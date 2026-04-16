@@ -1,0 +1,21 @@
+# Binary
+/rak
+
+# Test and coverage output
+*.test
+/coverage.out
+/coverage.html
+
+# Build artifacts
+/dist/
+/.artifacts/
+
+# Runtime / user state
+/.rak/
+
+# OS / editor
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
