@@ -192,10 +192,34 @@ Live mirror of the Tillsyn state for the rak project. Updated in the same commit
 
 **Drops created so far** (state as of the latest commit that touches this file):
 
+Level_1 containers (chained via `metadata.blocked_by` so the dev cannot start Drop N until Drop N−1 closes):
+
 | Title | UUID | State | Parent | `blocked_by` |
 |---|---|---|---|---|
 | `DROP_0_BOOTSTRAP` | `ab9db71d-6b4f-45dd-8472-0e96743eac49` | `done` | — (level_1) | — |
 | `DROP_1_CODE_SCAFFOLD_MAGE_CI` | `8dccebb1-a22c-48ad-b2c9-2c75b6fd46fb` | `todo` | — (level_1) | — (chain start) |
+| `DROP_2_COUNTING_DOMAIN_RENDER_BOUNDARY` | `8e424e76-ce8b-42fb-9f73-7ffc24a198a4` | `todo` | — (level_1) | `DROP_1` |
+| `DROP_3_DIRECTORY_WALK_GITIGNORE_DEPTH` | `0428861f-6246-43c3-8e74-a86401e1e0d1` | `todo` | — (level_1) | `DROP_2` |
+| `DROP_4_LANGUAGE_DETECTION_CODE_SPLITS` | `10bc32f2-c3e1-4994-91fa-b99872c0a75b` | `todo` | — (level_1) | `DROP_3` |
+| `DROP_5_STDIN_PIPE_BEHAVIOR` | `c0e27501-47b2-4a74-9f1f-198befb4a856` | `todo` | — (level_1) | `DROP_4` |
+| `DROP_6_SUMMARY_SORTING` | `8884a07e-d23c-4a5d-9c7b-8bccaebdb207` | `todo` | — (level_1) | `DROP_5` |
+| `DROP_7_TOKEN_COUNTING` | `e8cf4f31-e08e-4afd-adb5-c08cd8e62f96` | `todo` | — (level_1) | `DROP_6` |
+| `DROP_8_PERF_UX_POLISH` | `6f77bc6b-3bff-4372-9615-f920ca39f10f` | `todo` | — (level_1) | `DROP_7` |
+| `DROP_9_RELEASE_DOCS` | `3601b313-ce40-4557-9af2-830f80fe423f` | `todo` | — (level_1) | `DROP_8` |
+
+Planner first-children (one per level_1; `parent_id` = the level_1 drop's UUID). Each planner carries the Planner Description Template pasted verbatim into its description. A planner must close `done` before any builder sibling under the same level_1 is eligible to start:
+
+| Title | UUID | State | Parent | `blocked_by` |
+|---|---|---|---|---|
+| `DROP_1_PLANNER` | `49a40c23-b132-4e2a-9165-d2fdd7e52008` | `todo` | `DROP_1` | — |
+| `DROP_2_PLANNER` | `d404f567-8f97-4d66-9e26-964fd58da6d9` | `todo` | `DROP_2` | — |
+| `DROP_3_PLANNER` | `ad65083a-3f93-4ac0-8940-07a042761c50` | `todo` | `DROP_3` | — |
+| `DROP_4_PLANNER` | `3242bbbc-bfc0-4bd0-956e-7ef9af839189` | `todo` | `DROP_4` | — |
+| `DROP_5_PLANNER` | `7c7293c3-86e5-4e2a-b037-4aa9cadb364e` | `todo` | `DROP_5` | — |
+| `DROP_6_PLANNER` | `c81462e5-4f54-4282-a2f2-b3d8e9e25948` | `todo` | `DROP_6` | — |
+| `DROP_7_PLANNER` | `ff4ce37e-cb6a-4a90-870d-138752de7008` | `todo` | `DROP_7` | — |
+| `DROP_8_PLANNER` | `d468e07b-217f-4d34-bef9-5b32645370a6` | `todo` | `DROP_8` | — |
+| `DROP_9_PLANNER` | `65c97c0c-3a7f-42c6-882f-287e608d7ed7` | `todo` | `DROP_9` | — |
 
 **In-project mutation auth shape (pre-Drop-2 gotcha reminder):** every `till_plan_item(create)` needs the full five-field tuple (`session_id` + `session_secret` + `auth_context_id` + `agent_instance_id` + `lease_token`) **plus** `column_id`. For level_1 drops, `parent_id` must be **omitted** — passing the project's UUID there returns `not_found: authorize mutation: not found` (misleading). For nested drops, `parent_id` is the parent drop's UUID.
 
@@ -261,9 +285,13 @@ Closeout drop (`Role: commit`) responsibilities per `main/WIKI.md` § "Drop-End 
 
 ## Immediate Next Step
 
-1. Create Drops 2–9 level_1 container drops in Tillsyn, chained by `blocked_by` (Drop N `blocked_by` Drop N-1).
-2. Create nine `Role: planner` first-child drops (one per level_1, using the Planner Description Template below). Planners decompose their level_1 into builder + QA + closeout sub-drops during their own session.
-3. Update the "Drops created so far" table above in the same commit as the Tillsyn mutations.
+The level_1 scaffold is complete: Drops 1–9 containers are chained, and each has its `Role: planner` first-child. The next session is a **work orchestrator launched from `main/`** (not a steward from the bare-root) that starts with `DROP_1_PLANNER` (`49a40c23-b132-4e2a-9165-d2fdd7e52008`):
+
+1. `cd /Users/evanschultz/Documents/Code/hylla/rak/main && claude`.
+2. Read `main/WIKI.md` + `main/CLAUDE.md` + `main/PLAN.md` on cold-start per the "read WIKI.md after every compaction" rule.
+3. Claim a fresh project-scoped Tillsyn session under a **work-orchestrator** identity (not `rak-steward-orchestrator` — the current auth used here is steward-labeled even though pwd is `main/`; that mismatch gets corrected at work-orch claim time).
+4. Move `DROP_1_PLANNER` to `in_progress` and open the dev ↔ orchestrator decomposition discussion for Drop 1's six builder sub-drops (1.1 through 1.6 in the sketched hierarchy) + their QA twins + the `1.closeout` commit drop.
+5. Planner closes `done` when the decomposition is in Tillsyn with `paths` / `packages` / acceptance criteria on every nested drop, `blocked_by` set across siblings where ordering matters, and `PLAN.md` updated in the same commit as the Tillsyn mutations.
 
 ## Follow-Ups / Outstanding Orchestration Tasks
 
