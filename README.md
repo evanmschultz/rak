@@ -19,14 +19,14 @@ Available once the first release drop lands.
 ## Usage (Aspirational)
 
 ```sh
-rak                          # count the current directory
-rak ./src                    # count a specific path
-rak --depth 2 ./             # limit traversal depth
-rak --lang go,rs ./          # only Go and Rust files
-rak --json ./src             # machine-readable output (auto-selected when piped)
-rak --tokens ./src           # add tiktoken-based token estimates
-curl https://… | rak         # wc-parity counts on a stream
-cat main.go | rak --lang go  # code-aware counts on a stream
+rak                            # count the current directory
+rak ./cmd                      # count a specific path
+rak --depth 2 ./               # limit traversal depth
+rak --lang go,rs ./            # only Go and Rust files
+rak --json ./internal          # machine-readable output (auto-selected when piped)
+rak --tokens ./internal        # add tiktoken-based token estimates
+curl https://… | rak           # wc-parity counts on a stream
+cat main.go | rak --lang go    # code-aware counts on a stream
 ```
 
 Run `rak --help` for the full flag list once it's built.
