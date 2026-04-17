@@ -355,7 +355,7 @@ No co-authored-by trailers. No period at end. No capitalized first word after th
 
 ## Bare-Root and Worktree Discipline
 
-- The bare repo at `/Users/evanschultz/Documents/Code/hylla/rak` (one level up) is the **steward orchestrator** root — not a coding checkout. Bare-root internals live in `.bare/`; top-level `.git` is a pointer file (`gitdir: ./.bare`).
+- The bare repo at `/Users/evanschultz/Documents/Code/hylla/rak` (one level up) is the **steward orchestrator** root — not a coding checkout. It is a **flat bare repo**: `HEAD`, `config`, `objects/`, `refs/`, `worktrees/`, etc. live directly at the top level. There is no `.bare/` wrapper and no top-level `.git` pointer (an earlier `.bare/`-nested variant was tried and retired because it caused issues). This worktree's own `.git` pointer at `main/.git` reads `gitdir: /Users/evanschultz/Documents/Code/hylla/rak/worktrees/main`.
 - This directory (`main/`) is the primary work checkout. Real coding / building / testing / committing happens here.
 - Always confirm `pwd` is this checkout before edits, tests, commits, or gopls work.
 - **Dev launches work orchestrators from here.** Steward orchestrators (project oversight, merge-conflict help) launch from the bare-root one level up and never edit source.
