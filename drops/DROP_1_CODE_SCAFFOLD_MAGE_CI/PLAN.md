@@ -56,13 +56,13 @@ Six atomic units implementing the expected decomposition in main/PLAN.md lines 7
 
 ### Unit 1.2 — Rewrite go.mod module path to github.com/evanmschultz/rak
 
-- **State:** todo
+- **State:** in_progress
 - **Paths:** `main/go.mod`
 - **Packages:** — (edits go.mod only; no Go source edits)
 - **Acceptance:**
   - `main/go.mod` line 1 is exactly `module github.com/evanmschultz/rak`.
-  - `grep -rn 'github.com/evanmschultz/coding_challenges/fang' main/` returns zero lines (verifies no nested import path remnants; stash `main.go` had no self-imports so this is a guard against accidental new ones being added later in this drop).
-  - `grep -rn 'github.com/evanmschultz/fwc' main/` returns zero lines (guards against the mis-named `fwc` path main/PLAN.md line 82–83 + line 194 explicitly calls out).
+  - `grep -rn 'github.com/evanmschultz/coding_challenges/fang' main/ --include='*.go' --include='go.mod' --include='go.sum'` returns zero lines (scopes the invariant to code + module files, which is the real domain; `.md` planning/audit prose is intentionally out of scope — this unit does not rewrite history, and the acceptance bullet itself would be self-referential otherwise).
+  - `grep -rn 'github.com/evanmschultz/fwc' main/ --include='*.go' --include='go.mod' --include='go.sum'` returns zero lines (same scope: guards against the mis-named `fwc` path main/PLAN.md line 82–83 + line 194 explicitly calls out landing in code or module files).
   - `mage build` not yet required (magefile.go doesn't exist yet); raw `go build ./...` is also forbidden per main/CLAUDE.md § "Build Verification" rule 2. Compile verification defers to the first unit that can run `mage build` (1.5). Until then, acceptance is grep-based.
 - **Blocked by:** 1.1
 
