@@ -56,7 +56,7 @@ Six atomic units implementing the expected decomposition in main/PLAN.md lines 7
 
 ### Unit 1.2 — Rewrite go.mod module path to github.com/evanmschultz/rak
 
-- **State:** in_progress
+- **State:** done
 - **Paths:** `main/go.mod`
 - **Packages:** — (edits go.mod only; no Go source edits)
 - **Acceptance:**

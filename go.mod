@@ -1,4 +1,4 @@
-module github.com/evanmschultz/coding_challenges/fang
+module github.com/evanmschultz/rak
 
 go 1.26.1
 
