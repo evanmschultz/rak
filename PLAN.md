@@ -1,14 +1,14 @@
 # Rak — Planning Doc
 
-**Status:** **Persisted** backup mirror of the Tillsyn project tree, kept in-repo because Tillsyn is still under development and a local snapshot is cheap insurance. Tillsyn is the durable system of record; `PLAN.md` is the human-readable, git-versioned mirror that survives a Tillsyn outage or corrupted state.
+**Status:** Durable system of record for the overarching drop tree. Each drop's per-phase worklog lives under `main/drops/DROP_N_<NAME>/` — see `main/drops/WORKFLOW.md` for the canonical lifecycle. PLAN.md is updated **after** a drop closes (state flip + any structural changes that came out of the work) and **after** a planner restructures the tree. Not edited mid-build.
 
-**Update discipline:** every drop that mutates the Tillsyn tree (create, reword, close, add child, change `blocked_by`) also updates this file **in the same commit**, so `git log PLAN.md` tracks the plan's evolution alongside the Tillsyn changes. If the two drift, Tillsyn is authoritative and this file is reconciled to match.
+**Workflow:** see `main/drops/WORKFLOW.md` for the per-drop lifecycle (plan → plan-QA → discuss → revise → loop → build → build-QA → verify → closeout). PLAN.md owns the overarching plan; WORKFLOW.md owns the phase mechanics; `main/CLAUDE.md` owns role boundaries + Go quality rules.
 
 ## Project Intent
 
 **Rak** — a fast project-sizing CLI for counting code. Walk a directory (or single file, or stdin), produce accurate counts with language-aware breakdowns, respect `.gitignore`, emit human-readable output through laslig on TTY and JSON when piped.
 
-## Decisions Locked In (From Chat So Far)
+## Decisions Locked In
 
 1. **Name**: `rak` (binary + module), from Swedish *räkna* ("to count").
 2. **Module**: `github.com/evanmschultz/rak`.
@@ -28,17 +28,7 @@
 13. **Skip for v1 (YAGNI)**: cyclomatic complexity, churn, diff-vs-ref, caching.
 14. **Progress bar**: laslig has spinner (incl. `meter` style) + a transient `Activity` live-block in `gotestout`, but no named `Progress` primitive for a known-total percentage fill. Evan will add a progress bar to laslig when rak genuinely needs it; until then, spinner + "processed N files" counter is enough.
 15. **Orchestration**: never-edits-Go rule applies from the first builder drop onward. Bootstrap commit is docs + license + `.gitignore` only — no Go.
-16. **Tillsyn coordination model (from updated tillsyn wiki 2026-04-16)**:
-    - Only two node types: `project` + `drop`. Pre-Drop-2 creation rule: every new node under a rak project is written as `kind='task', scope='task'` but called a "drop" in prose. No other kinds. No `slice` terminology anywhere.
-    - **Template-free project** — do not bind a template; tillsyn itself is template-free until cascade Drop 3+.
-    - **Level addressing is 0-indexed**: project = level_0; level_1 = first child of project; level_N = N steps from the project root.
-    - **Every level-1 drop opens with a planning drop** (`Role: planner`), which must close before any build drop under it starts.
-    - **Every build drop gets two QA children**: `Role: qa-proof` and `Role: qa-falsification`, both `blocked_by: <build drop>`.
-    - **`blocked_by`, not `depends_on`**.
-    - **Rak is an external Tillsyn adopter** — every drop-end closeout writes a cross-project improvement prompt back to the Tillsyn team.
-
-## Decisions Locked In (Resolved Open Questions, 2026-04-16)
-
+16. **Coordination model**: drop = directory under `main/drops/` (e.g. `main/drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/`). Per-drop lifecycle (planner → plan-QA → discuss → revise → builder → build-QA → verify → closeout) lives in `main/drops/WORKFLOW.md`. PLAN.md tracks overarching containers + state; per-phase mechanics live in WORKFLOW.md; role boundaries live in `main/CLAUDE.md`. Subagents are global (`~/.claude/agents/`) but are spawned with a paradigm-override directive that tells them to ignore Tillsyn-coupled instructions and follow WORKFLOW.md instead.
 17. **Subcommand shape**: single root command — `rak [path]`. No subcommands in v0.1.0. All current flags (`--tokens`, `--lang`, `--as`, `--depth`, `--sort`, `--format`) are orthogonal to the operation, not distinct operations. Subcommands can be added later without breaking the root UX; the reverse is painful.
 18. **Stdin behavior**: on TTY-stdin with no path, hang and read stdin in `wc`-parity mode (matches `wc` convention — user terminates with Ctrl-D / EOF). Pipe + no path → `wc`-parity on stream. Pipe + `--as <lang>` → code-aware counting on stream.
 19. **Sort default**: `lines desc` for the directory view. `--sort {lines,files,bytes,tokens,name}`; `--sort-asc` flips direction.
@@ -59,248 +49,142 @@
     - **Errors wrap with `%w`** at every boundary that adds info. Sentinel errors named `ErrFoo` (e.g. `ErrTooDeep`, `ErrBinaryFile`). Inspect with `errors.Is` / `errors.As` — never string-match. Never swallow (discard to `_` only with a one-line why-comment).
     - Full rules in `main/CLAUDE.md` § "Go Development Rules" → "Concurrency" + "Errors".
 
-## Sketched Drop Hierarchy (For Tillsyn Once Created)
+## Drop Tree
 
-The plan below is a working shape — refined in chat before drops are created in Tillsyn. Everything below the project is a **drop** (single plan-item kind, `kind='task'` pre-Drop-2, `kind='drop'` post-rewrite).
+The plan below is the working shape. Each row is a level_1 container drop. **Each drop's atomic-unit decomposition lives inside its own `main/drops/DROP_N_<NAME>/PLAN.md`**, written by the planner subagent during Phase 1 of `WORKFLOW.md`. The sub-bullets below are the **expected** decomposition — refined and committed per drop when the planner runs.
 
-**Required tree shape under every level-1 drop:**
-
-- First child: a `Role: planner` drop (blocks every sibling until it closes).
-- Builder work: one or more `Role: builder` drops; each builder drop has two QA children (`Role: qa-proof` + `Role: qa-falsification`, both `blocked_by: <builder>`).
-- Final child: a `Role: commit` closeout drop (`blocked_by` every sibling).
-
-The sub-items below are **builder drops** unless noted; mentally wrap each under its planner-first / qa-children / closeout-last shape when creating them in Tillsyn.
-
-```
-rak (project)
-│
-├── Drop 0 — Bootstrap (DONE, out-of-band — this conversation)
-│   • Tree-shape exempt: predates Tillsyn project creation, so no planner/qa/closeout drops
-│   • GH repo created
-│   • CLAUDE.md (bare-root steward + main/ work), WIKI.md, README.md, LICENSE, .gitignore landed
-│
-├── Drop 1 — Code scaffold + mage + CI     [level_1]
-│   ├── 1.planner — decompose, confirm acceptance criteria, set blocked_by     (Role: planner)
-│   ├── 1.1 Move stashed files into target layout per decision 27: `go.mod` + `go.sum` to `main/`; rename flat `main.go` into `main/cmd/rak/main.go` + `main/cmd/rak/root.go` (split `fang.Execute` entry from cobra command construction so Drop 1.3 can rewrite `root.go` in isolation)     (Role: builder)
-│   ├── 1.2 Rewrite go.mod module path to github.com/evanmschultz/rak (stash path is `github.com/evanmschultz/coding_challenges/fang`, not fwc)     (Role: builder)
-│   ├── 1.3 Rewrite root command for rak shape: `Use: "rak [path]"`, `Args: cobra.MaximumNArgs(1)`, drop wc-style flags; `count(io.Reader) (Counts, error)` stays **unexported and in-file** in `cmd/rak/root.go` — Drop 2.1 owns the move into `internal/counting` and the export to `Count` (first-drop-hand-off boundary, pinned here so neither drop re-does it); wire `fang.WithNotifySignal(os.Interrupt, syscall.SIGTERM)` so `cmd.Context()` cancels on Ctrl-C / SIGTERM (prereq for Drop 8.1 parallel-walk cancellation)     (Role: builder)
-│   ├── 1.4 Add github.com/magefile/mage dep; go mod tidy (MUST land before 1.5 — magefile.go imports github.com/magefile/mage/mg and won't compile until the dep is present)     (Role: builder)
-│   ├── 1.5 Add magefile.go with 9 targets:                                                     (Role: builder)
-│   │      • `build`      → `go build ./...`
-│   │      • `test`       → `go test -race ./...` (race detector always on)
-│   │      • `format`     → `gofumpt -l -w .`
-│   │      • `lint`       → `go vet ./...` + `golangci-lint run` (config pinned in .golangci.yml — see 2.2 follow-up)
-│   │      • `ci`         → `gofumpt -l .` (must be empty) + `mage lint` + `mage test`
-│   │      • `install`    → `go install ./cmd/rak` — **dev-only, agents MUST NOT run it**
-│   │      • `run`        → `go run ./cmd/rak` (positional args pass after `--`)
-│   │      • `coverage`   → `go test -race -coverpkg=./internal/... -coverprofile=coverage.out ./... && go tool cover -func=coverage.out` — **report-only in Drop 1.5**; gate flips in Drop 9.3 (decision 22)
-│   │      • `plan-check` → diff `main/PLAN.md` drop titles against live Tillsyn drop titles under the rak project; fail if drift (guards the "update PLAN.md in the same commit as every drop-mutating Tillsyn action" rule)
-│   ├── 1.6 Add .github/workflows/ci.yml (mage ci on push/PR; no coverage gate yet — `mage coverage` is local-only report-only until Drop 9.3 flips it on)     (Role: builder)
-│   │   — each builder above carries its own qa-proof + qa-falsification children (blocked_by: <builder>)
-│   └── 1.closeout — git status clean, CI green, Hylla ingest, refinements + tillsyn-feedback prompt, LEDGER entry, WIKI update, delete /tmp/rak-stash/     (Role: commit)
-│
-├── Drop 2 — Counting domain + render boundary     [level_1]
-│   ├── 2.planner     (Role: planner)
-│   ├── 2.1 internal/counting: move `count` out of `cmd/rak/root.go`, export as `Count(io.Reader) (Counts, error)` with the `Counts` struct — bytes/lines/words/chars. Owns the lowercase→exported boundary (pinned per section-5 ruling, not Drop 1.3).     (Role: builder)
-│   ├── 2.2 internal/render: laslig-backed printer, Format{Human,JSON} plumbing     (Role: builder)
-│   ├── 2.3 Wire count subcommand (or root) to counting + render     (Role: builder)
-│   ├── 2.4 TTY-vs-pipe auto-detect via laslig     (Role: builder)
-│   ├── 2.5 Unit tests: counting table tests, render snapshot tests     (Role: builder)
-│   │   — each builder above carries qa-proof + qa-falsification children
-│   └── 2.closeout     (Role: commit)
-│
-├── Drop 3 — Directory walk + gitignore + depth     [level_1]
-│   ├── 3.planner — dep research (gitignore lib via Context7 / go doc); commit `fileset.File` contract with Open() and Peek(n) methods (per decision 25)     (Role: planner)
-│   ├── 3.1 internal/fileset: WalkDir-based traversal, depth limit, hidden-file skip; `File` struct with `Open() (io.ReadCloser, error)` + `Peek(n int) ([]byte, error)`     (Role: builder)
-│   ├── 3.2 internal/ignore: .gitignore parsing, --include/--exclude globs     (Role: builder)
-│   ├── 3.3 Binary file detection via `File.Peek(512)` (skip by default)     (Role: builder)
-│   ├── 3.4 Per-dir aggregation wired into render output     (Role: builder)
-│   │   — each builder above carries qa-proof + qa-falsification children
-│   └── 3.closeout     (Role: commit)
-│
-├── Drop 4 — Language detection + code-aware splits     [level_1]
-│   ├── 4.planner     (Role: planner)
-│   ├── 4.1 internal/lang: extension map + shebang sniff via `File.Peek(512)` + simple content heuristic     (Role: builder)
-│   ├── 4.2 Blank/comment/code split per detected language     (Role: builder)
-│   ├── 4.3 Per-type aggregation in render output     (Role: builder)
-│   ├── 4.4 `--lang go,rs` walk filter — which files to include from a tree (not to be confused with Drop 5.3's `--as <lang>` stream-type flag)     (Role: builder)
-│   │   — each builder above carries qa-proof + qa-falsification children
-│   └── 4.closeout     (Role: commit)
-│
-├── Drop 5 — Stdin pipe behavior     [level_1]
-│   ├── 5.planner     (Role: planner)
-│   ├── 5.1 Detect stdin is piped vs TTY; on TTY-stdin + no-path, hang and read stdin in wc-parity (decision 18)     (Role: builder)
-│   ├── 5.2 Default wc-parity counts on stream     (Role: builder)
-│   ├── 5.3 `--as <lang>` stream-type assertion — opt in to code-aware counting on a stream (separate flag from Drop 4.4's `--lang` walk filter; decision 24)     (Role: builder)
-│   ├── 5.4 JSON output in pipe-to-pipe chain     (Role: builder)
-│   │   — each builder above carries qa-proof + qa-falsification children
-│   └── 5.closeout     (Role: commit)
-│
-├── Drop 6 — Summary + sorting     [level_1]
-│   ├── 6.planner     (Role: planner)
-│   ├── 6.1 internal/summary: totals row, per-dir rollup, per-type rollup     (Role: builder)
-│   ├── 6.2 `--sort {lines,files,bytes,tokens,name}` with `--sort-asc` direction flip; default `lines desc` (decision 19)     (Role: builder)
-│   │   — each builder above carries qa-proof + qa-falsification children
-│   │   — [DEFERRED to v0.2+: tree view, TSV output — decision 26]
-│   └── 6.closeout     (Role: commit)
-│
-├── Drop 7 — Token counting     [level_1]
-│   ├── 7.planner     (Role: planner)
-│   ├── 7.1 Add github.com/tiktoken-go/tokenizer dep     (Role: builder)
-│   ├── 7.2 internal/tokens: count tokens per file (cl100k_base default, configurable)     (Role: builder)
-│   ├── 7.3 --tokens flag + output integration     (Role: builder)
-│   ├── 7.4 Document approximation caveat in README     (Role: builder)
-│   │   — each builder above carries qa-proof + qa-falsification children
-│   └── 7.closeout     (Role: commit)
-│
-├── Drop 8 — Perf + UX polish     [level_1]
-│   ├── 8.planner — benchmark rak on its own source + a larger tree; decide whether 8.1 (parallel walk) is justified per decision 26     (Role: planner)
-│   ├── 8.1 Parallel directory walk (bounded worker pool) — CONDITIONAL on 8.planner showing >500ms wall-time; cut otherwise     (Role: builder)
-│   ├── 8.2 Progress indication on TTY — laslig spinner + "processed N files" counter, trigger when wall-time > 250ms (decision 21)     (Role: builder)
-│   ├── 8.3 --max-files safety rail     (Role: builder)
-│   ├── 8.4 --tracked-only via git ls-files     (Role: builder)
-│   ├── 8.5 Symlink handling (default don't-follow, --follow flag; decision 20)     (Role: builder)
-│   │   — each builder above carries qa-proof + qa-falsification children
-│   └── 8.closeout     (Role: commit)
-│
-└── Drop 9 — Release + docs     [level_1]
-    ├── 9.planner — finalize 9.x ordering; note that 9.5 "flip repo public" is a dev-manual action with no code footprint, so its QA children are pro-forma (planner documents this explicitly)     (Role: planner)
-    ├── 9.1 Fill out README with real examples (replace aspirational usage)     (Role: builder)
-    ├── 9.2 Add --version via fang.WithVersion     (Role: builder)
-    ├── 9.3 Flip Drop 1.5's report-only `mage coverage` into a gate: 70% floor with scope `-coverpkg=./internal/...` (excludes `cmd/rak`), enforced in `mage ci` + CI workflow (decision 22)     (Role: builder)
-    ├── 9.4 GoReleaser config for binary releases + local dry-run (`goreleaser release --snapshot`)     (Role: builder)
-    ├── 9.5 Flip repo public (dev-manual GitHub action; QA children verify repo visibility + CI still green)     (Role: builder)
-    ├── 9.6 Tag v0.1.0 and push tag (triggers GoReleaser in CI)     (Role: builder)
-    │   — each builder above carries qa-proof + qa-falsification children
-    └── 9.closeout     (Role: commit)
-```
-
-## Tillsyn UUID Index
-
-Live mirror of the Tillsyn state for the rak project. Updated in the same commit as every drop-mutating Tillsyn action (create, reword, close, add child, change `blocked_by`). If this table drifts from Tillsyn, Tillsyn is authoritative and this section is reconciled to match.
-
-**Project** — `RAK` — `f68564e7-9b50-4bef-bc73-c70297f1d3c4`, template-free, `metadata.external_adopter=true`, `metadata.hylla_artifact_ref=github.com/evanmschultz/rak@main`.
-
-**Columns** (supplied out-of-band 2026-04-17; no MCP `till_column` tool exists yet — known Tillsyn bug, fix pending):
-
-| UUID | Name | Position | Use |
+| Drop | State | Blocked by | Drop dir |
 |---|---|---|---|
-| `cb4f6695-59f4-4181-966a-ccaf4be29c08` | To Do | 0 | default write target for new drops |
-| `e5ee13b9-1c16-483a-bcf5-063be8af66d0` | In Progress | 1 | active work |
-| `f3d0df47-5a95-4364-97a8-dc938643401e` | Done | 2 | terminal (auto-moved by `move_state=done`) |
-| `3e4e9b3a-0bcc-4517-8f03-83918b94fbd0` | Failed | 3 | archived 2026-04-17 — do not target |
+| `DROP_0_BOOTSTRAP` | done | — | (out-of-band; predates this workflow — see `WIKI.md` § "Current State") |
+| `DROP_1_CODE_SCAFFOLD_MAGE_CI` | todo | — | `main/drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/` |
+| `DROP_2_COUNTING_DOMAIN_RENDER_BOUNDARY` | todo | DROP_1 | `main/drops/DROP_2_COUNTING_DOMAIN_RENDER_BOUNDARY/` |
+| `DROP_3_DIRECTORY_WALK_GITIGNORE_DEPTH` | todo | DROP_2 | `main/drops/DROP_3_DIRECTORY_WALK_GITIGNORE_DEPTH/` |
+| `DROP_4_LANGUAGE_DETECTION_CODE_SPLITS` | todo | DROP_3 | `main/drops/DROP_4_LANGUAGE_DETECTION_CODE_SPLITS/` |
+| `DROP_5_STDIN_PIPE_BEHAVIOR` | todo | DROP_4 | `main/drops/DROP_5_STDIN_PIPE_BEHAVIOR/` |
+| `DROP_6_SUMMARY_SORTING` | todo | DROP_5 | `main/drops/DROP_6_SUMMARY_SORTING/` |
+| `DROP_7_TOKEN_COUNTING` | todo | DROP_6 | `main/drops/DROP_7_TOKEN_COUNTING/` |
+| `DROP_8_PERF_UX_POLISH` | todo | DROP_7 | `main/drops/DROP_8_PERF_UX_POLISH/` |
+| `DROP_9_RELEASE_DOCS` | todo | DROP_8 | `main/drops/DROP_9_RELEASE_DOCS/` |
 
-**Drops created so far** (state as of the latest commit that touches this file):
+Drop dirs are stamped from `main/drops/_TEMPLATE/` by the orchestrator at Phase 1 start. They do not exist until the drop begins.
 
-Level_1 containers (chained via `metadata.blocked_by` so the dev cannot start Drop N until Drop N−1 closes):
-
-| Title | UUID | State | Parent | `blocked_by` |
-|---|---|---|---|---|
-| `DROP_0_BOOTSTRAP` | `ab9db71d-6b4f-45dd-8472-0e96743eac49` | `done` | — (level_1) | — |
-| `DROP_1_CODE_SCAFFOLD_MAGE_CI` | `8dccebb1-a22c-48ad-b2c9-2c75b6fd46fb` | `todo` | — (level_1) | — (chain start) |
-| `DROP_2_COUNTING_DOMAIN_RENDER_BOUNDARY` | `8e424e76-ce8b-42fb-9f73-7ffc24a198a4` | `todo` | — (level_1) | `DROP_1` |
-| `DROP_3_DIRECTORY_WALK_GITIGNORE_DEPTH` | `0428861f-6246-43c3-8e74-a86401e1e0d1` | `todo` | — (level_1) | `DROP_2` |
-| `DROP_4_LANGUAGE_DETECTION_CODE_SPLITS` | `10bc32f2-c3e1-4994-91fa-b99872c0a75b` | `todo` | — (level_1) | `DROP_3` |
-| `DROP_5_STDIN_PIPE_BEHAVIOR` | `c0e27501-47b2-4a74-9f1f-198befb4a856` | `todo` | — (level_1) | `DROP_4` |
-| `DROP_6_SUMMARY_SORTING` | `8884a07e-d23c-4a5d-9c7b-8bccaebdb207` | `todo` | — (level_1) | `DROP_5` |
-| `DROP_7_TOKEN_COUNTING` | `e8cf4f31-e08e-4afd-adb5-c08cd8e62f96` | `todo` | — (level_1) | `DROP_6` |
-| `DROP_8_PERF_UX_POLISH` | `6f77bc6b-3bff-4372-9615-f920ca39f10f` | `todo` | — (level_1) | `DROP_7` |
-| `DROP_9_RELEASE_DOCS` | `3601b313-ce40-4557-9af2-830f80fe423f` | `todo` | — (level_1) | `DROP_8` |
-
-Planner first-children (one per level_1; `parent_id` = the level_1 drop's UUID). Each planner carries the Planner Description Template pasted verbatim into its description. A planner must close `done` before any builder sibling under the same level_1 is eligible to start:
-
-| Title | UUID | State | Parent | `blocked_by` |
-|---|---|---|---|---|
-| `DROP_1_PLANNER` | `49a40c23-b132-4e2a-9165-d2fdd7e52008` | `todo` | `DROP_1` | — |
-| `DROP_2_PLANNER` | `d404f567-8f97-4d66-9e26-964fd58da6d9` | `todo` | `DROP_2` | — |
-| `DROP_3_PLANNER` | `ad65083a-3f93-4ac0-8940-07a042761c50` | `todo` | `DROP_3` | — |
-| `DROP_4_PLANNER` | `3242bbbc-bfc0-4bd0-956e-7ef9af839189` | `todo` | `DROP_4` | — |
-| `DROP_5_PLANNER` | `7c7293c3-86e5-4e2a-b037-4aa9cadb364e` | `todo` | `DROP_5` | — |
-| `DROP_6_PLANNER` | `c81462e5-4f54-4282-a2f2-b3d8e9e25948` | `todo` | `DROP_6` | — |
-| `DROP_7_PLANNER` | `ff4ce37e-cb6a-4a90-870d-138752de7008` | `todo` | `DROP_7` | — |
-| `DROP_8_PLANNER` | `d468e07b-217f-4d34-bef9-5b32645370a6` | `todo` | `DROP_8` | — |
-| `DROP_9_PLANNER` | `65c97c0c-3a7f-42c6-882f-287e608d7ed7` | `todo` | `DROP_9` | — |
-
-**In-project mutation auth shape (pre-Drop-2 gotcha reminder):** every `till_plan_item(create)` needs the full five-field tuple (`session_id` + `session_secret` + `auth_context_id` + `agent_instance_id` + `lease_token`) **plus** `column_id`. For level_1 drops, `parent_id` must be **omitted** — passing the project's UUID there returns `not_found: authorize mutation: not found` (misleading). For nested drops, `parent_id` is the parent drop's UUID.
-
-## Tillsyn Project Creation Parameters (Historical)
-
-Retained for audit: the rak project was created in Tillsyn on 2026-04-17 with these parameters. No action required — this is here so a future reviewer can reconstruct how the project was authored if the Tillsyn record is ever lost.
-
-- `operation: create` on `till_project`.
-- `kind: project`, `scope: project`.
-- `slug / name`: `RAK` (uppercase per Evan's naming convention — user-facing Tillsyn project names are fully uppercase).
-- `template: none` (explicitly — do NOT bind `default-go` or any other template; Tillsyn itself is template-free and instructs external adopters to skip template binding until `child_rules` return).
-- `metadata`:
-  - `hylla_artifact_ref: github.com/evanmschultz/rak@main`
-  - `homepage: https://github.com/evanmschultz/rak`
-  - `language: go`
-  - `external_adopter: true` (so drop-end closeouts know to produce the cross-project improvement prompt for the Tillsyn team)
-
-All child drops under the project are created with `kind='task', scope='task'` (pre-Drop-2 creation rule) and role noted in description prose as `Role: planner | builder | qa-proof | qa-falsification | commit`.
-
-## Per-Level-1-Drop Structure Template
-
-Every level-1 drop below gets this shape at creation time:
+### Expected Decomposition (planner refines per drop)
 
 ```
-<Drop N> (level_1, kind=task, no Role prefix — container drop)
-├── N.planner          (kind=task, Role: planner)      — first child; blocks all siblings until done
-├── N.1 <builder task> (kind=task, Role: builder)      — blocked_by: N.planner
-│   ├── N.1.qa-proof           (kind=task, Role: qa-proof,         blocked_by: N.1)
-│   └── N.1.qa-falsification   (kind=task, Role: qa-falsification, blocked_by: N.1)
-├── N.2 <builder task> (kind=task, Role: builder)      — blocked_by: N.planner
-│   ├── N.2.qa-proof           (blocked_by: N.2)
-│   └── N.2.qa-falsification   (blocked_by: N.2)
-├── ... more builder drops with the same qa-children shape ...
-└── N.closeout         (kind=task, Role: commit)       — blocked_by: every other sibling in this level-1 subtree
+DROP_0 — Bootstrap (done, out-of-band)
+  • GH repo created
+  • CLAUDE.md mirrored at bare-root + main/, WIKI.md, README.md, LICENSE, .gitignore landed
+
+DROP_1 — Code scaffold + mage + CI
+  1.1 Move stashed files into target layout per decision 27: go.mod + go.sum to main/;
+      rename flat main.go into main/cmd/rak/main.go + main/cmd/rak/root.go (split fang.Execute
+      entry from cobra command construction so 1.3 can rewrite root.go in isolation).
+  1.2 Rewrite go.mod module path to github.com/evanmschultz/rak (stash path is
+      github.com/evanmschultz/coding_challenges/fang, not fwc).
+  1.3 Rewrite root command for rak shape: Use: "rak [path]", Args: cobra.MaximumNArgs(1),
+      drop wc-style flags. count(io.Reader) (Counts, error) stays UNEXPORTED + in-file in
+      cmd/rak/root.go — Drop 2.1 owns the move into internal/counting and the export to Count
+      (first-drop hand-off boundary, pinned here so neither drop re-does it). Wire
+      fang.WithNotifySignal(os.Interrupt, syscall.SIGTERM) so cmd.Context() cancels on Ctrl-C
+      / SIGTERM (prereq for Drop 8.1 parallel-walk cancellation).
+  1.4 Add github.com/magefile/mage dep + go mod tidy (MUST land before 1.5 — magefile.go
+      imports github.com/magefile/mage/mg and won't compile until the dep is present).
+  1.5 Add magefile.go with 9 targets:
+        • build      → go build ./...
+        • test       → go test -race ./...
+        • format     → gofumpt -l -w .
+        • lint       → go vet ./... + golangci-lint run
+        • ci         → gofumpt -l . (must be empty) + mage lint + mage test
+        • install    → go install ./cmd/rak — DEV-ONLY, agents MUST NOT run
+        • run        → go run ./cmd/rak (positional args pass after --)
+        • coverage   → go test -race -coverpkg=./internal/... -coverprofile=coverage.out ./...
+                       && go tool cover -func=coverage.out — REPORT-ONLY in 1.5; gate flips in 9.3
+        • plan-check → diff main/PLAN.md container titles + states against main/drops/*/
+                       directory names + each drop dir's PLAN.md header state; fail if drift
+  1.6 Add .github/workflows/ci.yml (mage ci on push/PR; no coverage gate yet — mage coverage
+      is local-only report-only until 9.3 flips it on).
+
+DROP_2 — Counting domain + render boundary
+  2.1 internal/counting: move count out of cmd/rak/root.go, export as
+      Count(io.Reader) (Counts, error) with Counts struct — bytes/lines/words/chars.
+  2.2 internal/render: laslig-backed printer, Format{Human,JSON} plumbing.
+  2.3 Wire count subcommand (or root) to counting + render.
+  2.4 TTY-vs-pipe auto-detect via laslig.
+  2.5 Unit tests: counting table tests, render snapshot tests.
+
+DROP_3 — Directory walk + gitignore + depth
+  3.1 internal/fileset: WalkDir-based traversal, depth limit, hidden-file skip; File struct
+      with Open() (io.ReadCloser, error) + Peek(n int) ([]byte, error).
+  3.2 internal/ignore: .gitignore parsing, --include/--exclude globs.
+  3.3 Binary file detection via File.Peek(512) (skip by default).
+  3.4 Per-dir aggregation wired into render output.
+
+DROP_4 — Language detection + code-aware splits
+  4.1 internal/lang: extension map + shebang sniff via File.Peek(512) + simple content heuristic.
+  4.2 Blank/comment/code split per detected language.
+  4.3 Per-type aggregation in render output.
+  4.4 --lang go,rs walk filter (NOT to be confused with 5.3's --as <lang> stream-type flag).
+
+DROP_5 — Stdin pipe behavior
+  5.1 Detect stdin is piped vs TTY; on TTY-stdin + no-path, hang and read stdin in wc-parity
+      (decision 18).
+  5.2 Default wc-parity counts on stream.
+  5.3 --as <lang> stream-type assertion — opt in to code-aware counting on a stream
+      (separate flag from 4.4's --lang walk filter; decision 24).
+  5.4 JSON output in pipe-to-pipe chain.
+
+DROP_6 — Summary + sorting
+  6.1 internal/summary: totals row, per-dir rollup, per-type rollup.
+  6.2 --sort {lines,files,bytes,tokens,name} with --sort-asc direction flip; default lines desc
+      (decision 19).
+  • [DEFERRED to v0.2+: tree view, TSV output — decision 26]
+
+DROP_7 — Token counting
+  7.1 Add github.com/tiktoken-go/tokenizer dep.
+  7.2 internal/tokens: count tokens per file (cl100k_base default, configurable).
+  7.3 --tokens flag + output integration.
+  7.4 Document approximation caveat in README.
+
+DROP_8 — Perf + UX polish
+  • Drop's planner benchmarks rak on its own source + a larger tree; decides whether 8.1
+    (parallel walk) is justified per decision 26.
+  8.1 Parallel directory walk (bounded worker pool) — CONDITIONAL on planner showing
+      >500ms wall-time; cut otherwise.
+  8.2 Progress indication on TTY — laslig spinner + "processed N files" counter, trigger when
+      wall-time > 250ms (decision 21).
+  8.3 --max-files safety rail.
+  8.4 --tracked-only via git ls-files.
+  8.5 Symlink handling (default don't-follow, --follow flag; decision 20).
+
+DROP_9 — Release + docs
+  • Drop's planner finalizes 9.x ordering; notes that 9.5 "flip repo public" is dev-manual
+    with no code footprint, so its build-QA is pro-forma (planner documents this explicitly).
+  9.1 Fill out README with real examples (replace aspirational usage).
+  9.2 Add --version via fang.WithVersion.
+  9.3 Flip Drop 1.5's report-only mage coverage into a gate: 70% floor with scope
+      -coverpkg=./internal/... (excludes cmd/rak), enforced in mage ci + CI workflow
+      (decision 22).
+  9.4 GoReleaser config for binary releases + local dry-run (goreleaser release --snapshot).
+  9.5 Flip repo public (dev-manual GitHub action; build-QA verifies repo visibility +
+      CI still green).
+  9.6 Tag v0.1.0 and push tag (triggers GoReleaser in CI).
 ```
-
-### Planner Drop Description Template
-
-Every `N.planner` drop pastes this block into its description at creation time, so planner responsibilities are written down on the drop itself rather than re-derived from `main/CLAUDE.md` by every subagent:
-
-```
-Role: planner
-
-Deliverables (all required before this drop can close):
-1. Confirm level_1 scope with dev — restate the goal of Drop N in one sentence, flag any ambiguity.
-2. Decompose into atomic nested builder drops. Every child carries: `paths` (file-level footprint), `packages` (Go package footprint), and acceptance criteria (yes/no-verifiable by a QA subagent).
-3. Set `blocked_by` across siblings where ordering matters. Parent-child nesting is the implicit depends_on — do not layer `depends_on` on top.
-4. File cross-cutting discussions as their own drops (e.g. "decide library X vs Y"), not inline inside a builder drop description.
-5. Commit the updated `main/PLAN.md` mirror in the same commit as the Tillsyn mutations that land the decomposed child drops (parity rule).
-```
-
-Closeout drop (`Role: commit`) responsibilities per `main/WIKI.md` § "Drop-End Closeout Checklist" (9 steps, canonical):
-
-1. Every sibling `done`, `git status --porcelain` clean.
-2. All commits on remote. CI green (`gh run watch --exit-status`).
-3. Aggregate per-subagent `## Hylla Feedback` sections → `main/HYLLA_FEEDBACK.md`.
-4. Aggregate usage findings → `main/REFINEMENTS.md` / `main/HYLLA_REFINEMENTS.md`.
-5. **External-adopter cross-project improvement prompt** → prompt routed to the Tillsyn team.
-6. `hylla_ingest` full-enrichment from remote, after CI green.
-7. Append entry to `main/LEDGER.md` (created when the first drop closes).
-8. Append one-liner to `main/WIKI_CHANGELOG.md`.
-9. Update `main/WIKI.md` sections in place if anything changed best practice.
 
 ## Immediate Next Step
 
-The level_1 scaffold is complete: Drops 1–9 containers are chained, and each has its `Role: planner` first-child. The next session is a **work orchestrator launched from `main/`** (not a steward from the bare-root) that starts with `DROP_1_PLANNER` (`49a40c23-b132-4e2a-9165-d2fdd7e52008`):
+The Drop 1 dir does not yet exist. Next session is a **work orchestrator launched from `main/`** (not a steward from the bare-root) that runs Phase 1 of WORKFLOW.md against Drop 1:
 
 1. `cd /Users/evanschultz/Documents/Code/hylla/rak/main && claude`.
-2. Read `main/WIKI.md` + `main/CLAUDE.md` + `main/PLAN.md` on cold-start per the "read WIKI.md after every compaction" rule.
-3. Claim a fresh project-scoped Tillsyn session under a **work-orchestrator** identity (not `rak-steward-orchestrator` — the current auth used here is steward-labeled even though pwd is `main/`; that mismatch gets corrected at work-orch claim time).
-4. Move `DROP_1_PLANNER` to `in_progress` and open the dev ↔ orchestrator decomposition discussion for Drop 1's six builder sub-drops (1.1 through 1.6 in the sketched hierarchy) + their QA twins + the `1.closeout` commit drop.
-5. Planner closes `done` when the decomposition is in Tillsyn with `paths` / `packages` / acceptance criteria on every nested drop, `blocked_by` set across siblings where ordering matters, and `PLAN.md` updated in the same commit as the Tillsyn mutations.
+2. Read `main/WIKI.md`, `main/CLAUDE.md`, `main/PLAN.md`, `main/drops/WORKFLOW.md` on cold-start (CLAUDE.md auto-loads; the others do not).
+3. Stamp drop dir: copy `main/drops/_TEMPLATE/` → `main/drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/`. Set its `PLAN.md` header `state: planning`. Commit (`docs(drop-1): scaffold drop dir from template`).
+4. Spawn `go-planning-agent` per WORKFLOW.md § "Phase 1 — Plan" with the paradigm-override directive (see WORKFLOW.md § "Subagent Spawn Prompts"). Planner decomposes Drop 1 into the six expected units (1.1–1.6 above), each with `paths` / `packages` / `acceptance` / `blocked_by`.
+5. Continue through Phase 2 (plan-QA), Phase 3 (discuss + cleanup), looping until plan accepted, then Phases 4–7 unit by unit.
 
 ## Follow-Ups / Outstanding Orchestration Tasks
 
 Items tracked for future sessions, separate from the Drop 0–9 hierarchy:
 
-- **Tillsyn Drop 2 rewrite watch** — when Tillsyn ships its Drop 2 rewrite (non-project nodes created as literal `kind='drop'` instead of `kind='task'`), update rak's `main/CLAUDE.md` and `main/WIKI.md` to drop the pre-Drop-2 creation-rule paragraphs and the "Do Not Use Other Kinds" section. Move role from description prose to `drop.metadata.role`. Memory `tillsyn_drops_vocabulary.md` has the detection signals.
 - **Laslig progress-bar follow-up** — when rak's perf drop (Drop 8) genuinely needs a known-total progress bar, dev extends laslig upstream (not rak). Until then, spinner + "processed N files" counter is enough.
-- **`default-go` template binding re-evaluation** — if Tillsyn's Drop 3+ ships `child_rules` that enforce the planner-first / qa-children / closeout-last shape, reconsider whether rak should bind a template at that point instead of enforcing tree shape manually.
-- **Stash cleanup** — `/tmp/rak-stash/` is deleted entirely in Drop 1 closeout, once Drop 1.1 has moved main.go/go.mod/go.sum into `main/` and the stashed legacy `PLAN.md` is confirmed folded into this hierarchy. `test.txt` is never copied into the repo.
 
 ## Stashed Legacy Files
 

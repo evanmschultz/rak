@@ -2,47 +2,35 @@
 
 This file lives in the **`main/` worktree** at `/Users/evanschultz/Documents/Code/hylla/rak/main/`. This is the primary work checkout — all real coding, building, testing, and committing happens here. **The dev launches work orchestrators from this directory.** Sessions launched from the bare-root one directory up are **steward orchestrators** with a different prompt (bare-root `CLAUDE.md`) and a different scope — cross-worktree oversight and merge-conflict help, not feature work.
 
-## Tillsyn Is the System of Record
+## Coordination Model — At a Glance
 
-All work is tracked in Tillsyn. No exceptions.
+Rak does **not** use Tillsyn. Three documents own the coordination model; they do not duplicate each other:
 
-- No markdown files for work tracking, coordination, worklogs, or execution state.
-- **Tillsyn = durable truth.** Every piece of work gets a Tillsyn plan item (a **drop**) before it starts.
-- **Use Tillsyn exclusively for work tracking.** Do NOT use Claude Code's built-in `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` / `TaskStop` / `TaskOutput` — they evaporate on compaction/restart. Decompose into child drops instead.
-- **When work starts on a drop, move it to `in_progress` immediately.**
-- **Read `main/WIKI.md` at session start and after every compaction.** The wiki is the living best-practice snapshot and changes as the project evolves. CLAUDE.md is auto-loaded; WIKI.md is NOT — Read it deliberately on the first turn after cold-start or compaction.
-- **`main/PLAN.md` is a persisted backup mirror of the Tillsyn project tree** (not transient). Kept in-repo because Tillsyn is still under development and a local snapshot is cheap insurance. **Every drop-mutating Tillsyn action (create, reword, close, add child, change `blocked_by`) updates `PLAN.md` in the same commit**, so `git log PLAN.md` tracks plan evolution alongside the Tillsyn changes. If the two drift, Tillsyn is authoritative and `PLAN.md` is reconciled to match.
+- **`main/PLAN.md`** — overarching drop tree (10 level_1 container drops + state + `blocked_by` + per-drop dir link). Updated *after* a drop closes or *after* a planner restructures the tree. Not edited mid-build.
+- **`main/drops/WORKFLOW.md`** — canonical per-drop lifecycle (planner → plan-QA → discuss → revise → builder → build-QA → verify → closeout). Owns: drop directory shape, file lifecycles, phase order, the **Agent Spawn Contract** (preamble pasted into every subagent spawn), restart recovery.
+- **`main/CLAUDE.md`** (this file) — orchestrator role boundaries, agent bindings, evidence sources, Go quality rules, mage discipline, commit format, safety. Does not own per-phase mechanics — those live in WORKFLOW.md.
 
-### Drops — The Only Plan-Item Kind
+Per-drop work artifacts live under `main/drops/DROP_N_<NAME>/`. The directory is stamped from `main/drops/_TEMPLATE/` at Phase 1 start and persists through closeout.
 
-Tillsyn has exactly **two node types**: `project` and **drop**. Drops nest infinitely. A drop is the Tillsyn-native word for a unit of work. The term "slice" is **not** used — it was prior internal vocabulary for this concept and has been retired.
+- **Read `main/WIKI.md` + `main/PLAN.md` + `main/drops/WORKFLOW.md` at session start and after every compaction.** CLAUDE.md auto-loads; the other three do not — read them deliberately on the first turn after cold-start or compaction before substantive orchestration.
+- **Use Tillsyn-style trackers for nothing.** Do NOT use Claude Code's built-in `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` / `TaskStop` / `TaskOutput` — they evaporate on compaction/restart. Decompose finer procedural granularity into atomic units inside the active drop's `PLAN.md` instead.
+- **No markdown files outside `main/drops/` for work tracking.** Per-drop dirs are the worklog substrate.
 
-- `project` — the rak root container (not a drop).
-- **drop** — every node below the project. Nest drops until they are atomic (one builder subagent can finish cleanly, acceptance criteria are yes/no-verifiable, paths/packages footprint is clear).
+## Drops
 
-**Pre-Drop-2 creation rule (current Tillsyn HEAD):** every new rak node is created with `kind='task', scope='task'`. Do **not** use any other kind (`build-task`, `subtask`, `qa-check`, `plan-task`, `commit-and-reingest`, `a11y-check`, `visual-qa`, `design-review`, `phase`, `branch`, `decision`, `note`) even though they remain in `kind_catalog`. Tillsyn's post-Drop-2 SQL rewrites every non-project node to literal `kind='drop'`. **Refer to the node as a drop in prose** regardless of the current on-disk kind value.
+A **drop** is a unit of work — one entry in PLAN.md, one directory under `main/drops/`. Drops are declared in PLAN.md and refined in their own dir.
 
-**Role in description prose (pre-Drop-2):** post-Drop-2 role lives on `drop.metadata.role`. Until that field lands, note the role in the drop description as `Role: <role>` where role ∈ { `planner`, `builder`, `qa-proof`, `qa-falsification`, `commit` }.
+- Atomic granularity: a drop is "atomic" when one builder subagent can finish a single unit cleanly, the unit's acceptance criteria are yes/no-verifiable by a QA subagent, and its `paths` / `packages` footprint is clear. If a drop is too large, **add more units inside its `PLAN.md`** rather than stretching one unit.
+- Ordering: parent-child nesting (a drop cannot close while any of its units is incomplete) + `blocked_by` for sibling and cross-unit ordering. No `depends_on` field.
+- State: per-drop `state` lives in the drop dir's `PLAN.md` header (`planning` / `building` / `done` / `blocked`); per-unit `state` lives in the Planner section's unit row inside that file (`todo` / `in_progress` / `done` / `blocked`); container-level `state` lives in `main/PLAN.md`'s drop tree table.
 
-**Template-free project:** do **not** bind a template to the rak project. Tillsyn itself is `template: none` and explicitly instructs external adopters to skip template binding until `child_rules` return in Tillsyn's Drop 3+. Rak enforces tree shape manually per the rules below.
-
-**Level addressing is 0-indexed:** the project itself is **level 0**. `level_1` = every drop directly under the rak project (first-child drops). `level_2` = drops one level below a level_1 drop. `level_N` = N steps deep from the project root. 0-indexed on purpose — the whole Tillsyn DB zero-indexes everything, so levels do too. Dotted addresses (`0.1.5.2`) are read-only shorthand — **mutations always use UUIDs**.
-
-### Required Tree Shape
-
-- **Every level-1 drop opens with a planning drop.** Its first child is a `Role: planner` drop whose job is a dev ↔ orchestrator discussion: confirm scope, decompose the level-1 drop into atomic nested drops, set `blocked_by` across siblings, file cross-cutting discussions as their own drops. **Until the planning drop is `done`, no build drop under the level-1 drop is eligible to start.**
-- **Every build drop gets two QA children.** A `Role: qa-proof` drop and a `Role: qa-falsification` drop, both with `blocked_by: <build drop>`. Both must pass before the build drop can close.
-- **Use `blocked_by`, not `depends_on`.** Parent-child nesting is the implicit depends_on (a parent cannot close while any child is incomplete). `blocked_by` is the only sibling / cross-subtree ordering primitive. Do not layer `depends_on` on top.
-
-### Rak Is an External Tillsyn Adopter
-
-Rak uses Tillsyn as an external adopter — it is not the Tillsyn repo. The tillsyn wiki mandates that external-adopter drop-end closeouts include a **cross-project improvement prompt** routed back to the Tillsyn team, capturing: context (rak is a Go CLI, solo dev), friction (schema confusion, missing primitives, MCP ergonomics), workarounds, ranked requests, and evidence (drop/comment/handoff IDs). This deliverable is part of every rak drop-end task, alongside the local findings log (`HYLLA_FEEDBACK.md`, future `REFINEMENTS.md`).
+Full lifecycle in `main/drops/WORKFLOW.md`. Drop tree in `main/PLAN.md`.
 
 ## Orchestrator-as-Hub
 
 The parent Claude Code session launched by the dev from this directory is always **the orchestrator**. Every other role (builder, qa-proof, qa-falsification, planning, research) is a subagent spawned via the `Agent` tool.
 
-**CRITICAL: The orchestrator NEVER writes Go code.** The parent session must not use `Edit`, `Write`, or any other tool to modify `.go` source, test, or `magefile.go` files. Every code change — every single one — goes through a `go-builder-agent` subagent. Orchestrator reads code for planning/research; edits markdown only (this file, `WIKI.md`, future `LEDGER.md`, `README.md`, agent `.md` files).
+**CRITICAL: The orchestrator NEVER writes Go code.** The parent session must not use `Edit`, `Write`, or any other tool to modify `.go` source, test, or `magefile.go` files. Every code change — every single one — goes through a `go-builder-agent` subagent. Orchestrator reads code for planning/research; edits markdown only (this file, `WIKI.md`, `PLAN.md`, drop dir mds, `LEDGER.md`, `README.md`, agent `.md` files).
 
 ### Agent Bindings
 
@@ -54,33 +42,24 @@ The parent Claude Code session launched by the dev from this directory is always
 | Planning | `go-planning-agent` | No |
 | Research | Claude's built-in `Explore` subagent | No |
 
-Orchestrator dispatches via the `Agent` tool with Tillsyn auth credentials in the spawn prompt. Split of concerns: spawn prompt carries ephemeral/spawn-unique fields (task_id, auth creds, working dir, move-state directive); the drop description carries durable task content (acceptance criteria, paths, packages, mage targets, Hylla artifact ref, cross-refs).
+The agents are **global** (`~/.claude/agents/`) and reference Tillsyn tooling that rak does not use. Every spawn carries the override preamble from `main/drops/WORKFLOW.md` § "Agent Spawn Contract" — single canonical source, do not duplicate it here. Per-role appendix fields (drop's PLAN.md path, unit ID, target output file, round number, working dir) are listed in WORKFLOW.md § "Per-Role Spawn Appendices".
 
-## Build-QA-Commit Loop (Pre-Cascade)
+## Build-QA-Commit Loop
 
-**Code is NEVER committed or pushed without QA completing first.** Until Tillsyn's cascade dispatcher ships, the parent orchestrator runs this loop manually:
+Per-drop lifecycle is canonical in `main/drops/WORKFLOW.md` (Phases 1–7: plan, plan-QA, discuss + cleanup, build, build-QA, verify, closeout). This file does not duplicate the phase steps.
 
-1. **Plan** — `go-planning-agent` (or orchestrator + dev, for trivial drops) decomposes the level-1 drop into atomic nested drops with `paths` / `packages` / acceptance criteria. First child of every level-1 drop is a `Role: planner` drop; no build drop is eligible until it closes.
-2. **Build** — `go-builder-agent` subagent implements the increment. **The builder moves its own drop to `in_progress` at start**, commits evidence to `implementation_notes_agent` + `completion_notes`, moves the drop to `done` at end, and closes with a `## Hylla Feedback` section.
-3. **QA Proof + QA Falsification (parallel)** — `go-qa-proof-agent` + `go-qa-falsification-agent`, both children of the build drop with `blocked_by: <build drop>`. Each moves its own QA drop to `in_progress` at start, `done` on pass, or leaves `in_progress` + posts findings on fail.
-4. **Fix** — if either QA fails, respawn the builder, re-run QA. Build drop stays `in_progress` until both QA children pass.
-5. **Commit** — after both QA pass, orchestrator + dev commit with conventional-commit format. **`git add <paths>` — never `git add .`**.
-6. **Push + CI green** — `git push`, then `gh run watch --exit-status` until green.
-7. **Update Tillsyn** — checklist + metadata + terminal state.
+**Follow WORKFLOW.md's phases in order, exactly as written. No skipped phases. No reordered phases. No shortcut paths.** If a phase looks redundant for a particular drop, return the question to the dev — do not unilaterally drop it. Phase exits gate the next phase (see WORKFLOW.md § "Phase Order").
 
-**No batched commits. No deferred pushes. No skipped QA. No skipped CI watch. No claiming done in chat without Tillsyn reflecting it.**
-
-Hylla reingest is **drop-end only** — once per drop, inside the end-of-drop closeout task, full enrichment from remote, only after CI green. Subagents never call `hylla_ingest`.
+**Code is NEVER committed or pushed without per-unit QA passing first**, and **Hylla reingest is drop-end only** — both rules are enforced inside WORKFLOW.md's phases. Subagents never call `hylla_ingest`.
 
 ## Hylla Baseline
 
 - **Artifact ref**: `github.com/evanmschultz/rak@main` — Hylla resolves `@main` to the latest ingest.
-- **Also on project metadata** (`metadata.hylla_artifact_ref`) once the Tillsyn project exists, so planners can read it programmatically.
-- **Hylla ingest is drop-end only**, not per-task. Only the orchestrator calls `hylla_ingest`. Always `enrichment_mode=full_enrichment`, always from the GitHub remote, never before `git push` + `gh run watch --exit-status` green. Subagents never call `hylla_ingest`.
+- **Hylla ingest is drop-end only**, not per-unit. Only the orchestrator calls `hylla_ingest`. Always `enrichment_mode=full_enrichment`, always from the GitHub remote, never before `git push` + `gh run watch --exit-status` green. Subagents never call `hylla_ingest`.
 
 ### Code Understanding Rules
 
-1. **All Go code**: use Hylla MCP first (`hylla_search`, `hylla_node_full`, `hylla_search_keyword`, `hylla_refs_find`, `hylla_graph_nav`). Exhaust every Hylla search mode — vector, keyword, graph-nav, refs — before falling back to `LSP`, `Read`, `Grep`, `Glob`. **Whenever a Hylla miss forces a fallback, the subagent records the miss in its closing comment** under a `## Hylla Feedback` heading.
+1. **All Go code**: use Hylla MCP first (`hylla_search`, `hylla_node_full`, `hylla_search_keyword`, `hylla_refs_find`, `hylla_graph_nav`). Exhaust every Hylla search mode — vector, keyword, graph-nav, refs — before falling back to `LSP`, `Read`, `Grep`, `Glob`. **Whenever a Hylla miss forces a fallback, the subagent records the miss in its closing comment** under a `## Hylla Feedback` heading inside the drop's `BUILDER_WORKLOG.md`.
 2. **Changed since last ingest**: use `git diff`. Hylla is stale for those files until reingest.
 3. **Non-Go code** (markdown, TOML, YAML, magefile, SQL): use `Read`, `Grep`, `Glob`, `Bash` directly.
 4. **External semantics**: Context7 + `go doc` + `LSP` for library and language questions the repo can't answer itself.
@@ -103,56 +82,26 @@ For semantic, high-risk, or ambiguous work:
 - **Evidence** — grounded in Hylla / `git diff` / Context7 / `go doc` / gopls.
 - **Trace or cases** — concrete paths through the code.
 - **Conclusion** — the claim.
-- **Unknowns** — what remains uncertain, routed into Tillsyn as a comment, handoff, or attention item.
+- **Unknowns** — what remains uncertain. Routed to the orchestrator (subagents return Unknowns in their final response; orchestrator surfaces to dev).
 
-Short and inspectable.
+Short and inspectable. Full Section 0 spec lives in `~/.claude/CLAUDE.md` § "Semi-Formal Reasoning — Section 0 Response Shape". The Agent Spawn Contract preamble (in WORKFLOW.md) requires Section 0 from every subagent — but Section 0 stays in the orchestrator-facing response **only**, never inside `PLAN.md` / `BUILDER_WORKLOG.md` / `BUILDER_QA_*.md` / `PLAN_QA_*.md` / `CLOSEOUT.md`.
 
 ## QA Discipline
 
-**No build drop is `done` without QA passing.** This is a gate, not a suggestion. Two asymmetric passes, not duplicates:
+**No build unit is `done` without per-unit QA passing.** This is a gate, not a suggestion. Two asymmetric passes, not duplicates:
 
-- **QA Proof** (`go-qa-proof-agent`, `/qa-proof`) — evidence completeness, reasoning coherence, trace coverage. Asks: *"does the evidence support the claim?"*
-- **QA Falsification** (`go-qa-falsification-agent`, `/qa-falsification`) — counterexamples, alternate traces, hidden dependencies, contract mismatches, YAGNI pressure. Asks: *"can I construct a case where this is wrong?"*
+- **QA Proof** (`go-qa-proof-agent`) — evidence completeness, reasoning coherence, trace coverage. Asks: *"does the evidence support the claim?"*
+- **QA Falsification** (`go-qa-falsification-agent`) — counterexamples, alternate traces, hidden dependencies, contract mismatches, YAGNI pressure. Asks: *"can I construct a case where this is wrong?"*
 
-Every build drop has **two QA children** — one `Role: qa-proof` drop and one `Role: qa-falsification` drop — both with `blocked_by: <build drop>`. Both must pass before the build drop is eligible to close. If either finds issues, the build drop stays `in_progress`, the finding is recorded on the failed QA drop, a fix drop runs, and QA re-runs. Spawn QA subagents in parallel for fresh-context isolation.
-
-## Drop Decomposition Rules
-
-**Atomic drop granularity.** A drop is "atomic" when:
-
-- One builder subagent (or one orchestrator + dev pairing, pre-cascade) can finish it in a single working session.
-- Its acceptance criteria are concrete and verifiable — a QA subagent can make a yes/no call.
-- It has a clear `paths` / `packages` footprint so file- / package-level blocking works.
-
-If a drop is too large to fit, **nest further** rather than stretching the drop.
-
-**Every level-1 drop opens with a planning drop.** First child is `Role: planner`; it runs the dev ↔ orchestrator decomposition discussion and sets `blocked_by` across siblings. Nested drops (level_2+) do not universally require their own planning drop — but any ambiguous or large nested drop gets one too.
-
-**`blocked_by`, not `depends_on`.** Parent-child nesting is the implicit dependency (a parent cannot close while any child is open). `blocked_by` is the only sibling / cross-subtree ordering primitive.
-
-**State hygiene.** A drop is moved to `in_progress` the moment work on it starts — by the subagent that owns it, not by the orchestrator. No `todo` items left while someone is working on them.
-
-## Drop-End Closeout Checklist
-
-Every level-1 drop ends with a closeout drop (`Role: commit`, `blocked_by` every other sibling in the level-1 subtree). Nine steps, canonical (mirrored in `WIKI.md` and `PLAN.md`):
-
-1. All sibling drops `done`. `git status --porcelain` clean.
-2. All commits on remote. CI green (`gh run watch --exit-status`).
-3. Aggregate per-subagent `## Hylla Feedback` sections into `HYLLA_FEEDBACK.md` (created when first such section lands).
-4. Aggregate usage findings — ergonomic wins, ergonomic pain, bugs, lessons — into `REFINEMENTS.md` / `HYLLA_REFINEMENTS.md` (created on first entry).
-5. **External-adopter cross-project improvement prompt** — rak is not the Tillsyn repo, so every drop-end writes a prompt for the Tillsyn team: context, friction, workarounds, ranked requests, evidence (drop/comment/handoff IDs). Routed via issue / PR / `till.handoff` once the Tillsyn-team identity exists.
-6. `hylla_ingest` — full enrichment, from the GitHub remote, only after CI green.
-7. Append an entry to `LEDGER.md` (created when the first drop closes).
-8. Append a one-liner to `WIKI_CHANGELOG.md` (created when the first wiki-changing drop lands).
-9. Update the relevant section(s) of `WIKI.md` if anything shipped that changed best practice (**in place** — no `2026-XX-XX update:` appended notes; git history is the audit trail).
+Plan-QA and build-QA both run as parallel proof + falsification spawns. Plan-QA writes transient files (`PLAN_QA_PROOF.md`, `PLAN_QA_FALSIFICATION.md`) that orch `git rm`s between rounds. Build-QA appends rounds to durable files (`BUILDER_QA_PROOF.md`, `BUILDER_QA_FALSIFICATION.md`). Full file-lifecycle table in `main/drops/WORKFLOW.md`.
 
 ## Orchestrator Role Boundaries
 
-- **Orchestrator** (this parent Claude Code session) — plans, routes, delegates, cleans up. **Never edits Go code or `magefile.go`.** May edit markdown docs (this file, `WIKI.md`, `README.md`, `LEDGER.md`, `REFINEMENTS.md`, agent `.md` files).
-- **Builder subagent** (`go-builder-agent`) — the ONLY role that edits Go code. Spawned via the `Agent` tool with Tillsyn auth credentials in the prompt.
-- **QA subagents** (`go-qa-proof-agent`, `go-qa-falsification-agent`) — gated to QA roles. Read, verify, verdict, die. Never edit code.
-- **Planner subagent** (`go-planning-agent`) — decomposes a level-1 drop into atomic nested drops. Never edits code.
-- **Dev / human** — approves auth, reviews results, makes design calls that the orchestrator files as discussion drops.
+- **Orchestrator** (this parent Claude Code session) — plans, routes, delegates, cleans up. **Never edits Go code or `magefile.go`.** May edit markdown docs (this file, `WIKI.md`, `PLAN.md`, drop dir mds, `README.md`, `LEDGER.md`, `REFINEMENTS.md`, agent `.md` files).
+- **Builder subagent** (`go-builder-agent`) — the ONLY role that edits Go code. Spawned via the `Agent` tool with the spawn contract preamble + builder appendix.
+- **QA subagents** (`go-qa-proof-agent`, `go-qa-falsification-agent`) — gated to QA roles. Read, verify, write to their own `*_QA_*.md` file, return verdict to orch, die. Never edit code.
+- **Planner subagent** (`go-planning-agent`) — fills the drop's `PLAN.md` Planner section (Phase 1) and revises it across plan-QA rounds (Phase 3). Never edits code.
+- **Dev / human** — approves design calls during plan-QA discussion (Phase 3), reviews build-QA findings (Phase 5).
 
 ## Project Structure
 
@@ -221,7 +170,7 @@ Non-test Go: ~1,600 LOC. Test Go: ~1,500 LOC. Total v0.1.0: ~3,100 LOC.
 8. **Test names:** `TestFuncName`; subcases via `t.Run("descriptive_name", ...)`.
 9. **File names:** match the primary type (`file.go` contains `File`). Split when a file exceeds ~400 LOC or holds two concepts.
 10. **Imports:** three groups (stdlib / third-party / local), blank-line-separated. `goimports` + `gofumpt` enforced.
-11. **Doc comments:** every exported identifier gets a `// Name …` doc comment per `golint`. No TODO/FIXME without a tracking drop.
+11. **Doc comments:** every exported identifier gets a `// Name …` doc comment per `golint`. No TODO/FIXME without a tracking unit in the active drop's `PLAN.md`.
 12. **Visibility:** everything under `internal/` by default. rak has no public API beyond the binary.
 
 ## Tech Stack
@@ -243,14 +192,14 @@ Dev tooling (installed locally, invoked via mage):
 
 ## Build Verification
 
-Before any build-drop is marked done:
+Per-unit verification (during build-QA, Phase 5 of WORKFLOW.md): builder runs `mage build` + `mage test` for the touched packages. Drop-end verification (after all units pass build-QA, Phase 6 of WORKFLOW.md): `mage ci` from `main/`, then `git push`, then `gh run watch --exit-status` until green.
 
 1. All relevant mage targets pass (discover via `mage -l`).
 2. **NEVER run raw `go test`, `go build`, `go run`, `go vet`, `gofumpt`, `golangci-lint`** — always `mage <target>`. If a mage target has a bug, fix the target — don't bypass. No exceptions, orchestrator or subagent.
-3. **NEVER run `mage install` from an agent.** This is a **dev-only** dogfood target that promotes a binary to `$GOBIN`. Orchestrator and every subagent must not invoke it. If a drop description asks for it, stop and return control to the orchestrator.
-4. All QA drops (proof + falsification) for this build-drop have closed green.
+3. **NEVER run `mage install` from an agent.** This is a **dev-only** dogfood target that promotes a binary to `$GOBIN`. Orchestrator and every subagent must not invoke it. If a unit description asks for it, stop and return control to the orchestrator.
+4. All build-QA rounds for every unit have closed green.
 
-Mage targets (land in Drop 1.4, stable from there):
+Mage targets (land in Drop 1.4–1.5, stable from there):
 
 | Target | Command | When |
 |---|---|---|
@@ -262,7 +211,7 @@ Mage targets (land in Drop 1.4, stable from there):
 | `mage install` | `go install ./cmd/rak` | **dev-only**, never from an agent |
 | `mage run` | `go run ./cmd/rak` (positional args pass after `--`) | smoke check |
 | `mage coverage` | `go test -race -coverpkg=./internal/... -coverprofile=coverage.out ./... && go tool cover -func=coverage.out` | report-only until Drop 9.3 flips it into a gate |
-| `mage plan-check` | diff `main/PLAN.md` drop titles vs live Tillsyn | guards the "update PLAN.md in the same commit" parity rule |
+| `mage plan-check` | diff `main/PLAN.md` container titles + states against `main/drops/*/` directory names + each drop dir's `PLAN.md` header state | guards parity between PLAN.md and the drops dir |
 
 Run `mage ci` before every push. `mage coverage` is report-only from Drop 1.5 on so every drop can see its current number; the 70% floor (scope `-coverpkg=./internal/...`, excludes `cmd/rak` CLI wiring) flips on in Drop 9.3.
 
@@ -305,7 +254,7 @@ Run `mage ci` before every push. `mage coverage` is report-only from Drop 1.5 on
 
 ### After Touching Go Code
 
-- `mage ci` before handoff. After pushing: `gh run watch --exit-status` until green.
+- `mage ci` before handoff at drop-end (Phase 6 of WORKFLOW.md). After pushing: `gh run watch --exit-status` until green.
 
 ### Dependencies
 
@@ -315,20 +264,21 @@ Run `mage ci` before every push. `mage coverage` is report-only from Drop 1.5 on
 
 - **Context7** + `go doc` + gopls `LSP` before any unfamiliar external API usage, after any test failure.
 
-### Tillsyn Authoring
+### Markdown Authoring
 
-- **Markdown-first** for Tillsyn `description`, `summary`, `body_markdown`, thread comments.
+- Drop dir mds (`PLAN.md`, `BUILDER_WORKLOG.md`, `*_QA_*.md`, `CLOSEOUT.md`) are markdown-first. Use fenced code blocks for snippets, tables for structured data, headings for the conventions in `main/drops/WORKFLOW.md`. No HTML.
 
 ## Skill and Slash Command Routing
 
 | Command | When to Use |
 |---|---|
-| `/plan-from-hylla` | Hylla-grounded planning |
-| `/qa-proof` | Proof-oriented QA |
-| `/qa-falsification` | Falsification-oriented QA |
+| `/qa-proof` | Proof-oriented QA (used inside subagent definitions; orchestrator typically just spawns the agent) |
+| `/qa-falsification` | Falsification-oriented QA (same) |
 | `/select-checkout` | Confirm the active visible checkout |
 | `/gopls-sync` | Verify gopls targets `main/` |
-| `semi-formal-reasoning` | Explicit reasoning certificate |
+| `semi-formal-reasoning` | Explicit reasoning certificate (Section 0 shape) |
+
+Note: `/plan-from-hylla` is a Tillsyn-coupled global skill — rak does not use it. Planner work happens via `go-planning-agent` spawned per `main/drops/WORKFLOW.md` § "Phase 1".
 
 ## Git Commit Format
 
@@ -342,7 +292,8 @@ Examples:
 - `feat(count): add blank/comment/code line split per file`
 - `fix(fileset): respect .gitignore in nested directories`
 - `chore(deps): add tiktoken-go/tokenizer`
-- `docs(plan): add plan.md mirror and codify drops vocab`
+- `docs(drop-1): planner decompose into six units`
+- `docs(drop-3): clear plan qa round 2, route to planner`
 
 No co-authored-by trailers. No period at end. No capitalized first word after the colon unless proper noun/acronym. Keep the subject under ~72 chars when possible — if it won't fit, the change is probably too bundled and should be two commits.
 
@@ -364,8 +315,11 @@ No co-authored-by trailers. No period at end. No capitalized first word after th
 
 ## Recovery After Session Restart
 
-1. `till.capture_state` — re-anchor project and scope.
-2. `till.attention_item(operation=list, all_scopes=true)` — inbox.
-3. `till.handoff(operation=list)` — open routing.
-4. Check `in_progress` drops for staleness.
-5. Revoke orphaned auth sessions / leases.
+Filesystem + git, no Tillsyn calls. Full procedure in `main/drops/WORKFLOW.md` § "Recovery After Restart". Quick form:
+
+1. `git status` — uncommitted work.
+2. `git log --oneline -20` — recent commits.
+3. Read `main/PLAN.md` — container states.
+4. List `main/drops/*/PLAN.md` headers — per-drop phase state.
+5. Per active drop: presence of `PLAN_QA_*.md` = mid-plan-QA loop; absence + `BUILDER_WORKLOG.md` exists = mid-build; `CLOSEOUT.md` with `state: done` = drop closed.
+6. Per active unit: scan latest `## Unit N.M — Round K` heading in `BUILDER_WORKLOG.md` + both `BUILDER_QA_*.md` to figure out next step.
