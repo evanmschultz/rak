@@ -37,7 +37,7 @@ Six atomic units implementing the expected decomposition in main/PLAN.md lines 7
 
 ### Unit 1.1 — Move stash into cmd/rak layout and split main.go
 
-- **State:** todo
+- **State:** done
 - **Paths:**
   - `main/go.mod` (new — copied from `/tmp/rak-stash/go.mod`, unmodified in this unit)
   - `main/go.sum` (new — copied from `/tmp/rak-stash/go.sum`, unmodified)
