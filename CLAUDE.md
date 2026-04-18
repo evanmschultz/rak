@@ -211,7 +211,7 @@ Mage targets (land in Drop 1.4–1.5, stable from there):
 | `mage install` | `go install ./cmd/rak` | **dev-only**, never from an agent |
 | `mage run` | `go run ./cmd/rak` (positional args pass after `--`) | smoke check |
 | `mage coverage` | `go test -race -coverpkg=./internal/... -coverprofile=coverage.out ./... && go tool cover -func=coverage.out` | report-only until Drop 9.3 flips it into a gate |
-| `mage plan-check` | diff `main/PLAN.md` container titles + states against `main/drops/*/` directory names + each drop dir's `PLAN.md` header state | guards parity between PLAN.md and the drops dir |
+| `mage planCheck` | diff `main/PLAN.md` container titles + states against `main/drops/*/` directory names + each drop dir's `PLAN.md` header state | guards parity between PLAN.md and the drops dir |
 
 Run `mage ci` before every push. `mage coverage` is report-only from Drop 1.5 on so every drop can see its current number; the 70% floor (scope `-coverpkg=./internal/...`, excludes `cmd/rak` CLI wiring) flips on in Drop 9.3.
 
@@ -259,6 +259,7 @@ Run `mage ci` before every push. `mage coverage` is report-only from Drop 1.5 on
 ### Dependencies
 
 - Ask the dev to run `go get` / module updates. No `GOPROXY=direct`, `GOSUMDB=off`, or checksum bypass.
+- **Bootstrap carve-out.** When a unit introduces a mage-managed dep for the very first time and no mage target yet exists to wrap `go get`, the builder MAY run `go get <module>` + `go mod tidy` directly from `main/` with default environment (no proxy / sum / checksum bypass, no private-module shenanigans). Today this applies only to Drop 1.4 (first-ever `github.com/magefile/mage` add). From Drop 2 onward the magefile exists, so every dep add routes through a mage target and this carve-out does not apply.
 
 ### Reference Lookups
 

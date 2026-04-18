@@ -99,7 +99,7 @@ DROP_1 — Code scaffold + mage + CI
         • run        → go run ./cmd/rak (positional args pass after --)
         • coverage   → go test -race -coverpkg=./internal/... -coverprofile=coverage.out ./...
                        && go tool cover -func=coverage.out — REPORT-ONLY in 1.5; gate flips in 9.3
-        • plan-check → diff main/PLAN.md container titles + states against main/drops/*/
+        • planCheck  → diff main/PLAN.md container titles + states against main/drops/*/
                        directory names + each drop dir's PLAN.md header state; fail if drift
   1.6 Add .github/workflows/ci.yml (mage ci on push/PR; no coverage gate yet — mage coverage
       is local-only report-only until 9.3 flips it on).
@@ -185,6 +185,7 @@ The Drop 1 dir does not yet exist. Next session is a **work orchestrator launche
 Items tracked for future sessions, separate from the Drop 0–9 hierarchy:
 
 - **Laslig progress-bar follow-up** — when rak's perf drop (Drop 8) genuinely needs a known-total progress bar, dev extends laslig upstream (not rak). Until then, spinner + "processed N files" counter is enough.
+- **Pin `gofumpt` + `golangci-lint` versions in Drop 9** — Drop 1.6's CI workflow installs `gofumpt` + `golangci-lint` without version pins, relying on `actions/setup-go` + latest-tag semantics. Surfaced by Drop 1 plan-QA falsification (C4) as a real CI-vs-local drift risk. Defer to Drop 9 (release polish) and pin both tools via `go.mod` `tool` directives or a `go run` pinned-version invocation.
 
 ## Stashed Legacy Files
 
