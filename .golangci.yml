@@ -1,0 +1,24 @@
+version: "2"
+
+# Minimal golangci-lint config for rak Drop 1.
+#
+# Rationale: the default linter set fires `unused` on `count` in
+# cmd/rak/root.go because Drop 1 stubs `RunE` with `return fmt.Errorf("not
+# implemented — see drop 2")` and does not call `count` yet. `count` and the
+# `Counts` struct are the pinned Drop 2.1 hand-off boundary per
+# drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/PLAN.md Unit 1.3 acceptance + main/PLAN.md
+# line 86–87: they MUST survive intact into Drop 2.1 which lifts them into
+# internal/counting. Deleting them to satisfy the linter would regress the
+# cross-drop boundary. Exclude the specific path+linter pairing here; Drop 2.1
+# removes this exclusion when `count` becomes used (or the file moves).
+#
+# Everything else stays on the golangci-lint default linter set (errcheck,
+# govet, ineffassign, staticcheck, unused). No extra linters enabled, no
+# defaults disabled globally.
+
+linters:
+  exclusions:
+    rules:
+      - path: cmd/rak/root\.go
+        linters:
+          - unused

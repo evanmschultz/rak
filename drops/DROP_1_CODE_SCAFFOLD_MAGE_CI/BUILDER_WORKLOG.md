@@ -205,3 +205,85 @@ Two, both documented above and absorbed cleanly:
 ### Hylla Feedback
 
 N/A — non-Go work (module-file edits only). Hylla indexes Go source; go.mod / go.sum are outside its scope. No cross-package lookup was needed and no Hylla query was run.
+
+## Unit 1.5 — Round 1
+
+### Files touched
+
+- `main/magefile.go` (new; 120 LOC; `//go:build mage` tag, `package main`, imports `github.com/magefile/mage/mg` + `/sh`; 9 exported target funcs: `Build`, `Test`, `Format`, `Lint`, `CI`, `Install`, `Run`, `Coverage`, `PlanCheck` + one unexported helper `gofumptClean` used by `CI`).
+- `main/.golangci.yml` (new; 22 LOC; minimal fallback config — see "Lint fallback" below).
+- `main/go.mod` (line 7 — `github.com/magefile/mage v1.17.1` promoted from the indirect block to the direct `require` block via `go mod tidy`; line 24's `// indirect` entry correspondingly removed).
+- `main/drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/PLAN.md` (Unit 1.5 `State: todo → in_progress → done`).
+
+`main/go.sum` unchanged — the mage hashes were already present from Unit 1.4's `go get`, and tidy only needed to rebalance `go.mod`'s require blocks.
+
+### Design decisions
+
+- **Coverage scope variant (a) picked — `-coverpkg=./internal/...`, no TODO.** Matches decision 22 in drop PLAN.md Notes and main/CLAUDE.md § "Build Verification". PLAN.md Notes line 155 explicitly permits this for Drop 1: Go 1.26 `go test -coverpkg=./internal/... ./...` with zero matching packages emits a stderr warning ("no packages being tested depend on matches for pattern ./internal/...") and exits 0. Confirmed empirically — `mage coverage` exits 0 with `total: (statements) 0.0%`. No TODO needed; Drop 2.1 will populate `./internal/counting` and the flag will start matching real packages.
+- **`mage ci` composition via `mg.SerialDeps(gofumptClean, Lint, Test)`.** Strict order is gofumpt-empty-diff assertion → lint → test. `gofumptClean` is an unexported helper (lowercased) so it does not appear in `mage -l` and is not one of the 9 canonical targets. `sh.Output` captures gofumpt's stdout (list of files needing format); non-empty = failure with the file list wrapped in the error for diagnostic signal. `sh.RunV` elsewhere prints shelled-out command output to the user's terminal (the V = verbose variant), which matters for `mage test`/`mage lint` log readability.
+- **`mage run` positional args via `os.Args[1:]`.** Mage passes everything after the target name through `os.Args`, so `mage run -- foo bar` yields `os.Args = ["mage", "foo", "bar"]`. Slicing `os.Args[1:]` and appending to `["run", "./cmd/rak"]` gives the expected `go run ./cmd/rak foo bar` command. `mage run` alone (no args) just runs `go run ./cmd/rak` — matches main/CLAUDE.md § "Build Verification" row wording "positional args pass after `--`".
+- **`mage planCheck` is a stub** — body is a single TODO comment + `return nil`. Drop PLAN.md Notes line 153 explicitly permits this: Drop 1 acceptance is target existence + `mage -l` listing. Real parity logic (diff `main/PLAN.md` container titles + states against `main/drops/*/` dirnames and their per-drop PLAN.md header states) is nontrivial and can be implemented in a follow-up drop.
+- **Error wrapping on every target.** Per main/CLAUDE.md § "Errors": every `sh.RunV` / `sh.Output` return is wrapped with `fmt.Errorf("mage <target>: %w", err)`. `lint` wraps two sub-steps independently (`go vet` vs `golangci-lint`) so a failure can be traced to which tool fired without re-reading stdout. `ci`'s failure attribution flows through `mg.SerialDeps`, which propagates the first failing dep's wrapped error verbatim.
+- **Package doc comment avoids backticks.** Mage slurps the package doc comment into a raw-string-literal in its generated `mage_output_file.go`; a backtick inside the doc comment closes the raw string prematurely and causes the magefile compile to fail with a cryptic "syntax error: unexpected name mage in argument list" (learned this when the first write used backticks — see "Surprises"). Fixed by switching backtick-quoted identifiers in the doc comment to unquoted form (e.g. "go build" instead of "\`go build\`"). Function-level doc comments keep their backticks because those land in a double-quoted string in the target-description map, where backticks are content rather than delimiters.
+
+### Commands run
+
+- `go mod tidy` (×3 from `main/`) — first run promoted `github.com/magefile/mage` from `// indirect` to direct; second + third runs produced no diff (stability confirmed).
+- `mage -l` — lists the 9 targets in alphabetical order (build, ci, coverage, format, install, lint, planCheck, run, test). No extras, no missing.
+- `mage build` — exit 0, no output (no build errors).
+- `mage test` — exit 0; `? github.com/evanmschultz/rak/cmd/rak [no test files]` (expected — Drop 1 has no `*_test.go`).
+- `mage format` (×2) — idempotent; second run produces no diff on `main/magefile.go` or `main/cmd/rak/`.
+- `mage lint` — failed first run (see "Lint fallback" below); passed after `.golangci.yml` landed.
+- `mage ci` — exit 0 after the fallback; chained gofumpt-clean → lint → test all green.
+- `mage coverage` — exit 0; stderr warning about zero-matching packages (expected per PLAN.md Notes line 155); `total: (statements) 0.0%`.
+- `mage planCheck` — exit 0 (stub).
+- **`mage install` NOT run** — per main/CLAUDE.md § "Build Verification" rule 3 and drop PLAN.md Unit 1.5 acceptance line 128. Only the comment text on the target was grep-verified.
+
+### Grep verification (acceptance bullets)
+
+- `grep -n '//go:build mage' main/magefile.go` → 1 line (`1://go:build mage`). PASS.
+- `grep -n 'github.com/magefile/mage/mg' main/magefile.go` → 1 line (`17:	"github.com/magefile/mage/mg"`). PASS.
+- `grep -n 'github.com/magefile/mage' main/go.mod` → 1 line (`7:	github.com/magefile/mage v1.17.1`) **without** `// indirect`. PASS (direct-not-indirect assertion).
+- `grep -n 'dev-only; agents MUST NOT invoke.' main/magefile.go` → 1 line (`76:// Install is dev-only; agents MUST NOT invoke. …`). PASS.
+- `grep -n 'report-only until Drop 9.3' main/magefile.go` → 1 line (`97:// then \`go tool cover -func=coverage.out\`. report-only until Drop 9.3 flips`). PASS.
+- `mage -l` lists exactly 9 targets matching main/CLAUDE.md table. PASS.
+
+### Tidy stability
+
+Three consecutive `go mod tidy` runs from `main/` diffed against each other:
+- Run 1: promoted mage (indirect → direct). Diff vs prior state: 2 lines (one added to direct block, one removed from indirect block).
+- Run 2: no diff (stable).
+- Run 3: no diff (stable).
+
+`go mod verify` (run after Run 1) — `all modules verified`. Hashes clean.
+
+### Lint fallback (invoked)
+
+`mage lint`'s first run failed on default-linter strictness:
+```
+cmd/rak/root.go:42:6: func count is unused (unused)
+```
+
+This is exactly the fallback-clause scenario on drop PLAN.md Unit 1.5 acceptance line 126: `golangci-lint` fires `unused` on `count` in `cmd/rak/root.go` because Drop 1's stubbed `RunE` does not call it. `count` + `Counts` are the pinned Drop 2.1 hand-off boundary per drop PLAN.md Unit 1.3 acceptance + main/PLAN.md line 86–87 — they MUST survive intact. Deleting them to placate the linter would regress the cross-drop boundary.
+
+Fallback applied: committed `main/.golangci.yml` (v2 schema format — the installed `golangci-lint` insists on the v2 format for v2.x binaries). Config is narrowly scoped:
+- Exclusion rule: `linters.exclusions.rules` suppresses `unused` on `cmd/rak/root\.go` only.
+- No other defaults disabled. No extra linters enabled. Default set (`errcheck`, `govet`, `ineffassign`, `staticcheck`, `unused`) remains active everywhere except the one `unused`-on-`root.go` pairing.
+
+Drop 2.1 removes this exclusion once `count` becomes used (or when `count` + `Counts` move into `internal/counting` and `cmd/rak/root.go` starts consuming the exported API).
+
+Re-run after `.golangci.yml` landed: `0 issues.` PASS.
+
+### Surprises
+
+1. **Backticks in the package doc comment broke mage's codegen.** First write of `magefile.go` included backtick-quoted identifiers in the package doc (``...Discover targets with `mage -l`.``). Mage's generator embeds the package doc comment verbatim into a backtick-delimited raw string literal in `mage_output_file.go`, so the embedded backticks closed the raw string prematurely and surfaced as `./mage_output_file.go:221:109: syntax error: unexpected name mage in argument list`. Fix: strip backticks from the package doc comment (switched to unquoted identifiers like "go build" / "gofumpt"). Function-level doc comments kept their backticks because those flow into a `"..."`-delimited target-description string in mage's codegen, where backticks are plain content. This is a mage-codegen quirk; no upstream bug to file. Worth noting for future drops that touch `magefile.go`: keep the package doc comment backtick-free.
+2. **`.golangci.yml` v2 schema required.** First fallback-config attempt used the v1 schema (`linters: disable: [unused]` at the top level) and `golangci-lint` rejected it with `error: jsonschema: "version" does not validate with https://golangci-lint.run/jsonschema/golangci.next.jsonschema.json#/properties/version/enum: value must be one of "2"`. Fix: use the v2 format — top-level `version: "2"` + `linters.exclusions.rules` nested path-scoped exclusions. Documented in the config's header comment so future readers understand the shape.
+3. **`mage coverage` zero-match warning is stderr-not-stdout and does NOT fail the target.** Expected per drop PLAN.md Notes line 155 but worth a concrete record: the stderr line `warning: no packages being tested depend on matches for pattern ./internal/...` is advisory — exit code is still 0 because `go test` ran successfully against the one package that exists (`cmd/rak`). Coverage report correctly shows `total: (statements) 0.0%` because `cmd/rak` is excluded from `-coverpkg`. Drop 9.3's gate flip and Drop 2.1's first `internal/` package both land before this becomes meaningful.
+
+### Hylla Feedback
+
+None — Hylla answered everything needed. All evidence lookups were either:
+- **Non-Go** (drop PLAN.md acceptance bullets, main/CLAUDE.md § "Build Verification" table, `.golangci.yml` schema) — outside Hylla's Go-only index.
+- **Uncommitted-local** (the just-written `main/magefile.go`) — covered by `Read` + `git diff`, not eligible for Hylla until the drop-end reingest.
+
+No Hylla query was run and no Hylla miss forced a fallback.

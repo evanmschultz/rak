@@ -99,7 +99,7 @@ Six atomic units implementing the expected decomposition in main/PLAN.md lines 7
 
 ### Unit 1.5 — Add magefile.go with 9 canonical targets
 
-- **State:** todo
+- **State:** done
 - **Paths:** `main/magefile.go`, optionally `main/.golangci.yml` (see fallback clause below)
 - **Packages:** `main` (the magefile lives at the `main/` module root and therefore declares `package main` per Go's one-package-per-directory rule; the `//go:build mage` build tag excludes it from the normal build surface).
 - **Acceptance:**
