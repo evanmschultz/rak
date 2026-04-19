@@ -69,3 +69,56 @@
 ### Hylla Feedback
 
 N/A — Unit 1.2 is a `go.mod`-only edit. Hylla today indexes Go files only (non-Go artifacts like `go.mod` are out of Hylla's scope per `main/CLAUDE.md` § "Hylla Baseline"), so no Hylla query was warranted and no fallback miss occurred. Acceptance is grep-based and `git diff`-backed.
+
+## Unit 1.3 — Round 1
+
+**Verdict:** pass
+
+**Evidence (per acceptance bullet, drop PLAN.md Unit 1.3 row lines 69–84):**
+
+1. **`newRootCmd()` shape.** Read `main/cmd/rak/root.go` lines 21–39. Returns `*cobra.Command` literal with `Use: "rak [path]"` (line 23), `Args: cobra.MaximumNArgs(1)` (line 30), `Short` (line 24, "Summarize code in a directory: line, word, and token counts by language"), `Long` (lines 25–29, two-paragraph rak description + Drop 1 caveat), and a `RunE` (lines 31–37) whose body is `_ = c.Context()` followed by `return fmt.Errorf("not implemented — see drop 2")`. The `_ = c.Context()` call + doc-comment block (lines 32–34) threads command-scoped cancellation forward; the immediate `return` guarantees no panic. LSP `documentSymbol` confirms `newRootCmd (Function) func() *cobra.Command - Line 21`. PASS.
+
+2. **No wc-style flags.** `Grep` for `BoolP` scoped to `main/cmd/rak/root.go` → 0 matches. All four stash `root.Flags().BoolP(...)` calls for `-b`/`-l`/`-w`/`-c` are gone (stash `/tmp/rak-stash/main.go` lines 57–60 had them). PASS.
+
+3. **`count` + `Counts` preserved, unexported.** `Grep` for `func count(` → exactly one match: `root.go:42:func count(r io.Reader) (Counts, error) {`. `Grep` for `func Count(` → 0 matches (no accidental export). `Grep` for `type Counts struct` → exactly one match: `root.go:13:type Counts struct {`. Byte-compare against stash:
+   - `diff` of current `root.go` lines 41–78 (doc comment + `count` body) against stash `main.go` lines 124–161 → **IDENTICAL** (no shape drift, no rename, no signature change).
+   - `diff` of current `root.go` lines 12–18 (doc comment + `Counts` struct) against stash `main.go` lines 26–32 → **IDENTICAL**.
+   Drop 2.1 hand-off boundary (pinned in drop PLAN.md Notes) survives intact. PASS.
+
+4. **RunE error string with UTF-8 em dash.** `Grep` for literal `not implemented — see drop 2` (em dash U+2014) → exactly one match: `root.go:36:			return fmt.Errorf("not implemented — see drop 2")`. Em dash verification: `Grep` for `not implemented -- see` (ASCII double-hyphen) → 0 matches, so no `--` substitution slipped in. The em-dash literal matches only when the source file actually contains UTF-8 bytes `0xE2 0x80 0x94` at that position — ripgrep's match proves the em dash is present. PASS.
+
+5. **`fang.Execute` shape in `main.go`.** Read `main/cmd/rak/main.go` lines 12–20. Exact call:
+   ```go
+   if err := fang.Execute(
+       context.Background(),
+       newRootCmd(),
+       fang.WithNotifySignal(os.Interrupt, syscall.SIGTERM),
+   ); err != nil {
+       os.Exit(1)
+   }
+   ```
+   `Grep` for `WithNotifySignal` → 1 match: `main.go:16:		fang.WithNotifySignal(os.Interrupt, syscall.SIGTERM),`. `Grep` for `syscall.SIGTERM` → 1 match on the same line. PASS.
+
+6. **`main.go` imports.** Read `main/cmd/rak/main.go` lines 4–10. Import block contains exactly `context` (line 5), `os` (line 6), `syscall` (line 7), `github.com/charmbracelet/fang` (line 9). `Grep` for `spf13/cobra` scoped to `main.go` → 0 matches (cobra import lives only in `root.go`). PASS.
+
+7. **`c.Context()` threading.** `root.go` line 35 has `_ = c.Context()` preceded by a three-line doc comment (lines 32–34) explaining the forward-looking intent. The stub itself returns immediately on line 36, which the acceptance bullet explicitly permits ("For the Drop 1 stub this is a forward-looking constraint on the file shape; the stub itself returns immediately"). No `context.Background()` invention inside `RunE`. PASS.
+
+8. **Obsolete helpers deleted; hand-off boundary intact.** LSP `documentSymbol` on `main/cmd/rak/root.go` returned exactly three top-level symbols: `Counts` (Struct, Line 13), `newRootCmd` (Function, Line 21), `count` (Function, Line 42). No `Config`, `configFromCommand`, `run`, `printCounts` — all four obsolete helpers present in stash `main.go` (lines 17–24, 65–102, 104–122, 163–186) are deleted from current `root.go`. `count` + `Counts` retained verbatim (see bullet 3 byte-compare). PASS.
+
+9. **`root.go` ≤ ~150 LOC.** `wc -l main/cmd/rak/root.go` → 78 LOC (target ≤ ~150). Builder's BUILDER_WORKLOG.md report of 78 LOC verified. PASS.
+
+**Cross-checks:**
+
+- **`count(io.Reader) (Counts, error)` signature verbatim against stash.** Byte-compare (`diff`) of current `root.go` lines 41–78 against stash `/tmp/rak-stash/main.go` lines 124–161 → IDENTICAL. Signature, body, comments, whitespace all byte-for-byte unchanged. PASS.
+- **`Counts` struct fields verbatim against stash.** Byte-compare of current `root.go` lines 12–18 against stash lines 26–32 → IDENTICAL. `Bytes`, `Lines`, `Words`, `Chars` all `int64`; field order preserved. PASS.
+- **`main.go` ≤ ~30 LOC.** `wc -l main/cmd/rak/main.go` → 20 LOC (target ≤ ~30). Builder's report of 20 LOC verified. PASS.
+- **Em dash is UTF-8 U+2014, not ASCII `--`.** Confirmed by (a) ripgrep match on the literal em-dash pattern and (b) zero match for the ASCII `--` variant. The same character appears in the orchestrator-facing spawn prompt and rak `main/PLAN.md` Decision 29, so the canonical string is em-dash throughout. PASS.
+- **`main.go` package doc comment updated.** Line 1: `// Package main implements the rak CLI entry point.` — replaces the stashed wc-style phrasing, appropriate for the post-1.3 command surface. Not an acceptance bullet, but a coherent follow-through. PASS.
+- **LSP intra-package resolution clean.** `documentSymbol` on `main.go` returns exactly one top-level symbol (`main (Function) func() - Line 12`); `documentSymbol` on `root.go` returns the three-symbol set noted above. No gopls diagnostics surfaced against the 1.3 surface (the pre-declared `go.mod` drift and `count` "unused" warnings are out of scope per spawn prompt — explicitly plan-state). PASS.
+- **Pre-declared diagnostics audit.** (a) `go.mod` drift (missing `x/exp/golden`, `golang.org/x/exp`; unused laslig transitives; `fang should be direct`) is scheduled for Unit 1.4's `go mod tidy` — confirmed out-of-scope per spawn prompt. (b) `count`/`Counts` "unused" diagnostics are intentional plan-state per Drop 2.1 hand-off pinning — confirmed out-of-scope per spawn prompt. Nothing else surfaced in the reviewed files would qualify as a new Unit 1.3 defect.
+
+**Findings:** none.
+
+### Hylla Feedback
+
+N/A — Unit 1.3 is a within-file rewrite in `cmd/rak/root.go` + a within-file edit in `cmd/rak/main.go`. No cross-package reuse question, no symbol-lookup need against the broader tree — the only external reference the review needed was the stash file (which is filesystem-local, not a Hylla artifact). All evidence was grep/diff/LSP-backed. No Hylla query run, no fallback forced.
