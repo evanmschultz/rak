@@ -195,3 +195,61 @@ None. Round 3 finds zero new counterexamples. The Round 2 fix (commit `6a4a387`)
 ### Hylla Feedback
 
 N/A — Round 3 evidence came from `Read` + `Grep` against drop PLAN.md and BUILDER_WORKLOG.md (both markdown). Hylla indexes Go source; markdown is outside its scope. No Hylla query was skipped that should have been attempted.
+
+## Unit 1.5 — Round 1
+
+**Verdict:** pass
+
+**Attack summary:** Probed all 14 appendix attack directions against commit a205e4d (magefile.go + .golangci.yml land). No counterexample constructed on any vector. Every attack either REFUTED by direct evidence (file read / mage execution / git compare) or resolved to matching the drop PLAN.md Unit 1.5 acceptance + main/CLAUDE.md § "Build Verification" table. Variant (a) for coverage (-coverpkg=./internal/... with no TODO) is internally consistent. Drop 2.1 hand-off boundary (count + Counts in cmd/rak/root.go) byte-identical to commit 3cb4325. No mage install invocation in worklog or magefile dep chain. No Section 0 leakage.
+
+Evidence gathered: Read of magefile.go / .golangci.yml / go.mod / cmd/rak/root.go / drop PLAN.md / BUILDER_WORKLOG.md; live mage -l / mage ci / mage coverage runs from main/; go mod tidy stability check (zero diff); git show 3cb4325:cmd/rak/root.go byte-compare against current; Grep for backticks in magefile.go / mg.(Deps|SerialDeps|...) in magefile.go / mage install in drop dir / Section 0 markers in drop dir / ^func in magefile.go.
+
+**Counterexamples found:** none
+
+**Findings:** none
+
+### Attack-by-attack trace
+
+- **1. Missing or extra target.** `mage -l` from `main/` lists exactly 9 targets in alphabetical order: build, ci, coverage, format, install, lint, planCheck, run, test. `Grep` for `^func ` in magefile.go returned 10 funcs — 9 exported + 1 unexported helper `gofumptClean` (used by `CI` via `mg.SerialDeps`). Unexported funcs are not mage targets (lowercase init is mage's discrimination rule) so do not appear in `mage -l`. Count matches main/CLAUDE.md § "Build Verification" table exactly. REFUTED.
+
+- **2. Command drift.** Each target's invocation verified against CLAUDE.md table: Build → `go build ./...` (magefile.go:23) MATCH. Test → `go test -race ./...` (magefile.go:31) — `-race` present MATCH. Format → `gofumpt -l -w .` (magefile.go:39) MATCH. Lint → `go vet ./...` then `golangci-lint run` (magefile.go:47, :50) — two separate `sh.RunV` calls with independent error wrapping MATCH. CI → `mg.SerialDeps(gofumptClean, Lint, Test)` (magefile.go:59); order gofumpt-empty-diff → Lint → Test; `gofumptClean` helper (magefile.go:65) runs `sh.Output("gofumpt", "-l", ".")` and errors if `strings.TrimSpace(out) != ""` MATCH. Install → `go install ./cmd/rak` (magefile.go:79) MATCH. Run → `go run ./cmd/rak` + `os.Args[1:]` pass-through (magefile.go:88-90) MATCH. Coverage → `go test -race -coverpkg=./internal/... -coverprofile=coverage.out ./...` + `go tool cover -func=coverage.out` (magefile.go:100-108) MATCH. PlanCheck → stub `// TODO(planCheck): real parity check — stub passes in Drop 1` + `return nil` (magefile.go:119-120); permitted per drop PLAN.md Notes line 153 MATCH. REFUTED.
+
+- **3. Coverage scope/comment mismatch.** Builder picked variant (a) — `-coverpkg=./internal/...` with NO TODO in the target body. Internal consistency verified: `Grep` on magefile.go for `TODO(drop-9.3)` (variant-b's required TODO wording) returned zero hits; the only TODO in the file is `TODO(planCheck)` on the `PlanCheck` stub, unrelated to coverage scope. `Grep` for `report-only until Drop 9.3` returned exactly one hit at magefile.go:97 (the `Coverage` doc comment), satisfying the Drop-9.3-gate-flip signaling requirement. Variant (a) + no scope-tighten TODO is the acceptance pairing. REFUTED.
+
+- **4. Install dep chain leak.** `Grep` for `mg\.(Deps|SerialDeps|CtxDeps|SerialCtxDeps)` in magefile.go returned exactly one hit — magefile.go:59 `mg.SerialDeps(gofumptClean, Lint, Test)` inside `CI()`. No `Install` reference in that dep list. No other `mg.Deps` chain anywhere in the file. `Install` is a standalone target reachable only by explicit `mage install` invocation; it is not a transitive dep of ci, test, lint, format, build, run, coverage, or planCheck. REFUTED.
+
+- **5. Mage install invocation anywhere.** `Grep` for `mage install` across the entire drop directory returned 5 hits, ALL documentation text (never execution trace): PLAN.md:128 acceptance bullet text; PLAN.md:141 Unit 1.6 workflow bullet; PLAN.md:152 Notes tripwire entry; BUILDER_WORKLOG.md:240 explicit "NOT run" record; BUILDER_QA_FALSIFICATION.md:182 prior Round 3 plan-review attack text. Zero execution hits in BUILDER_WORKLOG.md Unit 1.5 § "Commands run" (lines 230–240). Builder's worklog line 240 explicitly reads "`mage install` NOT run — per main/CLAUDE.md § 'Build Verification' rule 3 and drop PLAN.md Unit 1.5 acceptance line 128. Only the comment text on the target was grep-verified." REFUTED.
+
+- **6. `.golangci.yml` scope over-reach.** Read of main/.golangci.yml (24 LOC) shows config strictly narrow: a single `linters.exclusions.rules` entry with `path: cmd/rak/root\.go` + `linters: [unused]`. No top-level `linters.disable` key (would globally disable). No top-level `linters.enable` key (would add extras). The single exclusion rule suppresses ONLY `unused` ONLY on `cmd/rak/root.go` — every other linter stays on, every other path stays under default strictness. Rationale comment at lines 3-17 matches drop PLAN.md Unit 1.5 acceptance line 126 (fallback clause narrow scope for Drop 2.1 hand-off boundary preservation). REFUTED.
+
+- **7. Build-tag integrity.** `Read` of magefile.go line 1 = `//go:build mage` (exact). Line 2 empty. Lines 3-9 package doc comment. Line 10 `package main`. The build-tag line is the very first byte of the file, the canonical Go build-tag position. Normal `go build ./...` (which is what `mage build` dispatches to) does NOT activate the `mage` tag, so magefile.go is excluded from the normal compile — verified by running `mage build` directly via `mage ci`'s composition (exit 0, no build errors). Mage activates the `mage` tag internally only for its own compile of the magefile. REFUTED.
+
+- **8. Package doc backtick regression.** `Grep` for literal backtick in magefile.go returned hits on lines 29, 37, 45, 56, 63, 85, 86, 96, 97 — all inside function-level doc comments (Test, Format, Lint, CI, gofumptClean, Run, Coverage). Zero matches inside the package doc comment (lines 3-9), which is the exact block where backticks break mage's codegen (surprise documented in BUILDER_WORKLOG.md Unit 1.5 Surprise 1, line 279). Function doc backticks flow into double-quoted target-description strings in mage_output_file.go, where they are plain content — verified by `mage -l` running clean and producing correct formatted descriptions. No regression. REFUTED.
+
+- **9. Tidy stability.** `go mod tidy` run from main/; subsequent `git diff go.mod go.sum` returned empty (no output). Zero-diff confirms the go.mod + go.sum state committed at a205e4d is tidy-stable. `github.com/magefile/mage v1.17.1` appears in go.mod line 7 inside the DIRECT `require` block (lines 5-9) with NO `// indirect` marker — matches drop PLAN.md Unit 1.5 acceptance line 122 "direct-not-indirect" bullet (magefile.go's `mg` import holds mage in the direct block through tidy). REFUTED.
+
+- **10. `mage ci` regression surface.** Live run of `mage ci` from main/ produced exit 0 with output: `0 issues.` then `?   github.com/evanmschultz/rak/cmd/rak [no test files]`. gofumptClean (first dep) produced no stdout (gofumpt finds nothing to reformat). Lint (second dep) produced `0 issues.`. Test (third dep) produced `[no test files]` and exited 0 (expected — Drop 1 has zero *_test.go files). Full chain green. REFUTED.
+
+- **11. Hidden Drop 2.1 hand-off breakage.** `git show 3cb4325:cmd/rak/root.go` (the Unit 1.3 close commit) vs current main/cmd/rak/root.go byte-compared: IDENTICAL. Both show the same `type Counts struct { Bytes, Lines, Words, Chars int64 }` at lines 12-18 and the same `func count(r io.Reader) (Counts, error)` at lines 41-78. No edits to cmd/rak/root.go landed in a205e4d (`git show --stat a205e4d` confirms — the commit touched only .golangci.yml, BUILDER_WORKLOG.md, drop PLAN.md, go.mod, magefile.go; cmd/rak/root.go is NOT in the diff). Hand-off boundary preserved. REFUTED.
+
+- **12. Section 0 leakage.** `Grep` for `Section 0|SEMI-FORMAL|^## Planner$|^## Builder$|^## QA Proof$|^## QA Falsification$|^## Convergence$|Premises / Evidence / Trace` across drop dir returned only citations *about* Section 0 (attack text inside BUILDER_QA_FALSIFICATION.md and BUILDER_QA_PROOF.md describing prior REFUTED attacks — those are narrative records of verification, not Section 0 blocks themselves) and one `## Planner` heading in drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/PLAN.md:26 (the durable Planner worklog section per WORKFLOW.md Phase 1, not a Section 0 pass). No `# Section 0 — SEMI-FORMAL REASONING` header anywhere in the drop dir. No leakage. REFUTED.
+
+- **13. Coverage `0.0%` edge case.** Live `mage coverage` run from main/ produced: `warning: no packages being tested depend on matches for pattern ./internal/...` then `?   github.com/evanmschultz/rak/cmd/rak [no test files]` then `total:  (statements) 0.0%`. Exit 0 confirmed. The `warning:` line is stderr advisory (zero-matching-packages pattern) — not a test failure. `go test` ran against the one existing package (cmd/rak, excluded from -coverpkg scope so it shows [no test files]) and exited 0; `go tool cover -func=coverage.out` emitted `total: (statements) 0.0%` and exited 0. Variant (a) is correct for Drop 1 where no internal/* packages exist per drop PLAN.md Notes line 155 + main/CLAUDE.md § "Build Verification" coverage row. Exit-0 on zero-coverage is the correct signal because `mage coverage` is explicitly report-only in Drop 1 (gate flips in Drop 9.3). REFUTED.
+
+- **14. Race condition between build-tag and import visibility.** Not reproducible — `mage build` succeeds (dispatched via `mage ci` live run, exit 0). Mage's target execution compiles magefile.go with the `mage` build tag active, which satisfies the `github.com/magefile/mage/mg` + `/sh` imports. `go build ./...` (what `mage build` shells out to) does NOT activate the `mage` tag, so magefile.go is excluded from that compile and its imports are invisible to it. Both behaviors coexist because the build-tag gates the two views of the tree. REFUTED.
+
+### Counterexamples
+
+None.
+
+### Findings
+
+None.
+
+### Routing
+
+Verdict pass → orchestrator proceeds to QA Proof (Round 1) sibling verdict aggregation per WORKFLOW.md Phase 5. If the proof sibling also passes, Unit 1.5 flips `in_progress → done`.
+
+### Hylla Feedback
+
+None — Hylla answered everything needed. Attack directions were either: non-Go (drop PLAN.md / main/CLAUDE.md / .golangci.yml / builder worklog / YAML workflow directory) outside Hylla's Go-only index; uncommitted-local (magefile.go byte-inspection, go.mod direct/indirect block, live mage execution, go mod tidy stability) covered by Read + Grep + Bash against working tree; commit compare (`git show 3cb4325:cmd/rak/root.go` vs current) which is the right tool for historical byte-compare — Hylla ingests at snapshot boundaries and wouldn't help with arbitrary commit compare. No Hylla query was run and no Hylla miss forced a fallback.

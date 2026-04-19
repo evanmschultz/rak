@@ -255,3 +255,69 @@ N/A — Unit 1.4 Round 2 is plan-wording verification against `go.mod`, `go.sum`
 ### Hylla Feedback
 
 N/A — Unit 1.4 Round 3 is plan-wording + cross-reference verification against `go.mod`, `go.sum`, and drop PLAN.md prose. Hylla indexes Go source files; non-Go artifacts (`go.mod`, `go.sum`, markdown) are out of its scope per main/CLAUDE.md § "Hylla Baseline". All evidence was Read / Grep / git-log-backed. No Hylla query run, no fallback forced.
+
+## Unit 1.5 — Round 1
+
+**Verdict:** pass
+
+**Commit under review:** `a205e4d feat(build): add magefile.go + minimal golangci.yml for drop 1`
+
+**Evidence (per acceptance bullet, drop PLAN.md lines 105–128):**
+
+1. **`//go:build mage` on line 1.** `Read main/magefile.go:1` returns `//go:build mage`. PASS.
+
+2. **Package `main` + `mg` import.** `Read main/magefile.go:10` returns `package main`. `Grep` for `github.com/magefile/mage/mg` in `main/magefile.go` matches line 17. `sh` also imported at line 18. PASS.
+
+3. **Exactly 9 targets via `mage -l`.** Ran `mage -l` from `main/`: output listed `build`, `ci`, `coverage`, `format`, `install`, `lint`, `planCheck`, `run`, `test` — exactly 9, matches CLAUDE.md § "Build Verification" set, no extras, no missing. `Grep` for `^func\s+` in `main/magefile.go` returned 10 funcs — the 9 exported targets + `gofumptClean` (unexported helper at line 65, correctly hidden from `mage -l` because lowercase). PASS.
+
+4. **Per-target command bodies match CLAUDE.md § "Build Verification" table.** Direct file inspection:
+   - `Build` (L22-27) uses `sh.RunV("go", "build", "./...")`. Matches. PASS.
+   - `Test` (L30-35) uses `sh.RunV("go", "test", "-race", "./...")`. Matches. PASS.
+   - `Format` (L38-43) uses `sh.RunV("gofumpt", "-l", "-w", ".")`. Matches. PASS.
+   - `Lint` (L46-54) uses `sh.RunV("go", "vet", "./...")` then `sh.RunV("golangci-lint", "run")`. Both errors wrapped independently; either failure fails `Lint`. Matches. PASS.
+   - `CI` (L58-61) uses `mg.SerialDeps(gofumptClean, Lint, Test)`. `gofumptClean` (L65-74) uses `sh.Output("gofumpt", "-l", ".")` then asserts trimmed output is non-empty to raise an error. Serial order gofumpt-clean then lint then test matches table. PASS.
+   - `Install` (L78-83) uses `sh.RunV("go", "install", "./cmd/rak")`. Matches. PASS.
+   - `Run` (L87-94) builds `args := []string{"run", "./cmd/rak"}` appended with `os.Args[1:]`, then calls `sh.RunV("go", args...)`. Passthrough semantics match table. PASS.
+   - `Coverage` (L99-112) uses `sh.RunV("go", "test", "-race", "-coverpkg=./internal/...", "-coverprofile=coverage.out", "./...")` then `sh.RunV("go", "tool", "cover", "-func=coverage.out")`. Matches table exactly. PASS.
+   - `PlanCheck` (L118-121) is a stub returning nil with a `// TODO(planCheck): real parity check — stub passes in Drop 1` comment. Drop PLAN.md line 121 explicitly permits a stub in Drop 1. PASS.
+
+5. **`install` doc comment contains `"dev-only; agents MUST NOT invoke."`.** `Grep` for `dev-only; agents MUST NOT invoke\.` in `main/magefile.go` matches line 76: `// Install is dev-only; agents MUST NOT invoke. Promotes the rak binary to`. PASS.
+
+6. **`coverage` doc comment contains `"report-only until Drop 9.3"` + variant (a) internal consistency.** `Grep` for `report-only until Drop 9\.3` in `main/magefile.go` matches line 97. Builder picked **variant (a)** (flag `-coverpkg=./internal/...` at line 102, no scope-tighten TODO). `Grep` for `TODO\(drop-9\.3\)` in `main/magefile.go` returned zero hits, which is the correct state for variant (a) per drop PLAN.md line 118. Internal consistency holds: flag is `./internal/...` AND no variant-(b) TODO exists. PASS.
+
+7. **`go mod tidy` stability + mage direct-not-indirect.** `Grep` for `github\.com/magefile/mage` in `main/go.mod` returned a single hit at line 7: `github.com/magefile/mage v1.17.1`. Line lives in the direct `require` block (lines 5-9) with NO `// indirect` marker. Contrast Unit 1.4 end-state (line 24 in the indirect block); tidy in Unit 1.5 correctly promoted mage to direct per drop PLAN.md line 122. BUILDER_WORKLOG.md Unit 1.5 § "Tidy stability" records three consecutive `go mod tidy` runs: Run 1 promoted mage (2-line diff), Runs 2 and 3 no-diff stable; `go mod verify` returned `all modules verified`. PASS.
+
+
+8. **mage target executions (all exit 0):**
+   - `mage build` exits 0, no output. PASS.
+   - `mage test` exits 0; standard no-test-files message for package `cmd/rak` (expected — Drop 1 has no `*_test.go`; acceptance is target wiring, not test existence, per PLAN.md line 124). PASS.
+   - `mage format` exits 0 on first run. Re-ran immediately, exit 0, `git diff --stat` clean (only unrelated untracked `.claude/` directory). Idempotent. PASS.
+   - `mage lint` exits 0 with zero issues. PASS.
+   - `mage ci` exits 0; chained gofumpt-clean (silent) then lint (zero issues) then test (no-test-files) all green. PASS.
+   - `mage coverage` exits 0; stderr warning about zero-matching internal packages is expected (variant a, drop PLAN.md line 118); stdout shows the no-test-files message and total statement coverage reports 0.0 percent. Exit 0 confirmed. PASS.
+   - `mage planCheck` exits 0 (stub). PASS.
+
+9. **`mage install` NOT invoked by QA.** Only the comment text was grep-verified (see bullet 5). Acceptance per PLAN.md line 128 is the comment text, not execution. PASS.
+
+10. **Fallback `.golangci.yml` is minimally scoped.** `Read main/.golangci.yml` shows v2 schema (`version: "2"`); `linters.exclusions.rules` contains exactly one rule: `path: cmd/rak/root\.go` with `linters: - unused`. The `unused` linter is suppressed ONLY for the `cmd/rak/root.go` path, not globally. No other defaults disabled, no extra linters enabled. Rationale preserved in the config header comment (lines 3-17) and BUILDER_WORKLOG.md Unit 1.5 § "Lint fallback": `count` and `Counts` are the pinned Drop 2.1 hand-off boundary that MUST survive intact. Scope is narrow and targeted. PASS.
+
+**Attack checks (falsification-adjacent):**
+
+- **No hidden extra target.** `Grep ^func\s+ main/magefile.go` returns 10 funcs total: 9 exported (Build, Test, Format, Lint, CI, Install, Run, Coverage, PlanCheck) + 1 unexported (`gofumptClean`). Unexported helpers do not appear in `mage -l` (confirmed). No extra target leaks into the canonical set.
+
+- **No hidden backticks in package doc comment.** Package doc comment spans lines 3-9 (between the `//go:build mage` tag + blank at lines 1-2 and `package main` at line 10). Grep for backticks in `main/magefile.go` returned hits only on function-level doc comments at lines 29, 37, 45, 56, 63, 85, 86, 96, 97 — all AFTER line 10. Package doc comment range (lines 3-9) has zero backticks. Builder surprise #1 is genuinely mitigated; function-level backticks embed into double-quoted strings in mage codegen (safe).
+
+- **Coverage flag-vs-comment internal consistency.** Flag at L102 is `./internal/...`. `TODO(drop-9.3)` grep returned 0 hits. Variant (a) invariants both hold; no cross-variant drift.
+- **`ci` does not invoke `install` or `coverage`.** `SerialDeps` deps are `gofumptClean, Lint, Test` only — matches acceptance (coverage is report-only, install is dev-only; neither should gate CI).
+- **`.golangci.yml` exclusion is not blanket.** Rule targets `cmd/rak/root\.go` specifically, not `.*` or `cmd/.*`. Single-linter-on-single-path scope is the minimum viable carve-out; Drop 2.1 removes it once `count` becomes used.
+- **`go.mod` has mage only once, in the direct block.** `Grep` returned a single hit at line 7, no second hit in the indirect block — builder tidy correctly removed the Unit 1.4 indirect entry when promoting.
+
+**Findings:** none.
+
+### Hylla Feedback
+
+None — Hylla answered everything needed. All evidence lookups for this review were either:
+- **Non-Go** (magefile source, `.golangci.yml`, `go.mod`, drop PLAN.md, BUILDER_WORKLOG.md) — covered by `Read` / `Grep` / `Bash` directly; `magefile.go` has a `//go:build mage` tag so even after drop-end reingest it is outside Hylla normal-build index surface, and `.golangci.yml` / `go.mod` are not Go source at all.
+- **Mage target execution** — covered by `Bash mage <target>`, not by static analysis tooling.
+
+No Hylla query was run and no fallback was forced.
