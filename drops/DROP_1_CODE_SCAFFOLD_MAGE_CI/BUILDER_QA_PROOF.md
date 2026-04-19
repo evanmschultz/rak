@@ -209,3 +209,49 @@ N/A — Unit 1.4 is a dep-add touching only `main/go.mod` and `main/go.sum`. Hyl
 ### Hylla Feedback
 
 N/A — Unit 1.4 Round 2 is plan-wording verification against `go.mod`, `go.sum`, BUILDER_WORKLOG.md prose, and drop PLAN.md prose. Hylla indexes Go source files; module files and markdown are out of its scope per main/CLAUDE.md § "Hylla Baseline". All evidence was grep / Read / git-log / diff-backed. No Hylla query run, no fallback forced.
+
+## Unit 1.4 — Round 3
+
+**Verdict:** pass
+
+**Scope:** Re-verify Unit 1.4's acceptance (drop PLAN.md lines 86–98) against the current committed tree after commit `6a4a387 docs(drop-1): unit 1.4 qa rounds 1-2, fix 1.5 stale cross-ref`, plus verify that the fix-shape-(b) patch at drop PLAN.md line 122 closes Round 2 Falsification's counterexample (stale quoted fragment `"go mod tidy is NOT run in this unit"` in Unit 1.5's acceptance) without introducing new issues. No builder re-spawn; this is a doc-edit verification round against the same committed Unit-1.4 code surface (`go.mod`, `go.sum`) that Rounds 1 and 2 reviewed.
+
+**Evidence (per Unit 1.4 acceptance bullet, drop PLAN.md lines 86–98):**
+
+1. **Heading — `### Unit 1.4 — Add mage dependency via `go get`` (line 86).** PASS. Read of drop PLAN.md line 86 returns `### Unit 1.4 — Add mage dependency via `go get`` with no trailing `+ go mod tidy` fragment. Heading remains in the Round-2-revised form.
+
+2. **State — `- **State:** done` (line 88).** PASS. Read of drop PLAN.md line 88 returns `- **State:** done`. Commit `6a4a387` is a docs-only edit to drop PLAN.md + BUILDER_QA_PROOF.md + BUILDER_QA_FALSIFICATION.md; the Unit 1.4 state correctly does not regress.
+
+3. **Bullet 1 — `grep -n 'github.com/magefile/mage' main/go.mod` ≥ 1 line, carries `// indirect`.** PASS. `Grep` on `main/go.mod` pattern `github.com/magefile/mage` returns exactly one match: `24:	github.com/magefile/mage v1.17.1 // indirect`. The `// indirect` marker is present on the same line. The forward-looking parenthetical ("1.5's magefile.go imports `github.com/magefile/mage/mg` which promotes it to direct via `go mod tidy` in 1.5") still describes work that has not yet happened — `main/magefile.go` does not exist on disk (confirmed via failed `Read` — "File does not exist"), so mage correctly remains `// indirect`.
+
+4. **Bullet 2 — Dep added via `go get` from `main/`, default env, no GOPROXY / GOSUMDB / checksum bypass.** PASS. BUILDER_WORKLOG.md Unit 1.4 Round 1 `### Commands run (actor-annotated)` records the builder-denied → orch-denied → dev-authorized `go get github.com/magefile/mage` chain. All `go get` invocations are plain form; no proxy / sum / checksum bypass flags. Actor-escalation path matches main/CLAUDE.md § "Dependencies" → "Bootstrap carve-out". Worklog is unchanged by commit `6a4a387` and remains the canonical audit record.
+
+5. **Bullet 3a — `go mod tidy` stability-assertion verification deferred to Unit 1.5 (line 94).** PASS. Read of drop PLAN.md line 94 returns the deferral bullet explaining that `go 1.26.1` tidy prunes any module no source imports; since no `.go` file imports `github.com/magefile/mage/mg` until 1.5's magefile.go lands, tidy against 1.4's end-state would strip mage. The stability assertion is therefore only meaningful once magefile.go exists, and 1.5's acceptance owns it. Deferral back-reference is intact.
+
+6. **Bullet 3b — Unit-end state is `go get`-restored, not tidy-stable (line 95).** PASS. Read of drop PLAN.md line 95 returns the long explanatory bullet documenting the dev's two-tidy + one-`go get`-restore sequence, asserting `go get` is the final module-file-mutating action of the unit. Corroborating signal: `main/go.mod` line 24 still contains `github.com/magefile/mage v1.17.1 // indirect` — a tidy-last sequence under `go 1.26.1` would have stripped mage (since no source imports `mg` yet). Mage's survival into the committed state confirms `go get` ran after tidy. Consistent with the revised bullet's narrative.
+
+7. **Bullet 4 — `grep -c 'github.com/magefile/mage' main/go.sum` ≥ 1 (line 96).** PASS. `Grep` on `main/go.sum` pattern `github.com/magefile/mage` returns exactly two matches: `34:github.com/magefile/mage v1.17.1 h1:F1d2lnLSlbQDM0Plq6Ac4NtaHxkxTK8t5nrMY9SkoNA=` (h1 content checksum) and `35:github.com/magefile/mage v1.17.1/go.mod h1:Yj51kqllmsgFpvvSzgrZPK9WtluG3kUhFaBUVLo4feA=` (go.mod checksum). Count is 2, satisfies ≥ 1.
+
+8. **Bullet 5 — `head -n 1 main/go.mod` == `module github.com/evanmschultz/rak` (no 1.2 regression) (line 97).** PASS. Read of `main/go.mod` line 1 returns exactly `module github.com/evanmschultz/rak`. Unit 1.2's module-path rewrite preserved byte-for-byte; commit `6a4a387` is markdown-only and did not touch `go.mod`.
+
+**Round-3-specific fix verification (the Round 2 Falsification counterexample):**
+
+9. **Line 122 fix-shape (b) applied — stale quoted fragment removed, replaced by acceptance-bullet + Notes-entry referent.** PASS. Read of drop PLAN.md line 122 returns the Unit 1.5 tidy bullet whose parenthetical now reads `(deferred from 1.4 per Unit 1.4 acceptance + Notes entry "go mod tidy stability-assertion deferred to 1.5")` — referring to Unit 1.4 by (a) its acceptance (which in current form at lines 94–95 no longer contains the removed wording) and (b) the Notes entry by its exact heading phrase `go mod tidy stability-assertion deferred to 1.5`. Both references point at content that currently exists in the document; neither quotes the removed `"go mod tidy is NOT run in this unit"` wording.
+
+10. **No residual instance of the removed wording anywhere in drop PLAN.md.** PASS. `Grep` of drop PLAN.md for pattern `go mod tidy is NOT run` returned `No matches found` (zero hits, document-wide). The stale-fragment counterexample from Round 2 Falsification is fully resolved — no sibling unit and no Notes entry quotes the removed wording.
+
+11. **Referent Notes entry at drop PLAN.md line 149 exists and matches the parenthetical's citation.** PASS. Read of drop PLAN.md line 149 returns `- **`go mod tidy` stability-assertion deferred to 1.5 (ordering hole).**` followed by the explanatory prose about the `go 1.26.1` prune behavior + the tidy-ran-twice-but-assertion-not-actionable history + the plan amendment date. The bolded heading string `` `go mod tidy` stability-assertion deferred to 1.5 `` matches the parenthetical's referent at line 122 (`Notes entry "go mod tidy stability-assertion deferred to 1.5"`) — the `(ordering hole)` trailing qualifier on the Note's heading is a disambiguating suffix; the cited phrase is a proper prefix of the Note's heading, so the reference unambiguously identifies the right Note.
+
+**Cross-checks:**
+
+- **Commit `6a4a387` scope.** `git log --oneline -5` from `main/` shows `6a4a387 docs(drop-1): unit 1.4 qa rounds 1-2, fix 1.5 stale cross-ref` as HEAD. Per the spawn prompt's commit-contents statement, `6a4a387` contains (a) the line-122 fix and (b) Round 2 Proof + Round 2 Falsification appends to the two `BUILDER_QA_*.md` files. All three edits are markdown-only (drop PLAN.md + BUILDER_QA_PROOF.md + BUILDER_QA_FALSIFICATION.md); no `.go`, `go.mod`, or `go.sum` changes. Consistent with "plan-wording + durable QA appends; no builder re-spawn" for Round 3.
+- **Unit 1.4 acceptance (lines 86–98) remains internally coherent.** The bullet-3a deferral narrative + bullet-3b `go get`-restored narrative + Notes-line-149 ordering-hole explanation + Unit-1.5-line-122 deferred-stability-assertion owner all tell the same story with consistent vocabulary: tidy strips mage at 1.4's end-state because no source imports `mg`; `go get` restored mage; 1.5's magefile.go (with its `mg` import) finally lets tidy settle + promotes mage to direct. No contradiction across the four artifacts; Round 2's coherence verdict carries forward unchanged.
+- **Unit 1.5 acceptance (line 122) is now internally clean AND externally coherent.** Internally: the bullet still holds the two-part deferred-from-1.4 assertion (tidy-stability + direct-not-indirect promotion). Externally: the parenthetical's references (`Unit 1.4 acceptance` + `Notes entry "go mod tidy stability-assertion deferred to 1.5"`) both resolve to current content in the document, forming a valid reference graph with no dangling pointers. Fix-shape (b) achieves the stated goal without collateral.
+- **No over-broad fix.** `Grep` on drop PLAN.md for `go mod tidy` returns the expected set of legitimate occurrences (acceptance bullets 3a/3b at lines 94–95, Unit 1.5 bullet at line 122, Notes lines 149/150/151). None of them quote the removed wording; all of them are intentional references to the tidy concept as used across 1.4's ordering-hole narrative + 1.5's deferred-owner acceptance. Fix was surgical, not a blanket rewrite.
+- **Unit 1.4 end-state evidence unchanged since Round 2.** `main/go.mod` line 24, `main/go.sum` lines 34–35, `main/go.mod` line 1, and BUILDER_WORKLOG.md Unit 1.4 Round 1 commands-run chain are all byte-identical to what Rounds 1 and 2 verified. Code surface is stable; only the drop PLAN.md cross-reference prose was modified.
+
+**Findings:** none.
+
+### Hylla Feedback
+
+N/A — Unit 1.4 Round 3 is plan-wording + cross-reference verification against `go.mod`, `go.sum`, and drop PLAN.md prose. Hylla indexes Go source files; non-Go artifacts (`go.mod`, `go.sum`, markdown) are out of its scope per main/CLAUDE.md § "Hylla Baseline". All evidence was Read / Grep / git-log-backed. No Hylla query run, no fallback forced.
