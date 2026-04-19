@@ -1,15 +1,20 @@
-// Package main implements a Fang/Cobra version of a small wc-style CLI.
+// Package main implements the rak CLI entry point.
 package main
 
 import (
 	"context"
 	"os"
+	"syscall"
 
 	"github.com/charmbracelet/fang"
 )
 
 func main() {
-	if err := fang.Execute(context.Background(), newRootCmd()); err != nil {
+	if err := fang.Execute(
+		context.Background(),
+		newRootCmd(),
+		fang.WithNotifySignal(os.Interrupt, syscall.SIGTERM),
+	); err != nil {
 		os.Exit(1)
 	}
 }

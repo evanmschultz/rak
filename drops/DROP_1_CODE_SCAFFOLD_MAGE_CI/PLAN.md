@@ -68,7 +68,7 @@ Six atomic units implementing the expected decomposition in main/PLAN.md lines 7
 
 ### Unit 1.3 — Rewrite root command for rak shape + fang signal wiring
 
-- **State:** todo
+- **State:** done
 - **Paths:** `main/cmd/rak/root.go`, `main/cmd/rak/main.go`
 - **Packages:** `github.com/evanmschultz/rak/cmd/rak`
 - **Acceptance:**

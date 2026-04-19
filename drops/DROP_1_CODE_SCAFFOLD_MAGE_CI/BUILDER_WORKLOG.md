@@ -112,3 +112,47 @@ None. The Round 1 edit was correct from the start; the pause was a specification
 ### Hylla Feedback
 
 N/A — verification-only round against `go.mod` + scoped greps. Hylla indexes Go files only and would not cover `go.mod` regardless; no Go-semantic lookup needed.
+
+## Unit 1.3 — Round 1
+
+### Files touched
+
+- `main/cmd/rak/root.go` (rewritten: 177 → 78 LOC; removed `Config`, `configFromCommand`, `run`, `printCounts`; rewrote `newRootCmd` for `rak [path]` shape with `MaximumNArgs(1)` and stub `RunE`; kept `type Counts struct` + `func count(r io.Reader) (Counts, error)` verbatim as Drop 2.1 hand-off boundary).
+- `main/cmd/rak/main.go` (15 → 20 LOC; added `syscall` import, passed `fang.WithNotifySignal(os.Interrupt, syscall.SIGTERM)` as third arg to `fang.Execute`; updated package doc comment from the stash's wc-style phrasing to rak-accurate one-liner).
+- `main/drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/PLAN.md` (Unit 1.3 `State: todo → in_progress → done`).
+
+### Design decisions
+
+- **Deleted `Config` / `configFromCommand` / `run` / `printCounts` outright** rather than stubbing them. Rationale: acceptance lets the unit simplify/delete anything that no longer serves the rewritten command surface, LOC target was ≤ ~150, and the stashed shape kept root.go at 177 (Unit 1.1 falsification flagged this). Deleting the four obsolete symbols drops the file to 78 LOC with no downstream consumer to worry about — Drop 2.1 lifts `count` + `Counts` only, both of which are preserved verbatim.
+- **Import list trimmed** to `bufio`, `fmt`, `io`, `unicode`, `github.com/spf13/cobra`. Dropped `os` (was only used by `run`'s `os.Open` + `printCounts`'s `os.Stderr`) and `strings` (was only used by `printCounts`'s `strings.Join`). `fmt` survives — now used by `RunE`'s `fmt.Errorf` instead of by `printCounts`.
+- **`Short` + `Long` wording:** kept plain and forward-looking. `Short`: "Summarize code in a directory: line, word, and token counts by language" (one line, pitches the eventual v0.1.0 surface). `Long`: two-sentence paragraph that names the v0.1.0 behavior (walk, detect, report by dir + language) plus a one-line caveat noting Drop 1 is stub-only and real counting lands in subsequent drops. No flag documentation included — there are no flags in Drop 1's shape.
+- **`c.Context()` threading:** the stub returns immediately, so nothing actually needs the context yet. To satisfy the forward-looking acceptance constraint ("RunE threads `c.Context()` down rather than inventing a fresh `context.Background()`") without adding a fake consumer, I did `_ = c.Context()` with a comment explaining the intent. This compiles clean, keeps the stub minimal, and signals the right shape to whoever lands Drop 2.3.
+- **Preserved verbatim:** `type Counts struct { Bytes, Lines, Words, Chars int64 }` and `func count(r io.Reader) (Counts, error)` copied byte-for-byte from the pre-edit file (comments included). These are the Drop 2.1 hand-off surface — preserving them intact means 2.1's lift is mechanical.
+- **Package doc comment on main.go** rewritten from `// Package main implements a Fang/Cobra version of a small wc-style CLI.` to `// Package main implements the rak CLI entry point.`. The stashed phrasing referenced `fwc`'s wc-style lineage, which no longer matches the command surface after 1.3.
+
+### Grep verification (post-edit)
+
+- `grep -n 'BoolP' main/cmd/rak/root.go` → 0 lines. PASS.
+- `grep -n 'func Count(' main/cmd/rak/root.go` → 0 lines. PASS.
+- `grep -n 'func count(' main/cmd/rak/root.go` → 1 line (`root.go:42`). PASS.
+- `grep -n 'type Counts struct' main/cmd/rak/root.go` → 1 line (`root.go:13`). PASS.
+- `grep -n 'not implemented — see drop 2' main/cmd/rak/root.go` → 1 line (`root.go:36`). PASS. (Em dash U+2014, not ASCII `--`.)
+- `grep -n 'WithNotifySignal' main/cmd/rak/main.go` → 1 line (`main.go:16`). PASS.
+- `grep -n 'syscall.SIGTERM' main/cmd/rak/main.go` → 1 line (`main.go:16`). PASS.
+- `grep -n 'spf13/cobra' main/cmd/rak/main.go` → 0 lines. PASS.
+- `wc -l main/cmd/rak/root.go` → 78 (≤ ~150 target). PASS.
+- `wc -l main/cmd/rak/main.go` → 20 (≤ ~30 target). PASS.
+
+### LSP verification
+
+- `documentSymbol` on `main/cmd/rak/root.go` returned exactly three top-level symbols: `Counts` (struct, line 13), `newRootCmd` (func, line 21), `count` (func, line 42). No leftover `Config`, `configFromCommand`, `run`, or `printCounts` — confirms deletions landed cleanly.
+- `goToDefinition` on `newRootCmd` from `main.go:15:3` → resolved to `root.go:21:6`. Clean intra-package resolution; the split between files is not breaking symbol lookup.
+- `goToDefinition` on `context` from `main.go:14:4` → resolved to `main.go:5:2` (the `"context"` import). Also clean.
+
+### Surprises
+
+None. The acceptance criteria were mechanical and the grep + LSP results line up exactly.
+
+### Hylla Feedback
+
+N/A — the change is all deletion + local rewrite within a single file, grounded in the stashed source plus drop PLAN.md acceptance. No cross-package symbol search was needed, so no Hylla query was run. For reference, Hylla would have been the right tool if a cross-package caller existed, but `cmd/rak` has no other package touching `count` / `Counts` yet (Drop 2.1 introduces the first one).
