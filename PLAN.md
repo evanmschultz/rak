@@ -2,7 +2,7 @@
 
 **Status:** Durable system of record for the overarching drop tree. Each drop's per-phase worklog lives under `main/drops/DROP_N_<NAME>/` — see `main/drops/WORKFLOW.md` for the canonical lifecycle. PLAN.md is updated **after** a drop closes (state flip + any structural changes that came out of the work) and **after** a planner restructures the tree. Not edited mid-build.
 
-**Workflow:** see `main/drops/WORKFLOW.md` for the per-drop lifecycle (plan → plan-QA → discuss → revise → loop → build → build-QA → verify → closeout). PLAN.md owns the overarching plan; WORKFLOW.md owns the phase mechanics; `main/CLAUDE.md` owns role boundaries + Go quality rules.
+**Workflow:** see `main/drops/WORKFLOW.md` for the per-drop lifecycle (plan → plan-QA → discuss → revise → loop → build → build-QA → verify → close). PLAN.md owns the overarching plan; WORKFLOW.md owns the phase mechanics; `main/CLAUDE.md` owns role boundaries + Go quality rules.
 
 ## Project Intent
 
@@ -28,7 +28,7 @@
 13. **Skip for v1 (YAGNI)**: cyclomatic complexity, churn, diff-vs-ref, caching.
 14. **Progress bar**: laslig has spinner (incl. `meter` style) + a transient `Activity` live-block in `gotestout`, but no named `Progress` primitive for a known-total percentage fill. Evan will add a progress bar to laslig when rak genuinely needs it; until then, spinner + "processed N files" counter is enough.
 15. **Orchestration**: never-edits-Go rule applies from the first builder drop onward. Bootstrap commit is docs + license + `.gitignore` only — no Go.
-16. **Coordination model**: drop = directory under `main/drops/` (e.g. `main/drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/`). Per-drop lifecycle (planner → plan-QA → discuss → revise → builder → build-QA → verify → closeout) lives in `main/drops/WORKFLOW.md`. PLAN.md tracks overarching containers + state; per-phase mechanics live in WORKFLOW.md; role boundaries live in `main/CLAUDE.md`. Subagents are global (`~/.claude/agents/`) but are spawned with a paradigm-override directive that tells them to ignore Tillsyn-coupled instructions and follow WORKFLOW.md instead.
+16. **Coordination model**: drop = directory under `main/drops/` (e.g. `main/drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/`). Per-drop lifecycle (planner → plan-QA → discuss → revise → builder → build-QA → verify → close) lives in `main/drops/WORKFLOW.md`. PLAN.md tracks overarching containers + state; per-phase mechanics live in WORKFLOW.md; role boundaries live in `main/CLAUDE.md`. Subagents are global (`~/.claude/agents/`) but are spawned with a paradigm-override directive that tells them to ignore Tillsyn-coupled instructions and follow WORKFLOW.md instead.
 17. **Subcommand shape**: single root command — `rak [path]`. No subcommands in v0.1.0. All current flags (`--tokens`, `--lang`, `--as`, `--depth`, `--sort`, `--format`) are orthogonal to the operation, not distinct operations. Subcommands can be added later without breaking the root UX; the reverse is painful.
 18. **Stdin behavior**: on TTY-stdin with no path, hang and read stdin in `wc`-parity mode (matches `wc` convention — user terminates with Ctrl-D / EOF). Pipe + no path → `wc`-parity on stream. Pipe + `--as <lang>` → code-aware counting on stream.
 19. **Sort default**: `lines desc` for the directory view. `--sort {lines,files,bytes,tokens,name}`; `--sort-asc` flips direction.
@@ -55,7 +55,7 @@ The plan below is the working shape. Each row is a level_1 container drop. **Eac
 
 | Drop | State | Blocked by | Drop dir |
 |---|---|---|---|
-| `DROP_0_BOOTSTRAP` | done | — | (out-of-band; predates this workflow — see `WIKI.md` § "Current State") |
+| `DROP_0_BOOTSTRAP` | done | — | (out-of-band; predates this workflow) |
 | `DROP_1_CODE_SCAFFOLD_MAGE_CI` | done | — | `main/drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/` |
 | `DROP_2_COUNTING_DOMAIN_RENDER_BOUNDARY` | todo | DROP_1 | `main/drops/DROP_2_COUNTING_DOMAIN_RENDER_BOUNDARY/` |
 | `DROP_3_DIRECTORY_WALK_GITIGNORE_DEPTH` | todo | DROP_2 | `main/drops/DROP_3_DIRECTORY_WALK_GITIGNORE_DEPTH/` |
@@ -73,7 +73,7 @@ Drop dirs are stamped from `main/drops/_TEMPLATE/` by the orchestrator at Phase 
 ```
 DROP_0 — Bootstrap (done, out-of-band)
   • GH repo created
-  • CLAUDE.md mirrored at bare-root + main/, WIKI.md, README.md, LICENSE, .gitignore landed
+  • CLAUDE.md mirrored at bare-root + main/, README.md, LICENSE, .gitignore landed
 
 DROP_1 — Code scaffold + mage + CI
   1.1 Move stashed files into target layout per decision 27: go.mod + go.sum to main/;
@@ -175,7 +175,7 @@ DROP_9 — Release + docs
 The Drop 1 dir does not yet exist. Next session is a **work orchestrator launched from `main/`** (not a steward from the bare-root) that runs Phase 1 of WORKFLOW.md against Drop 1:
 
 1. `cd /Users/evanschultz/Documents/Code/hylla/rak/main && claude`.
-2. Read `main/WIKI.md`, `main/CLAUDE.md`, `main/PLAN.md`, `main/drops/WORKFLOW.md` on cold-start (CLAUDE.md auto-loads; the others do not).
+2. Read `main/CLAUDE.md`, `main/PLAN.md`, `main/drops/WORKFLOW.md` on cold-start (CLAUDE.md auto-loads; the others do not).
 3. Stamp drop dir: copy `main/drops/_TEMPLATE/` → `main/drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/`. Set its `PLAN.md` header `state: planning`. Commit (`docs(drop-1): scaffold drop dir from template`).
 4. Spawn `go-planning-agent` per WORKFLOW.md § "Phase 1 — Plan" with the paradigm-override directive (see WORKFLOW.md § "Subagent Spawn Prompts"). Planner decomposes Drop 1 into the six expected units (1.1–1.6 above), each with `paths` / `packages` / `acceptance` / `blocked_by`.
 5. Continue through Phase 2 (plan-QA), Phase 3 (discuss + cleanup), looping until plan accepted, then Phases 4–7 unit by unit.
@@ -197,4 +197,4 @@ From the prior `fwc` prototype at `/Users/evanschultz/Documents/Code/hylla/rak/`
 - `/tmp/rak-stash/PLAN.md` — obsolete `fwc` plan. Useful phasing notes folded into the drop hierarchy above; not copied into `main/`.
 - `/tmp/rak-stash/test.txt` — 342KB coding-challenge fixture. Not copied into `main/`; rak will generate its own test corpus.
 
-Entire `/tmp/rak-stash/` directory is deleted in Drop 1 closeout.
+Entire `/tmp/rak-stash/` directory is deleted in Drop 1 close.

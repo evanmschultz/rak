@@ -7,12 +7,12 @@ This file lives in the **`main/` worktree** at `/Users/evanschultz/Documents/Cod
 Rak does **not** use Tillsyn. Three documents own the coordination model; they do not duplicate each other:
 
 - **`main/PLAN.md`** — overarching drop tree (10 level_1 container drops + state + `blocked_by` + per-drop dir link). Updated *after* a drop closes or *after* a planner restructures the tree. Not edited mid-build.
-- **`main/drops/WORKFLOW.md`** — canonical per-drop lifecycle (planner → plan-QA → discuss → revise → builder → build-QA → verify → closeout). Owns: drop directory shape, file lifecycles, phase order, the **Agent Spawn Contract** (preamble pasted into every subagent spawn), restart recovery.
+- **`main/drops/WORKFLOW.md`** — canonical per-drop lifecycle (planner → plan-QA → discuss → revise → builder → build-QA → verify → close). Owns: drop directory shape, file lifecycles, phase order, the **Agent Spawn Contract** (preamble pasted into every subagent spawn), restart recovery.
 - **`main/CLAUDE.md`** (this file) — orchestrator role boundaries, agent bindings, evidence sources, Go quality rules, mage discipline, commit format, safety. Does not own per-phase mechanics — those live in WORKFLOW.md.
 
-Per-drop work artifacts live under `main/drops/DROP_N_<NAME>/`. The directory is stamped from `main/drops/_TEMPLATE/` at Phase 1 start and persists through closeout.
+Per-drop work artifacts live under `main/drops/DROP_N_<NAME>/`. The directory is stamped from `main/drops/_TEMPLATE/` at Phase 1 start and persists through close.
 
-- **Read `main/WIKI.md` + `main/PLAN.md` + `main/drops/WORKFLOW.md` at session start and after every compaction.** CLAUDE.md auto-loads; the other three do not — read them deliberately on the first turn after cold-start or compaction before substantive orchestration.
+- **Read `main/PLAN.md` + `main/drops/WORKFLOW.md` at session start and after every compaction.** CLAUDE.md auto-loads; the other two do not — read them deliberately on the first turn after cold-start or compaction before substantive orchestration.
 - **Use Tillsyn-style trackers for nothing.** Do NOT use Claude Code's built-in `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` / `TaskStop` / `TaskOutput` — they evaporate on compaction/restart. Decompose finer procedural granularity into atomic units inside the active drop's `PLAN.md` instead.
 - **No markdown files outside `main/drops/` for work tracking.** Per-drop dirs are the worklog substrate.
 
@@ -30,7 +30,7 @@ Full lifecycle in `main/drops/WORKFLOW.md`. Drop tree in `main/PLAN.md`.
 
 The parent Claude Code session launched by the dev from this directory is always **the orchestrator**. Every other role (builder, qa-proof, qa-falsification, planning, research) is a subagent spawned via the `Agent` tool.
 
-**CRITICAL: The orchestrator NEVER writes Go code.** The parent session must not use `Edit`, `Write`, or any other tool to modify `.go` source, test, or `magefile.go` files. Every code change — every single one — goes through a `go-builder-agent` subagent. Orchestrator reads code for planning/research; edits markdown only (this file, `WIKI.md`, `PLAN.md`, drop dir mds, `LEDGER.md`, `README.md`, agent `.md` files).
+**CRITICAL: The orchestrator NEVER writes Go code.** The parent session must not use `Edit`, `Write`, or any other tool to modify `.go` source, test, or `magefile.go` files. Every code change — every single one — goes through a `go-builder-agent` subagent. Orchestrator reads code for planning/research; edits markdown only (this file, `PLAN.md`, drop dir mds, `README.md`, agent `.md` files).
 
 ### Agent Bindings
 
@@ -46,7 +46,7 @@ The agents are **global** (`~/.claude/agents/`) and reference Tillsyn tooling th
 
 ## Build-QA-Commit Loop
 
-Per-drop lifecycle is canonical in `main/drops/WORKFLOW.md` (Phases 1–7: plan, plan-QA, discuss + cleanup, build, build-QA, verify, closeout). This file does not duplicate the phase steps.
+Per-drop lifecycle is canonical in `main/drops/WORKFLOW.md` (Phases 1–7: plan, plan-QA, discuss + cleanup, build, build-QA, verify, close). This file does not duplicate the phase steps.
 
 **Follow WORKFLOW.md's phases in order, exactly as written. No skipped phases. No reordered phases. No shortcut paths.** If a phase looks redundant for a particular drop, return the question to the dev — do not unilaterally drop it. Phase exits gate the next phase (see WORKFLOW.md § "Phase Order").
 
@@ -84,7 +84,7 @@ For semantic, high-risk, or ambiguous work:
 - **Conclusion** — the claim.
 - **Unknowns** — what remains uncertain. Routed to the orchestrator (subagents return Unknowns in their final response; orchestrator surfaces to dev).
 
-Short and inspectable. Full Section 0 spec lives in `~/.claude/CLAUDE.md` § "Semi-Formal Reasoning — Section 0 Response Shape". The Agent Spawn Contract preamble (in WORKFLOW.md) requires Section 0 from every subagent — but Section 0 stays in the orchestrator-facing response **only**, never inside `PLAN.md` / `BUILDER_WORKLOG.md` / `BUILDER_QA_*.md` / `PLAN_QA_*.md` / `CLOSEOUT.md`.
+Short and inspectable. Full Section 0 spec lives in `~/.claude/CLAUDE.md` § "Semi-Formal Reasoning — Section 0 Response Shape". The Agent Spawn Contract preamble (in WORKFLOW.md) requires Section 0 from every subagent — but Section 0 stays in the orchestrator-facing response **only**, never inside `PLAN.md` / `BUILDER_WORKLOG.md` / `BUILDER_QA_*.md` / `PLAN_QA_*.md`.
 
 ## QA Discipline
 
@@ -97,7 +97,7 @@ Plan-QA and build-QA both run as parallel proof + falsification spawns. Plan-QA 
 
 ## Orchestrator Role Boundaries
 
-- **Orchestrator** (this parent Claude Code session) — plans, routes, delegates, cleans up. **Never edits Go code or `magefile.go`.** May edit markdown docs (this file, `WIKI.md`, `PLAN.md`, drop dir mds, `README.md`, `LEDGER.md`, `REFINEMENTS.md`, agent `.md` files).
+- **Orchestrator** (this parent Claude Code session) — plans, routes, delegates, cleans up. **Never edits Go code or `magefile.go`.** May edit markdown docs (this file, `PLAN.md`, drop dir mds, `README.md`, agent `.md` files).
 - **Builder subagent** (`go-builder-agent`) — the ONLY role that edits Go code. Spawned via the `Agent` tool with the spawn contract preamble + builder appendix.
 - **QA subagents** (`go-qa-proof-agent`, `go-qa-falsification-agent`) — gated to QA roles. Read, verify, write to their own `*_QA_*.md` file, return verdict to orch, die. Never edit code.
 - **Planner subagent** (`go-planning-agent`) — fills the drop's `PLAN.md` Planner section (Phase 1) and revises it across plan-QA rounds (Phase 3). Never edits code.
@@ -267,7 +267,7 @@ Run `mage ci` before every push. `mage coverage` is report-only from Drop 1.5 on
 
 ### Markdown Authoring
 
-- Drop dir mds (`PLAN.md`, `BUILDER_WORKLOG.md`, `*_QA_*.md`, `CLOSEOUT.md`) are markdown-first. Use fenced code blocks for snippets, tables for structured data, headings for the conventions in `main/drops/WORKFLOW.md`. No HTML.
+- Drop dir mds (`PLAN.md`, `BUILDER_WORKLOG.md`, `*_QA_*.md`) are markdown-first. Use fenced code blocks for snippets, tables for structured data, headings for the conventions in `main/drops/WORKFLOW.md`. No HTML.
 
 ## Skill and Slash Command Routing
 
@@ -285,7 +285,7 @@ Note: `/plan-from-hylla` is a Tillsyn-coupled global skill — rak does not use 
 
 Conventional-commit: `type(scope): message`. All lowercase except proper nouns, acronyms (HTTP, CLI, JSON, TUI). Concise — describe what changed, not how.
 
-**Subject-line only. No body. No bullet lists in the commit message.** The diff records what changed file-by-file; the subject line carries the human summary. Do not enumerate per-file changes in a body — that content belongs in the PR description, WIKI changelog, or LEDGER entry, not in `git log`.
+**Subject-line only. No body. No bullet lists in the commit message.** The diff records what changed file-by-file; the subject line carries the human summary. Do not enumerate per-file changes in a body — that content belongs in the PR description, not in `git log`.
 
 Types: `feat`, `fix`, `refactor`, `chore`, `docs`, `test`, `ci`, `style`, `perf`.
 
@@ -322,5 +322,5 @@ Filesystem + git, no Tillsyn calls. Full procedure in `main/drops/WORKFLOW.md` �
 2. `git log --oneline -20` — recent commits.
 3. Read `main/PLAN.md` — container states.
 4. List `main/drops/*/PLAN.md` headers — per-drop phase state.
-5. Per active drop: presence of `PLAN_QA_*.md` = mid-plan-QA loop; absence + `BUILDER_WORKLOG.md` exists = mid-build; `CLOSEOUT.md` with `state: done` = drop closed.
+5. Per active drop: presence of `PLAN_QA_*.md` = mid-plan-QA loop; absence + `BUILDER_WORKLOG.md` exists = mid-build; drop's `PLAN.md` header `state: done` = drop closed.
 6. Per active unit: scan latest `## Unit N.M — Round K` heading in `BUILDER_WORKLOG.md` + both `BUILDER_QA_*.md` to figure out next step.

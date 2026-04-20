@@ -6,7 +6,7 @@ It's `wc` for a whole project — walk directories, split counts by file type an
 
 ## Status
 
-**Scaffold.** Project layout and rules are in place; real functionality lands incrementally. See [`main/WIKI.md`](./WIKI.md) for current state and [`main/CLAUDE.md`](./CLAUDE.md) for how this project is built.
+**Scaffold.** Project layout and rules are in place; real functionality lands incrementally. See [`main/PLAN.md`](./PLAN.md) for the drop tree and [`main/CLAUDE.md`](./CLAUDE.md) for how this project is built.
 
 ## Install
 
