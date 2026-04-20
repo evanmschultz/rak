@@ -130,7 +130,7 @@ Six atomic units implementing the expected decomposition in main/PLAN.md lines 7
 
 ### Unit 1.6 — Add .github/workflows/ci.yml running mage ci
 
-- **State:** todo
+- **State:** done
 - **Paths:** `main/.github/workflows/ci.yml`
 - **Packages:** — (YAML only, non-Go file)
 - **Acceptance:**

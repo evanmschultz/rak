@@ -287,3 +287,56 @@ None — Hylla answered everything needed. All evidence lookups were either:
 - **Uncommitted-local** (the just-written `main/magefile.go`) — covered by `Read` + `git diff`, not eligible for Hylla until the drop-end reingest.
 
 No Hylla query was run and no Hylla miss forced a fallback.
+
+## Unit 1.6 — Round 1
+
+### Files touched
+
+- `main/.github/workflows/ci.yml` (new; 42 LOC; single `ci` job on `ubuntu-latest` running `mage ci` on push/PR to `main`).
+- `main/drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/PLAN.md` (Unit 1.6 `State: todo → in_progress → done`).
+
+### Design decisions
+
+- **Action versions pinned to stable major tags.** `actions/checkout@v4`, `actions/setup-go@v5`. Both are the current stable majors; Context7 shows setup-go@v5 accepts `go-version: '1.26.x'` + `cache` + `cache-dependency-path` inputs. Pinning to `@v4`/`@v5` rather than `@main`/`@master` is supply-chain hygiene (per unit background context) and matches the stable policy all examples in the setup-go README use. Context7 also shows a v6 series exists, but v5 is the widely-documented stable major — picked for conservatism. Upgrading is a mechanical tag bump when the dev wants it.
+- **Go version via `go-version: '1.26.x'` not a `go-version-file` pointer.** `main/go.mod` line 3 is `go 1.26.1`. `go-version: '1.26.x'` matches the minor-series pin and lets `actions/setup-go` grab the latest patch in the `1.26.*` range, which matches "Go 1.26+" on the acceptance bullet without locking CI to `1.26.1` exactly (a minor-patch bump on the GitHub-hosted runner is safe and expected). `go-version-file: 'go.mod'` was the alternative; it would pin CI to `1.26.1` exactly. Using `.x` is the idiomatic choice when the project wants latest-patch-in-series, which is rak's stance until a concrete reason to pin tighter arises. Forward-looking: Drop 9's tool-pinning follow-up (`main/PLAN.md` line 188) is the right place to revisit if stricter pinning is wanted.
+- **No `working-directory` override.** Verified via `git ls-tree -r HEAD --name-only`: on the remote (`origin/main` at `github.com/evanmschultz/rak`), `go.mod`, `magefile.go`, `go.sum`, `cmd/`, `drops/`, `.github/` all live at **repo root**. The local `main/` directory is the *worktree checkout name* — in the pushed repo it maps to repo root. So CI's default working directory (the checkout root) is where `mage ci` must run. An explicit `working-directory: main` would be wrong — there is no `main/` subdir on the remote. This was a QA falsification attack I caught in Section 0; the fix was to confirm remote layout before writing the YAML.
+- **Tool install order: mage first, then gofumpt, then golangci-lint.** All three via `go install <module>@latest` using the Go toolchain provisioned by `actions/setup-go`. Unpinned per drop PLAN.md Notes line 156 + main/PLAN.md Follow-Ups line 188 ("Pin `gofumpt` + `golangci-lint` versions in Drop 9"). The install ordering doesn't matter functionally — all three land on PATH before `mage ci` runs — but putting `mage` first matches the mental order "install the runner, then the tools it runs".
+- **`cache: true` + `cache-dependency-path: go.sum`.** Built-in Go module cache keyed on `go.sum` (actions/setup-go docs show this as the default-on behavior in v5+). Shaves cold-start time off the CI run without changing the semantics. Disabling the cache would have no functional effect beyond slower runs, so leaving it on is the conservative default.
+- **Concurrency group** `ci-${{ github.workflow }}-${{ github.ref }}` with `cancel-in-progress: true`. Standard hygiene (per unit background context: "Include it if it lands cleanly; it cancels superseded runs on the same ref"). Superseded pushes on the same branch/PR cancel the older run rather than queueing. Not required by acceptance but lands cleanly.
+- **`permissions: contents: read`** at the workflow level — least-privilege default. The workflow reads the repo (checkout + test) and does nothing else, so read-only permissions are correct. Guards against any accidental privilege escalation from a compromised action in the future.
+- **No coverage step.** Acceptance bullet explicitly: no coverage gate in Drop 1 (decision 22). `mage coverage` is report-only locally; CI does not run it. Drop 9.3 flips the gate.
+- **No `mage install` invocation anywhere.** Verified via `grep -n 'mage install' main/.github/workflows/ci.yml` → 0 lines. `Install` target is dev-only per main/CLAUDE.md § "Build Verification" rule 3 + drop PLAN.md Unit 1.5 acceptance.
+
+### Commands run
+
+- `mkdir -p /Users/evanschultz/Documents/Code/hylla/rak/main/.github/workflows` — created the directory (didn't exist before this unit).
+- `Grep push: main/.github/workflows/ci.yml -n` → `4:  push:` (1 line, ≥ 1 required). PASS.
+- `Grep pull_request: main/.github/workflows/ci.yml -n` → `6:  pull_request:` (1 line, ≥ 1 required). PASS.
+- `Grep 'mage ci' main/.github/workflows/ci.yml -n` → `18:    name: mage ci` + `40:      - name: Run mage ci` + `41:        run: mage ci` (3 lines, ≥ 1 required). PASS.
+- `Grep coverage main/.github/workflows/ci.yml -ni` → No matches found. PASS (0 lines, permitted).
+- `Grep 'mage install' main/.github/workflows/ci.yml -n` → No matches found. PASS (0 lines required by agents-must-not-run rule).
+- `ruby -ryaml` soft YAML parse via `/tmp/check_yaml.rb` → `OK: YAML parses`, top-level keys = `["name", true, "permissions", "concurrency", "jobs"]` (the `true` key is YAML 1.1's Norway-problem quirk where bare `on` is the boolean `True` under `safe_load`; GitHub Actions' own parser uses a stricter schema that treats `on` as the string trigger key — grep assertions find the literal line regardless of parser quirk). Triggers keys = `["push", "pull_request"]`, push branches = `["main"]`, PR branches = `["main"]`, jobs = `["ci"]`, runs-on = `ubuntu-latest`, 6 steps: Checkout / Set up Go / Install mage / Install gofumpt / Install golangci-lint / Run mage ci. Structure matches the acceptance bullets.
+- **No `git push` run** (per unit instructions — Phase 6 is orch-owned drop-end verification).
+- **No workflow run triggered** (this unit only lands the YAML; the green CI run is verified by orch in Phase 6).
+- **No `mage install` invocation anywhere** (this is the whole-project invariant).
+
+### Acceptance verification (bullet-by-bullet)
+
+1. `main/.github/workflows/ci.yml` exists. **PASS** — `Write` succeeded; `Read` confirms 42 LOC.
+2. Triggers on `push` to `main` and `pull_request` targeting `main`; both grep hits ≥ 1. **PASS** — see "Commands run" above.
+3. Runs on `ubuntu-latest`, checks out, installs Go 1.26+, installs mage + gofumpt + golangci-lint, runs `mage ci`. `grep 'mage ci'` ≥ 1. **PASS** — 6 steps in the job match the required shape; `go-version: '1.26.x'` satisfies "Go 1.26+".
+4. No coverage gate. `grep -ni coverage` returns 0 lines. **PASS** — no coverage step present. (The acceptance bullet allows 0 lines OR a report-only step; I chose 0 lines as the cleanest outcome.)
+5. No `mage install` anywhere. **PASS** — `grep 'mage install'` returns 0 lines.
+6. YAML parses as a valid GitHub Actions workflow. **PASS (soft)** — `ruby -ryaml` via script file parsed the document with no exception; all expected top-level keys and nested structures present. `gh workflow view` soft-check deferred to Phase 6 (per acceptance note: "Acceptance is verifiable via `gh workflow view` after the workflow file lands on the pushed branch").
+7. Note: `gh run watch --exit-status` on triggered run is NOT a 1.6 criterion — it's Phase 6 drop-end verification. **Respected** — no push, no workflow trigger from this subagent.
+
+All seven acceptance bullets clear.
+
+### Surprises
+
+1. **YAML 1.1 parses bare `on` as boolean `true`.** When I ran the ruby YAML parser for the soft-check, the top-level key for the trigger block came back as the Ruby boolean `true`, not the string `"on"`. This is the well-known YAML 1.1 "Norway problem" class of issues (`on`/`off`/`yes`/`no`/`y`/`n` are reserved bool literals in the 1.1 spec). GitHub Actions' own YAML parser is stricter and treats the top-level `on:` key as the string trigger key, so the workflow works on GitHub. The ruby parse is still meaningful — it confirms the document is well-formed YAML — but the trigger-key detection in my validation script had to handle `y[true] || y['on']`. Worth knowing for future workflow YAML soft-checks in this repo. No change to the YAML itself; this is a parser quirk, not a file bug.
+2. **Remote repo layout vs local worktree naming.** The local directory `main/` is the visible worktree checkout (bare-root + worktree-per-lane setup per main/CLAUDE.md § "Bare-Root and Worktree Discipline"), but on the pushed remote the contents of `main/` ARE the repo root. Initially I considered `working-directory: main` in the workflow — that would have been wrong. Verified via `git ls-tree -r HEAD --name-only` that `.github/`, `go.mod`, `magefile.go` all live at the remote repo root. This is the standard bare-root + worktree layout in Hylla's ecosystem; noting it here because it's easy to get backwards when writing CI for the first time in a project using this layout.
+
+### Hylla Feedback
+
+N/A — Unit 1.6 is YAML-only, a non-Go file. Hylla is Go-only by design (per main/CLAUDE.md § "Code Understanding Rules" rule 3: "Non-Go code (markdown, TOML, YAML, magefile, SQL): use `Read`, `Grep`, `Glob`, `Bash` directly"). No Hylla query was run and none would have applied. The Context7 query for `actions/setup-go` was the external-semantics lookup (third evidence tier), not a Hylla fallback.
