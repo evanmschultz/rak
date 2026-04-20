@@ -373,3 +373,63 @@ No Hylla query was run and no fallback was forced.
 ### Hylla Feedback
 
 N/A — Unit 1.6 is YAML-only (`.github/workflows/ci.yml`), a non-Go artifact outside Hylla's Go-indexing scope per main/CLAUDE.md § "Code Understanding Rules" rule 3. All evidence was `Read` / `Grep` / worklog cross-reference-backed. No Hylla query was run and no fallback was forced. The hard YAML parse that would normally provide the soft-validity check was blocked by sandbox policy; the acceptance note explicitly defers authoritative validation to `gh workflow view` in Phase 6, so this gap is by design rather than a Hylla miss.
+
+## Unit 1.6 — Round 2
+
+**Verdict:** pass
+
+**Defect under review:** Phase 6 CI failure on Round 1 commit `c2300004` — `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest` resolved to v1, which rejected the v2-schema `.golangci.yml`. Round 2 commit `a87dda5` swaps the install path to the upstream `install.sh` script pinned to v2.11.4 in both `.github/workflows/ci.yml` and the drop `PLAN.md` dev-prereq bullet. Round 1 QA missed the defect because both QA agents evaluated locally; the dev's local `golangci-lint` is already v2.11.4 (installed via the script path).
+
+**Evidence (per Round 2 acceptance bullet):**
+
+1. **Original 7 acceptance bullets still hold on current worktree.**
+   - `push:` at `ci.yml:4`; `pull_request:` at `ci.yml:6` — workflow triggers correct (≥ 1 each, PASS).
+   - `runs-on: ubuntu-latest` at `ci.yml:19`; `go-version: '1.26.x'` at `ci.yml:27`; `name: Run mage ci` at `ci.yml:40` + `run: mage ci` at `ci.yml:41`. Install steps for mage (line 32), gofumpt (line 35), golangci-lint (line 38) all present and ordered before the `mage ci` step. PASS.
+   - `grep -ni coverage main/.github/workflows/ci.yml` → 0 hits (no coverage gate; permitted by acceptance bullet 4). PASS.
+   - `grep -n 'mage install' main/.github/workflows/ci.yml` → 0 hits (agents-must-not-run rule respected). PASS.
+   - YAML structure intact: 6 steps in the `ci` job (Checkout / Set up Go / Install mage / Install gofumpt / Install golangci-lint / Run mage ci), `permissions: contents: read`, concurrency group at workflow level, `cache: true` + `cache-dependency-path: go.sum` on setup-go. No structural regressions vs Round 1.
+
+2. **Round 2 defect fix is actually applied.**
+   - `grep -n 'install.sh' main/.github/workflows/ci.yml` → 1 hit at line 38: `run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.11.4`. PASS.
+   - `grep -n 'v2.11.4' main/.github/workflows/ci.yml` → 1 hit at line 38 (same line). PASS.
+   - `grep -c 'go install github\.com/golangci/golangci-lint/cmd/golangci-lint' main/.github/workflows/ci.yml` → 0. The v1 module-path invocation is fully removed. PASS.
+   - `grep -c 'go install github\.com/golangci/golangci-lint/cmd/golangci-lint' main/drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/PLAN.md` → 0. The v1 invocation is also removed from the dev-prereq bullet. PASS.
+   - `grep -n 'install.sh' main/drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/PLAN.md` → 1 hit at line 22 with the v2.11.4 pin and the upstream-don't-go-install rationale citation. PASS.
+
+3. **Scope discipline — mage and gofumpt installs UNCHANGED.**
+   - `grep -n 'go install github.com/magefile/mage@latest' main/.github/workflows/ci.yml` → 1 hit at line 32. UNCHANGED (PASS).
+   - `grep -n 'go install mvdan.cc/gofumpt@latest' main/.github/workflows/ci.yml` → 1 hit at line 35. UNCHANGED (PASS).
+   - Drop 9's tool-version-pinning follow-up still owns full pinning across the workflow; this Round 2 fix is narrowly scoped to the v1/v2 defect.
+
+4. **Commit scope sanity.** `git show --stat a87dda5` reports exactly 3 files touched:
+   - `.github/workflows/ci.yml` (+1/-1)
+   - `drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/PLAN.md` (+1/-1)
+   - `drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/BUILDER_WORKLOG.md` (+57)
+   No `.go` files, no `go.mod`, no `go.sum`, no other directory churn. PASS.
+
+5. **State integrity.** Drop PLAN.md `^- \*\*State:\*\*` greps return `done` at lines 40, 59, 71, 88, 102, 133 — units 1.1 through 1.6 all `done`. Unit 1.6 line 133 specifically reads `done`. No collateral state regression on any other unit. PASS.
+
+6. **Worklog integrity.** `^## Unit 1.6 — Round 2` heading at `BUILDER_WORKLOG.md:344` (1 hit). Section contains:
+   - Files touched (3 files matching commit scope).
+   - Defect recap with verbatim CI error message and run id `24643888100`, sha `c2300004fa05f257dec77f4b52abc64ef53f6adb`.
+   - Commands run including `mage ci` exit 0 local cross-reference plus all four required greps (install.sh, v2.11.4, mage install, coverage).
+   - Design notes documenting the two alternatives considered (A: switch to `.../v2@latest` module path; B: install.sh + v2.11.4 pin) with rationale for picking B and the verbatim Context7 citation against `go install`.
+   - Surprises: "None."
+   - Hylla Feedback: explicit "None — YAML + markdown edits only, non-Go" with Hylla-is-Go-only note.
+   PASS.
+
+7. **No Section 0 leakage in drop dir.** `Grep '^# Section 0|SEMI-FORMAL REASONING' drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/` returns hits only inside prior `BUILDER_QA_*.md` files where earlier QA rounds wrote narrative attacks verifying Section 0 ABSENCE (e.g. PROOF.md:147, FALSIFICATION.md:56 + :235, PROOF.md:367). No actual `# Section 0 — SEMI-FORMAL REASONING` header lines or pass-structure blocks (`## Planner` / `## Builder` / `## QA Proof` / `## QA Falsification` / `## Convergence`) inside any durable rak artifact. The one `## Planner` heading in drop PLAN.md:26 is the durable Phase-1 worklog section, not a Section 0 reasoning block. BUILDER_WORKLOG.md line 302 mentions the phrase "Section 0" only as Round 1 narrative ("an attack I caught in Section 0"), not as a header. PASS.
+
+8. **Local `mage ci` cross-reference.** BUILDER_WORKLOG.md Round 2 "Commands run" records `mage ci` from `main/` exit 0 with output `0 issues.` + `?   	github.com/evanmschultz/rak/cmd/rak	[no test files]`. Local execution path unchanged (dev's existing v2.11.4 binary on PATH); the workflow swap only affects the CI runner's install path. Not re-run by QA per spawn instructions. PASS.
+
+**Cross-checks:**
+
+- Round 2 commit message `fix(ci): install golangci-lint v2.11.4 via upstream script` matches conventional-commit format from main/CLAUDE.md § "Git Commit Format" — type `fix`, scope `ci`, lowercase, no period, well under 72 chars.
+- `permissions: contents: read`, `cache: true`, `cache-dependency-path: go.sum`, concurrency group, action pins (`@v4`/`@v5`) all preserved from Round 1.
+- Round 2 fix is the minimal correct delta: one step body in ci.yml, one prereq line in drop PLAN.md, one worklog append. No incidental file churn.
+
+**Findings:** none.
+
+### Hylla Feedback
+
+N/A — task touched non-Go files only (YAML + markdown). Hylla is Go-only by design (per main/CLAUDE.md § "Code Understanding Rules" rule 3); no Hylla query was run and none would have applied.

@@ -293,3 +293,35 @@ Next step for orch: both QA passes green for Unit 1.6. Close Unit 1.6 as complet
 ### Hylla Feedback
 
 None — Hylla answered everything needed. Per prompt: Unit 1.6 is YAML + workflow semantics (non-Go), Hylla is Go-only by design (`main/CLAUDE.md` § "Code Understanding Rules" rule 3). No Hylla query attempted and none would apply. External semantics (setup-go behavior, PATH handling, go-version input format) correctly routed to Context7 per the third evidence tier. The N/A here is a structural invariant of the unit's file set, not a Hylla shortfall.
+
+## Unit 1.6 — Round 2
+
+**Verdict:** pass
+
+**Defect under review:** Phase 6 CI failure on Round 1 commit `c2300004` — v1 golangci-lint rejecting the v2-schema `.golangci.yml`. Round 2 commit `a87dda5` swaps the CI install to the upstream `install.sh` script pinned to v2.11.4 (both `.github/workflows/ci.yml` and the drop `PLAN.md` dev-prereq bullet).
+
+**Attack directions (15 total) + dispositions:**
+
+1. **Install-script URL not reachable at run time.** REFUTED (advisory). URL is identical to what upstream's vanity URL `https://golangci-lint.run/install.sh` redirects to per Context7 `/golangci/golangci-lint` docs. Sandbox blocked direct `curl`-fetch from this QA session; URL liveness and v2.11.4 release tag were verified upstream by orch + builder pre-commit (BUILDER_WORKLOG.md lines 372–389). Residual risk is upstream availability, not a defect in the diff.
+2. **Pinned version v2.11.4 missing on upstream.** REFUTED (advisory). Pin matches the dev's local binary; upstream release presence verified pre-commit.
+3. **`master` branch path could rename to `main` later.** Advisory only. Not a present defect as of 2026-04-19. Non-blocking, tracked as forward-looking via the Drop 9 tool-pinning follow-up row.
+4. **Install-script writes outside writable bin-dir.** REFUTED. `-b $(go env GOPATH)/bin` scopes writes; `actions/setup-go@v5` sets `GOPATH` and ensures `$(go env GOPATH)/bin` is writable on the runner (Round 1 run already succeeded reaching the lint step via the same PATH).
+5. **`.golangci.yml` v2 schema mismatch with v2.11.4.** REFUTED (strongest attack). `.golangci.yml` uses `version: "2"` + `linters.exclusions.rules` with one rule (`path:` + `linters: [unused]`). Context7 `/golangci/golangci-lint` migration-guide examples show this exact key shape under v2 — direct schema match. Builder's local `mage ci` exit 0 against v2.11.4 is concrete cross-evidence.
+6. **Install-script `$(go env GOPATH)` empty.** REFUTED. `actions/setup-go@v5` always sets `$GOPATH` to a writable runner path (upstream-action behavior, already verified by Round 1's run reaching the v1 binary).
+7. **v1 module-path install command leaks elsewhere.** REFUTED. `grep` for `github.com/golangci/golangci-lint/cmd/golangci-lint` finds 3 hits total: CLAUDE.md:191 (general doc reference), PLAN.md:21 (project tech-stack reference), and BUILDER_WORKLOG.md (Round 2 defect-recap text, intentional). Zero hits in `.github/workflows/`. Zero hits as an install command anywhere.
+8. **Drop PLAN.md vs ci.yml install-method drift.** REFUTED. `grep 'v2.11.4|install.sh'` returns the identical install command in both `.github/workflows/ci.yml:38` and `drops/.../PLAN.md:22` — same URL, same script, same pin.
+9. **`mage install` leakage in CI.** REFUTED. `grep 'mage install' .github/` → 0 hits.
+10. **Coverage-gate leakage in CI.** REFUTED. `grep -i coverage .github/` → 0 hits; coverage stays report-only per decision 22.
+11. **State integrity regression.** REFUTED. Only Unit 1.6 state `done` post-fix; Units 1.1–1.5 unchanged.
+12. **Commit scope churn (touches .go / go.mod / go.sum).** REFUTED. `git show --stat a87dda5` → exactly 3 files: `.github/workflows/ci.yml` (+1/-1), `BUILDER_WORKLOG.md` (+57), `drops/.../PLAN.md` (+1/-1). Zero `.go` / `go.mod` / `go.sum` churn.
+13. **Action-version drift.** REFUTED. `actions/checkout@v4` and `actions/setup-go@v5` unchanged from Round 1.
+14. **YAML well-formedness broken by swap.** REFUTED. Sandbox blocked `python3 -c "import yaml"` validation, but the diff is a single `run:` step-body string swap — surrounding YAML structure is byte-identical to Round 1's parsed-clean state. The new value contains no YAML 1.1 booleans (`yes`/`no`/`on`/`off`/`y`/`n`), no leading `*`/`&`/`!`/`[`/`{`, no tabs (line 38 is space-indented to match the surrounding `      ` block), and the entire `run:` value is not quoted but contains no YAML special chars in leading/trailing position.
+15. **Phase 6 prediction false-positive.** REFUTED (high confidence). The single defect Round 1 missed (v1/v2 module path) is now eliminated at the install boundary; the v2.11.4 binary will resolve `version: "2"` cleanly per Context7 schema match + builder's local `mage ci` exit 0 proof.
+
+**Counterexamples:** none CONFIRMED. All 15 attack directions REFUTED or reduced to forward-looking advisory.
+
+**Verdict:** PASS. Phase 6 prediction: high confidence `gh run watch --exit-status` turns green on next push. Residual risk concentrates entirely outside the diff (install.sh URL liveness, v2.11.4 release tag) and is pre-verified by orch + builder; sandbox blocked independent re-verification from this QA session.
+
+### Hylla Feedback
+
+N/A — task touched non-Go files only (`ci.yml` YAML + 2 markdown). Hylla is Go-only by design (main/CLAUDE.md § "Code Understanding Rules" rule 3); no Hylla query was attempted and none would have applied.
