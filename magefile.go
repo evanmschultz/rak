@@ -82,6 +82,16 @@ func Install() error {
 	return nil
 }
 
+// AddDep runs `go get <module>` to add or update a Go module dependency.
+// It does NOT run `go mod tidy`; callers handle tidy separately if needed.
+// Use this from Drop 2 onward whenever a unit introduces a new Go dep.
+func AddDep(module string) error {
+	if err := sh.RunV("go", "get", module); err != nil {
+		return fmt.Errorf("mage addDep %s: %w", module, err)
+	}
+	return nil
+}
+
 // Run executes `go run ./cmd/rak`. Positional args pass through after `--`,
 // e.g. `mage run -- --help`.
 func Run() error {

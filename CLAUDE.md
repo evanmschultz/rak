@@ -207,6 +207,7 @@ Mage targets (land in Drop 1.4–1.5, stable from there):
 | `mage test` | `go test -race ./...` | tests, race detector always on |
 | `mage format` | `gofumpt -l -w .` | auto-format (writes) |
 | `mage lint` | `go vet ./...` && `golangci-lint run` | static analysis |
+| `mage addDep <module>` | `go get <module>` | when adding a new Go dep (from Drop 2 onward) |
 | `mage ci` | `gofumpt -l .` (must be empty) && `mage lint` && `mage test` | pre-push gate |
 | `mage install` | `go install ./cmd/rak` | **dev-only**, never from an agent |
 | `mage run` | `go run ./cmd/rak` (positional args pass after `--`) | smoke check |

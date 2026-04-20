@@ -36,7 +36,7 @@ Minimal cut: `2.0 → 2.2 → 2.3 → 2.4`, with `2.1` parallel to `2.0` (2.1 ha
 
 ### Unit 2.0 — Add `mage addDep <module>` target
 
-- **State:** todo
+- **State:** done
 - **Paths:** `main/magefile.go` (add `AddDep` func), `main/CLAUDE.md` (add one row to § "Build Verification" mage targets table)
 - **Packages:** `main` (the magefile package — build-tagged `//go:build mage`)
 - **Blocked by:** —
@@ -53,12 +53,13 @@ Minimal cut: `2.0 → 2.2 → 2.3 → 2.4`, with `2.1` parallel to `2.0` (2.1 ha
 ### Unit 2.1 — Lift counting primitive into `internal/counting`
 
 - **State:** todo
-- **Paths:** `main/internal/counting/counting.go` (new), `main/internal/counting/counting_test.go` (new), `main/cmd/rak/root.go` (remove `Counts` struct + `count` function; imports shrink accordingly), `main/.golangci.yml` (remove orphan `cmd/rak/root.go` → `unused` exclusion rule now that `count` is exported + has a caller in `RunE`)
+- **Paths:** `main/internal/counting/counting.go` (new), `main/internal/counting/counting_test.go` (new), `main/cmd/rak/root.go` (remove `Counts` struct + `count` function; imports shrink accordingly), `main/.golangci.yml` (remove orphan `cmd/rak/root.go` → `unused` exclusion rule now that `count` is exported + has a caller in `RunE`), `main/magefile.go` (F3 fold: doc comment "nine" → "ten")
 - **Packages:** `github.com/evanmschultz/rak/internal/counting` (new), `github.com/evanmschultz/rak/cmd/rak`
 - **Blocked by:** —
 - **Acceptance:**
     - `internal/counting/counting.go` defines exported `Counts` struct with fields **in declaration order** `Bytes int64`, `Lines int64`, `Words int64`, `Chars int64` (Go doc comment on struct + each field starting with identifier name per CLAUDE.md naming rule 11).
     - **`.golangci.yml` cleanup (F2 fold):** remove the `linters.exclusions.rules` entry that exempts `cmd/rak/root.go` from the `unused` linter (lines 19-24 of current file). After 2.1 lands, `count` is no longer unused (it's exported as `Count` and called from `cmd/rak/root.go`'s `RunE` in 2.3 — but 2.1's move alone is enough to stop triggering the warning since the symbol leaves `cmd/rak/`). Also remove the preceding rationale comment block (lines 3-17). File shrinks to minimal `version: "2"` with no custom rules. `mage lint` from `main/` must be green after removal.
+    - **`magefile.go` doc comment fix (F3 fold, from Unit 2.0 build-QA advisory):** update `magefile.go:5` from `"The nine canonical targets mirror…"` to `"The ten canonical targets mirror…"`. Mechanical single-word edit; the doc comment's own self-rule flags the drift after Unit 2.0 added `AddDep`.
     - **Cross-unit JSON contract (F4):** `Counts` carries **no `json:` struct tags**. Downstream Unit 2.2 JSON snapshot depends on this exact field declaration order and the absence of tags — changing 2.1's struct without updating 2.2's snapshot will break build-QA for 2.2.
     - `internal/counting/counting.go` defines exported `func Count(r io.Reader) (Counts, error)` with the same semantics as the current unexported `count` in `cmd/rak/root.go:42-78` (`bufio.NewReader` + `ReadRune` loop + `unicode.IsSpace` word split + `io.EOF` clean-exit). Go doc comment on `Count` starting with "Count …".
     - `cmd/rak/root.go` no longer declares `Counts` or `count` — both moved. `cmd/rak/root.go` imports shrink to remove `bufio` and `unicode` (the remaining imports are `fmt` and `github.com/spf13/cobra` — `io` can also go since `RunE` no longer uses it directly yet; 2.3 re-adds `io` for stdin).
