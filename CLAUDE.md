@@ -258,8 +258,8 @@ Run `mage ci` before every push. `mage coverage` is report-only from Drop 1.5 on
 
 ### Dependencies
 
-- Ask the dev to run `go get` / module updates. No `GOPROXY=direct`, `GOSUMDB=off`, or checksum bypass.
-- **Bootstrap carve-out.** When a unit introduces a mage-managed dep for the very first time and no mage target yet exists to wrap `go get`, the builder MAY run `go get <module>` + `go mod tidy` directly from `main/` with default environment (no proxy / sum / checksum bypass, no private-module shenanigans). Today this applies only to Drop 1.4 (first-ever `github.com/magefile/mage` add). From Drop 2 onward the magefile exists, so every dep add routes through a mage target and this carve-out does not apply.
+- Default path: `mage addDep <module>` (lands in Drop 2.0). The target shells `go get <module>` from `main/` with default environment (no `GOPROXY=direct`, `GOSUMDB=off`, or checksum bypass). **It deliberately does not run `go mod tidy`** — `tidy` prunes deps that have no importer yet, which breaks the "add dep, then write code that imports it" flow. Run `go mod tidy` separately after the importing code lands (or let `mage ci` surface any leftover inconsistency).
+- **Historical bootstrap carve-out (Drop 1.4 only).** Before Drop 2.0 existed, the first-ever dep add (mage itself) used a direct `go get` + `go mod tidy` from `main/`. From Drop 2 onward the `mage addDep` target is the sole path.
 
 ### Reference Lookups
 

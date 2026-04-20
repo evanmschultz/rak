@@ -1,6 +1,6 @@
 # DROP_2 — COUNTING_DOMAIN_RENDER_BOUNDARY
 
-**State:** planning
+**State:** building
 **Blocked by:** —
 **Paths (expected):** `main/magefile.go` (new `AddDep` target), `main/cmd/rak/root.go` (lift `count` out), `main/internal/counting/` (new package), `main/internal/render/` (new package), `main/cmd/rak/testdata/` (integration fixture), `main/CLAUDE.md` (mage targets table row), plus per-package `*_test.go` files
 **Packages (expected):** `github.com/evanmschultz/rak/cmd/rak`, `github.com/evanmschultz/rak/internal/counting` (new), `github.com/evanmschultz/rak/internal/render` (new)
@@ -41,11 +41,11 @@ Minimal cut: `2.0 → 2.2 → 2.3 → 2.4`, with `2.1` parallel to `2.0` (2.1 ha
 - **Packages:** `main` (the magefile package — build-tagged `//go:build mage`)
 - **Blocked by:** —
 - **Acceptance:**
-    - `main/magefile.go` adds `func AddDep(ctx context.Context, module string) error` (exported — mage surfaces it as `mage addDep <module>`; cobra/mage idiom per CLAUDE.md naming rule 2). Go doc comment on `AddDep` starting with "AddDep …" (CLAUDE.md naming rule 11).
-    - Implementation shape: runs `sh.RunV("go", "get", module)` then `sh.RunV("go", "mod", "tidy")`, both from the module root (`main/`), both with default environment (no `GOPROXY` / `GOSUMDB` / checksum overrides per CLAUDE.md § "Go Development Rules" → "Dependencies"). Both errors wrapped (`fmt.Errorf("mage addDep: go get: %w", err)`, `fmt.Errorf("mage addDep: go mod tidy: %w", err)`). The `ctx` parameter is declared for signature uniformity with other context-aware targets but not threaded through `sh.RunV` (mage's `sh` package has no context-aware variant; future upgrade possible). Builder may use `_ = ctx` with a one-line comment explaining why, per CLAUDE.md § "Errors" → "Never swallow".
+    - `main/magefile.go` adds `func AddDep(module string) error` (exported — mage surfaces it as `mage addDep <module>`). Go doc comment on `AddDep` starting with "AddDep …" per CLAUDE.md naming rule 11. Signature matches the existing mage-target pattern in `magefile.go` (no `context.Context` — other targets don't thread it either).
+    - Implementation shape: runs `sh.RunV("go", "get", module)` from the module root (`main/`) with default environment (no `GOPROXY` / `GOSUMDB` / checksum overrides per CLAUDE.md § "Dependencies"). Error wrapped: `fmt.Errorf("mage addDep: go get %s: %w", module, err)`. **No `go mod tidy` here** — `tidy` prunes deps that have no importer yet, which breaks the "add dep before writing the code that imports it" flow (Unit 2.2 does exactly that). Callers who want cleanup run `go mod tidy` separately after the importing code lands.
     - Uses `github.com/magefile/mage/sh` already imported at `main/magefile.go:18` (direct dep in `main/go.mod` line 7); no new magefile import needed.
-    - `main/CLAUDE.md` § "Build Verification" mage targets table (lines ~204–214) gets a new row. Column shape mirrors existing rows: **Target** = `mage addDep <module>`; **Command** = `go get <module>` && `go mod tidy`; **When** = "when adding a new Go dep (from Drop 2 onward)". This is a **markdown edit inside the builder's allowed file list** — CLAUDE.md is markdown, not Go, but per CLAUDE.md § "Orchestrator Role Boundaries" the builder is the role that lands Go-coupled changes; the table-row edit accompanies the `magefile.go` change in the same commit.
-    - Target is invokable: `mage addDep github.com/magefile/mage` from `main/` is a no-op (mage is already direct in `main/go.mod` line 7) and exits 0. Build-QA asserts this specifically.
+    - `main/CLAUDE.md` § "Build Verification" mage targets table gets a new row: **Target** = `mage addDep <module>`; **Command** = `go get <module>`; **When** = "when adding a new Go dep (from Drop 2 onward)". Builder lands this markdown edit in the same commit as `magefile.go` — CLAUDE.md's role-boundary text forbids builder from editing **Go** code outside `.go` files, and is permissive about paired markdown that documents a Go-coupled change.
+    - Target is invokable: `mage addDep github.com/magefile/mage@v1.17.1` from `main/` leaves `main/go.mod` + `main/go.sum` unchanged (mage is already at `v1.17.1` in `main/go.mod` line 7) — build-QA asserts `git diff main/go.mod main/go.sum` is empty after running the target, and exit code is 0.
     - `mage build` succeeds from `main/` (includes magefile compilation under `//go:build mage`).
     - `mage ci` succeeds from `main/` (gofumpt clean on `magefile.go` and `CLAUDE.md` has no gofumpt exposure — markdown only).
     - **No invocation of `mage install` anywhere** (CLAUDE.md § "Build Verification" rule 3).
@@ -53,11 +53,12 @@ Minimal cut: `2.0 → 2.2 → 2.3 → 2.4`, with `2.1` parallel to `2.0` (2.1 ha
 ### Unit 2.1 — Lift counting primitive into `internal/counting`
 
 - **State:** todo
-- **Paths:** `main/internal/counting/counting.go` (new), `main/internal/counting/counting_test.go` (new), `main/cmd/rak/root.go` (remove `Counts` struct + `count` function; imports shrink accordingly)
+- **Paths:** `main/internal/counting/counting.go` (new), `main/internal/counting/counting_test.go` (new), `main/cmd/rak/root.go` (remove `Counts` struct + `count` function; imports shrink accordingly), `main/.golangci.yml` (remove orphan `cmd/rak/root.go` → `unused` exclusion rule now that `count` is exported + has a caller in `RunE`)
 - **Packages:** `github.com/evanmschultz/rak/internal/counting` (new), `github.com/evanmschultz/rak/cmd/rak`
 - **Blocked by:** —
 - **Acceptance:**
     - `internal/counting/counting.go` defines exported `Counts` struct with fields **in declaration order** `Bytes int64`, `Lines int64`, `Words int64`, `Chars int64` (Go doc comment on struct + each field starting with identifier name per CLAUDE.md naming rule 11).
+    - **`.golangci.yml` cleanup (F2 fold):** remove the `linters.exclusions.rules` entry that exempts `cmd/rak/root.go` from the `unused` linter (lines 19-24 of current file). After 2.1 lands, `count` is no longer unused (it's exported as `Count` and called from `cmd/rak/root.go`'s `RunE` in 2.3 — but 2.1's move alone is enough to stop triggering the warning since the symbol leaves `cmd/rak/`). Also remove the preceding rationale comment block (lines 3-17). File shrinks to minimal `version: "2"` with no custom rules. `mage lint` from `main/` must be green after removal.
     - **Cross-unit JSON contract (F4):** `Counts` carries **no `json:` struct tags**. Downstream Unit 2.2 JSON snapshot depends on this exact field declaration order and the absence of tags — changing 2.1's struct without updating 2.2's snapshot will break build-QA for 2.2.
     - `internal/counting/counting.go` defines exported `func Count(r io.Reader) (Counts, error)` with the same semantics as the current unexported `count` in `cmd/rak/root.go:42-78` (`bufio.NewReader` + `ReadRune` loop + `unicode.IsSpace` word split + `io.EOF` clean-exit). Go doc comment on `Count` starting with "Count …".
     - `cmd/rak/root.go` no longer declares `Counts` or `count` — both moved. `cmd/rak/root.go` imports shrink to remove `bufio` and `unicode` (the remaining imports are `fmt` and `github.com/spf13/cobra` — `io` can also go since `RunE` no longer uses it directly yet; 2.3 re-adds `io` for stdin).
@@ -161,6 +162,14 @@ Minimal cut: `2.0 → 2.2 → 2.3 → 2.4`, with `2.1` parallel to `2.0` (2.1 ha
 
 - Unknown #1 (stdin-vs-path-arg, Round 1): resolved by Decision A above.
 - Unknown #2 (laslig re-add mechanism, Round 1): resolved by Decision B above.
+
+**Round 2 plan-QA fork decisions (applied pre-build, no Round 3 planner spawn):**
+
+- **A1** (F1 tidy-prune): `AddDep` runs `go get` only, no `go mod tidy`. Avoids prune trap when adding a dep before its importing code exists.
+- **B1** (F3 no-op precision): build-QA runs `mage addDep github.com/magefile/mage@v1.17.1` and asserts `git diff main/go.mod main/go.sum` is empty + exit 0.
+- **C1** (F4/F5 ctx param): `AddDep` signature is `func AddDep(module string) error` — matches existing mage targets, no `context.Context`.
+- **D3** (F15 CLAUDE.md auth): accept role-boundary text as permissive. Builder lands the CLAUDE.md table row in the same commit as `magefile.go`. No CLAUDE.md amendment to § "Orchestrator Role Boundaries" needed; CLAUDE.md § "Dependencies" is updated separately by orch to reflect the new `mage addDep` default path.
+- **F2** (mechanical fold): `.golangci.yml` orphan `unused` exclusion removed in Unit 2.1 (see Unit 2.1 paths + acceptance).
 
 **Laslig API used (v0.2.4 citations — verified Round 1 falsification F2, unchanged for Round 2).**
 - `func New(out io.Writer, policy Policy) *Printer` — `printer.go:39` — Unit 2.2's `NewHumanRenderer` uses this with `Policy{Format: FormatAuto, Style: StyleAuto}` for automatic TTY-vs-pipe selection.

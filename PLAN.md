@@ -57,7 +57,7 @@ The plan below is the working shape. Each row is a level_1 container drop. **Eac
 |---|---|---|---|
 | `DROP_0_BOOTSTRAP` | done | — | (out-of-band; predates this workflow) |
 | `DROP_1_CODE_SCAFFOLD_MAGE_CI` | done | — | `main/drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/` |
-| `DROP_2_COUNTING_DOMAIN_RENDER_BOUNDARY` | todo | DROP_1 | `main/drops/DROP_2_COUNTING_DOMAIN_RENDER_BOUNDARY/` |
+| `DROP_2_COUNTING_DOMAIN_RENDER_BOUNDARY` | building | DROP_1 | `main/drops/DROP_2_COUNTING_DOMAIN_RENDER_BOUNDARY/` |
 | `DROP_3_DIRECTORY_WALK_GITIGNORE_DEPTH` | todo | DROP_2 | `main/drops/DROP_3_DIRECTORY_WALK_GITIGNORE_DEPTH/` |
 | `DROP_4_LANGUAGE_DETECTION_CODE_SPLITS` | todo | DROP_3 | `main/drops/DROP_4_LANGUAGE_DETECTION_CODE_SPLITS/` |
 | `DROP_5_STDIN_PIPE_BEHAVIOR` | todo | DROP_4 | `main/drops/DROP_5_STDIN_PIPE_BEHAVIOR/` |
