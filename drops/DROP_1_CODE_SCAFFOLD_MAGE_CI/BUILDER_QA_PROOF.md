@@ -321,3 +321,55 @@ None — Hylla answered everything needed. All evidence lookups for this review 
 - **Mage target execution** — covered by `Bash mage <target>`, not by static analysis tooling.
 
 No Hylla query was run and no fallback was forced.
+
+## Unit 1.6 — Round 1
+
+**Verdict:** pass
+
+**Commit under review:** `72828aa ci(drop-1): add github actions workflow running mage ci`
+
+**Evidence (per acceptance bullet, drop PLAN.md lines 131–144):**
+
+1. **`main/.github/workflows/ci.yml` exists.** `Read main/.github/workflows/ci.yml` succeeded; file is 42 LOC. PASS.
+
+2. **Triggers on `push` to `main` AND `pull_request` targeting `main`.** `Read` confirms `on:` block at lines 3–7 with `push:` (L4) → `branches: [main]` (L5) and `pull_request:` (L6) → `branches: [main]` (L7). `Grep -n 'push:' main/.github/workflows/ci.yml` → 1 hit on L4 (≥ 1 required). `Grep -n 'pull_request:' main/.github/workflows/ci.yml` → 1 hit on L6 (≥ 1 required). Both branch filters pin `main` exactly. PASS.
+
+3. **Job runs on `ubuntu-latest`; checks out; installs Go 1.26+, mage, gofumpt, golangci-lint; runs `mage ci` from repo root.** `Read` shows `jobs.ci` at L17 with `runs-on: ubuntu-latest` at L19. Six steps in order:
+   - L21–22: `actions/checkout@v4`.
+   - L24–29: `actions/setup-go@v5` with `go-version: '1.26.x'` (L27), `cache: true` (L28), `cache-dependency-path: go.sum` (L29).
+   - L31–32: `go install github.com/magefile/mage@latest`.
+   - L34–35: `go install mvdan.cc/gofumpt@latest`.
+   - L37–38: `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`.
+   - L40–41: `run: mage ci`.
+   `go.mod` line 3 reads `go 1.26.1`; `1.26.x` pinning matches the acceptance-stated allowance. `Grep 'mage ci' main/.github/workflows/ci.yml` → 3 hits (L18 job name, L40 step name, L41 step run), ≥ 1 required. No `working-directory` override — correct, because the remote layout places `main/`'s contents at the repo root (per BUILDER_WORKLOG L302). PASS.
+
+4. **No coverage gate.** `Grep -i 'coverage' main/.github/workflows/ci.yml` → `No matches found` (0 hits). Zero lines is the cleanest permitted outcome per acceptance. PASS.
+
+5. **`mage install` NOT invoked anywhere.** `Grep 'mage install' main/.github/workflows/ci.yml` → `No matches found` (0 hits). The dev-only-tripwire rule holds. PASS.
+
+6. **YAML parses as a valid GitHub Actions workflow (soft check).** Hard Python/Ruby parse in this QA round was blocked by sandbox policy (denied Bash attempts for `python3 -c 'import yaml; ...'` and re-run of builder's `/tmp/check_yaml.rb`). Soft-check satisfied by two independent signals: (a) BUILDER_WORKLOG L318 records a successful builder `ruby -ryaml` parse producing expected top-level keys and 6-step job structure; (b) human structural review of the 42-LOC file through `Read` shows well-formed indentation, valid `name:` / `on:` / `permissions:` / `concurrency:` / `jobs:` nesting, and correct step syntax alternating `uses:` and `run:`. Per acceptance line 142, authoritative validation happens via `gh workflow view` in Phase 6 (drop-end verify), not in Phase 5 unit QA. PASS (soft).
+
+**Attack checks (falsification-adjacent):**
+
+- **Third-party actions pinned to stable major tags** (`actions/checkout@v4`, `actions/setup-go@v5`). Not SHA-pinned, but acceptance does not require SHA pinning and tag-pinning to a stable major is the widely-documented posture for setup-go; Context7-verified per BUILDER_WORKLOG L300. Tighter pinning is a Drop-9 follow-up per main/PLAN.md § "Follow-Ups".
+- **`go-version` matches go.mod within the accepted latitude.** go.mod L3 `go 1.26.1` vs workflow L27 `go-version: '1.26.x'`. Minor-series pin, latest-patch within the `1.26.*` range. Acceptance wording explicitly permits `1.26.x` pinning. No drift risk — `.x` cannot grab 1.27+.
+- **Install order is sound.** mage → gofumpt → golangci-lint all land via `go install @latest` before the `mage ci` step (L41). All three binaries resolve on PATH because `actions/setup-go@v5` sets up Go's GOBIN under a PATH-included directory by default. Order within the install block is not semantically load-bearing (no install depends on another), but putting the runner first matches intent.
+- **No `working-directory` on any step.** Correct — on the pushed remote at `github.com/evanmschultz/rak`, `main/`'s contents ARE the repo root (bare-root + worktree-per-lane layout). Adding `working-directory: main` would break CI by `cd`-ing into a nonexistent subdir.
+- **`permissions: contents: read` at workflow level.** Least-privilege default; the workflow only reads the repo + runs tests. No permission escalation.
+- **`concurrency` block with `cancel-in-progress: true`.** Cancels superseded runs on the same `github.ref`. Hygiene, not a gate. Lands cleanly and matches the unit's optional-hygiene guidance.
+- **CI step `run: mage ci` is an unqualified `mage` invocation.** Correct — `go install github.com/magefile/mage@latest` on L32 places the `mage` binary on PATH before the final step executes.
+- **YAML 1.1 "Norway problem" on bare `on:` key.** BUILDER_WORKLOG L337 documents that `yaml.safe_load` parses bare `on:` as boolean `true`. GitHub Actions' own YAML parser uses a stricter schema and treats `on:` correctly as the string trigger key. Not a file defect; relevant only to soft-parse verification tooling choice.
+
+**Cross-checks:**
+
+- **Drop PLAN.md Unit 1.6 state.** L133: `- **State:** done`. Matches builder's reported state flip in BUILDER_WORKLOG L296. PASS.
+- **BUILDER_WORKLOG.md `## Unit 1.6 — Round 1` section complete.** Lines 291–342 contain `### Files touched`, `### Design decisions`, `### Commands run`, `### Acceptance verification (bullet-by-bullet)`, `### Surprises`, `### Hylla Feedback` — matches WORKFLOW.md § "Phase 4 — Build (per unit)" requirements. PASS.
+- **No Section 0 leakage into durable artifacts.** `Grep '# Section 0|SEMI-FORMAL REASONING' drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/` returned 3 hits, ALL of them narrative references inside QA review files (`BUILDER_QA_FALSIFICATION.md` attacks that verify Section 0 ABSENCE, and one BUILDER_WORKLOG line describing "an attack I caught in Section 0" during planning). None are actual `# Section 0 — SEMI-FORMAL REASONING` header lines or pass-structure blocks in any durable rak artifact. PASS.
+- **File scope.** The commit under review (`72828aa`) adds only `main/.github/workflows/ci.yml`. No `.go`, `go.mod`, `go.sum`, or magefile changes — consistent with the unit's "Packages: — (YAML only, non-Go file)" declaration at drop PLAN.md L135. PASS.
+- **`gh run watch --exit-status` deferred to Phase 6.** Acceptance L143 explicitly: "`gh run watch --exit-status` on the triggered workflow run is **not** a 1.6 unit acceptance criterion — it is drop-end verification." Round 1 respects this boundary — no push, no workflow trigger. PASS.
+
+**Findings:** none.
+
+### Hylla Feedback
+
+N/A — Unit 1.6 is YAML-only (`.github/workflows/ci.yml`), a non-Go artifact outside Hylla's Go-indexing scope per main/CLAUDE.md § "Code Understanding Rules" rule 3. All evidence was `Read` / `Grep` / worklog cross-reference-backed. No Hylla query was run and no fallback was forced. The hard YAML parse that would normally provide the soft-validity check was blocked by sandbox policy; the acceptance note explicitly defers authoritative validation to `gh workflow view` in Phase 6, so this gap is by design rather than a Hylla miss.
