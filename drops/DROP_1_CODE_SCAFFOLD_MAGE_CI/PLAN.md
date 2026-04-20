@@ -1,13 +1,13 @@
 # DROP_1 — CODE_SCAFFOLD_MAGE_CI
 
-**State:** building
+**State:** done
 **Blocked by:** —
 **Paths (expected):** `main/go.mod`, `main/go.sum`, `main/cmd/rak/main.go`, `main/cmd/rak/root.go`, `main/magefile.go`, `main/.github/workflows/ci.yml`, `/tmp/rak-stash/*` (source for move)
 **Packages (expected):** `github.com/evanmschultz/rak/cmd/rak` (only package with Go code after Drop 1; `internal/*` packages land from Drop 2 onward)
 **PLAN.md ref:** main/PLAN.md → `DROP_1_CODE_SCAFFOLD_MAGE_CI` row
 **Workflow:** main/drops/WORKFLOW.md
 **Started:** 2026-04-18
-**Closed:** —
+**Closed:** 2026-04-19
 
 ## Scope
 
