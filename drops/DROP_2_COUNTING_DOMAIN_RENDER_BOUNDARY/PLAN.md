@@ -78,7 +78,7 @@ Minimal cut: `2.0 → 2.2 → 2.3 → 2.4`, with `2.1` parallel to `2.0` (2.1 ha
 
 ### Unit 2.2 — Land `internal/render` package with laslig dep re-add
 
-- **State:** todo
+- **State:** done
 - **Paths:** `main/internal/render/render.go` (new — `Renderer` interface + shared helpers), `main/internal/render/human.go` (new — laslig-backed human renderer), `main/internal/render/json.go` (new — stdlib encoding/json renderer), `main/internal/render/render_test.go` (new — snapshot tests for both renderers), `main/go.mod` (laslig dep add via `mage addDep`), `main/go.sum` (laslig dep add via `mage addDep`)
 - **Packages:** `github.com/evanmschultz/rak/internal/render` (new)
 - **Blocked by:** 2.0, 2.1

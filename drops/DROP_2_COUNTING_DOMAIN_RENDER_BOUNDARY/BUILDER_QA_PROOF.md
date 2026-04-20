@@ -2,6 +2,30 @@
 
 Append a `## Unit N.M — Round K` section per QA attempt. See `main/drops/WORKFLOW.md`.
 
+## Unit 2.2 — Round 1
+
+- **QA agent:** go-qa-proof-agent
+- **Verdict:** pass
+- **Verified acceptance bullets:**
+    - `Renderer` interface at `internal/render/render.go:21-25` with single method `Render(w io.Writer, counts counting.Counts) error`. Package doc + interface doc + method doc all start with the identifier name per naming rule 11.
+    - `NewHumanRenderer` at `internal/render/human.go:36-44` uses `laslig.New(w, laslig.Policy{Format: FormatAuto, Style: StyleAuto})`. Printer constructed per-call inside `Render` (`human.go:60-66`), not cached — satisfies "TTY detection against the real writer" design note.
+    - `newHumanRendererWithMode(mode laslig.Mode) Renderer` at `human.go:50-55` (unexported test variant); `Render` dispatches to `laslig.NewWithMode(w, h.mode)` when `useExplicitMode` is true.
+    - `NewJSONRenderer` at `json.go:23-25` returns a renderer whose `Render` uses `json.NewEncoder(w).Encode(counts)` with wrapped error. No laslig import in `json.go`.
+    - `TestHumanRenderer_SnapshotPlain` uses `newHumanRendererWithMode(testHumanMode)` where `testHumanMode = laslig.Mode{Format: FormatPlain, Styled: false, Width: 80}`. `TestHumanRenderer_TablePlain` covers zero / small / large tuples.
+    - `TestJSONRenderer_Snapshot` asserts exact `{"Bytes":12,"Lines":1,"Words":2,"Chars":12}\n`. `TestJSONRenderer_Table` covers zero / small / large tuples.
+    - F3 env invariant: no `os.Setenv` / `os.Unsetenv` in `render_test.go`; only a comment documenting the invariant.
+    - `main/go.mod` lists `github.com/evanmschultz/laslig v0.2.4` in direct `require` block (no `// indirect`). Transitive indirect deps in the indirect block.
+    - `main/go.sum` has laslig v0.2.4 h1 + /go.mod h1 entries.
+    - F4 pin: `grep -n 'json:' internal/counting/counting.go` → zero hits. `Counts` still tagless.
+    - PLAN.md Unit 2.2 state flipped to `done`.
+    - BUILDER_WORKLOG.md Unit 2.2 Round 1 entry at top, above Unit 2.1 entry.
+- **Mage targets run:**
+    - `mage build` → pass (silent success).
+    - `mage test` → pass; `internal/render` green under `-race`.
+    - `mage ci` → `0 issues.` + tests green end-to-end.
+- **Findings:** none. F3 env-independence, F4 no-json-tags, per-call printer construction all held.
+- **Hylla Feedback:** None — new `internal/render/*.go` files not in last ingest; laslig is external. Evidence via `Read` + `Grep` + mage stdout + laslig v0.2.4 module cache.
+
 ## Unit 2.1 — Round 1
 
 - **QA agent:** go-qa-proof-agent

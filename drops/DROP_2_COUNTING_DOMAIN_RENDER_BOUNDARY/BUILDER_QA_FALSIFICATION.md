@@ -2,6 +2,36 @@
 
 Append a `## Unit N.M — Round K` section per QA attempt. See `main/drops/WORKFLOW.md`.
 
+## Unit 2.2 — Round 1
+
+- **QA agent:** go-qa-falsification-agent
+- **Verdict:** pass
+- **Attacks tried:**
+    1. **F3 env pollution** — mitigated. Grep for `os.Setenv|Unsetenv|LookupEnv|Getenv|COLUMNS|NO_COLOR|TERM|CI` in `internal/render/` returned only comment hits documenting the invariant. No runtime env mutation.
+    2. **F3 mode pin** — mitigated. `render_test.go` declares `testHumanMode = laslig.Mode{Format: FormatPlain, Styled: false, Width: 80}` exactly. Every snapshot calls `newHumanRendererWithMode(testHumanMode)`.
+    3. **Per-call printer** — mitigated. `human.go:60-66` constructs `laslig.Printer` per `Render` call bound to the caller's writer. Nothing cached at `NewHumanRenderer()` time.
+    4. **JSON exact string** — mitigated. Snapshot asserts `{"Bytes":12,"Lines":1,"Words":2,"Chars":12}\n` exactly — declaration order (not alphabetical) confirms no `json:` tags.
+    5. **`Counts` tagless (F4)** — mitigated. `grep -n 'json:' internal/counting/counting.go` → zero hits.
+    6. **Laslig direct-dep** — mitigated. `go.mod` line 7 inside first `require ( ... )` block, no `// indirect`.
+    7. **`go mod tidy` process concern** — accepted. Builder ran `go mod tidy` directly to promote laslig indirect→direct. CLAUDE.md § "Dependencies" prescribes this flow after `mage addDep`. Not in forbidden raw-go list. Recommend future `mage tidy` wrapper for uniformity.
+    8. **Laslig KV method** — mitigated. `laslig@v0.2.4/printer.go:172-218` confirms `Printer.KV` iterates `Pairs` in slice order; `human.go:68-75` supplies Pairs in Bytes/Lines/Words/Chars declaration order.
+    9. **Snapshot format leak** — mitigated. Grep for ANSI codes in `render_test.go` → zero hits. Plain ASCII + `\n` only.
+    10. **Large-count formatting** — mitigated. Test covers `Bytes: 1_000_000_000` with full decimal output, no scientific notation, no comma separators.
+    11. **Table shape** — mitigated. `TestHumanRenderer_TablePlain` + `TestJSONRenderer_Table` each ship 3 cases (zero/small/large) with descriptive `t.Run` subtest names.
+    12. **YAGNI** — mitigated. Only `NewHumanRenderer` + `NewJSONRenderer` exported. No XML/CSV/YAML/TOML. No options struct. No format-enum factory.
+    13. **Test parallelism / race** — mitigated. `t.Parallel()` at function + subtest level. `mage test` with `-race` green.
+    14. **Import layering** — mitigated. `internal/render` imports only `io`, `fmt`, `strconv`, `encoding/json`, `laslig`, `internal/counting`. No `cmd/rak` leak. DAG intact.
+    15. **Interface conformance** — mitigated via compilation (`mage build` green proves constructors return `Renderer`-conformant values).
+- **Mage / shell invocations:**
+    - `mage build` → exit 0.
+    - `mage test` → exit 0; render + counting OK.
+    - `mage ci` → `0 issues.` end-to-end green.
+- **Findings:** none.
+- **Accepted trade-offs:**
+    - Attack 7: raw `go mod tidy` to promote laslig indirect→direct. Explicitly sanctioned by CLAUDE.md § "Dependencies". Recommend `mage tidy` wrapper later; accept for Unit 2.2.
+    - Attack 15: no compile-time `var _ Renderer = ...` assertion. Not required; `mage build` green proves conformance.
+- **Hylla Feedback:** N/A — new `internal/render/` files not in last ingest; laslig external. `Read` + `Grep` + module cache.
+
 ## Unit 2.1 — Round 1
 
 - **QA agent:** go-qa-falsification-agent
