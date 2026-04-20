@@ -2,7 +2,7 @@
 
 // Package main hosts the rak build automation targets driven by mage.
 //
-// Discover targets with mage -l. The nine canonical targets mirror the table
+// Discover targets with mage -l. The ten canonical targets mirror the table
 // in main/CLAUDE.md § "Build Verification"; any drift between that table and
 // this file is a bug. Never invoke raw go build, go test, go vet, gofumpt, or
 // golangci-lint — always route through the mage target. If a target is

@@ -52,7 +52,7 @@ Minimal cut: `2.0 → 2.2 → 2.3 → 2.4`, with `2.1` parallel to `2.0` (2.1 ha
 
 ### Unit 2.1 — Lift counting primitive into `internal/counting`
 
-- **State:** todo
+- **State:** done
 - **Paths:** `main/internal/counting/counting.go` (new), `main/internal/counting/counting_test.go` (new), `main/cmd/rak/root.go` (remove `Counts` struct + `count` function; imports shrink accordingly), `main/.golangci.yml` (remove orphan `cmd/rak/root.go` → `unused` exclusion rule now that `count` is exported + has a caller in `RunE`), `main/magefile.go` (F3 fold: doc comment "nine" → "ten")
 - **Packages:** `github.com/evanmschultz/rak/internal/counting` (new), `github.com/evanmschultz/rak/cmd/rak`
 - **Blocked by:** —

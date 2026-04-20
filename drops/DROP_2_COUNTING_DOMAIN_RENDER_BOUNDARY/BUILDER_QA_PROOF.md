@@ -2,6 +2,29 @@
 
 Append a `## Unit N.M — Round K` section per QA attempt. See `main/drops/WORKFLOW.md`.
 
+## Unit 2.1 — Round 1
+
+- **QA agent:** go-qa-proof-agent
+- **Verdict:** pass
+- **Verified acceptance bullets:**
+    - `Counts` struct shape + field order `Bytes, Lines, Words, Chars int64` — `internal/counting/counting.go:18-30`. F4 pin held: grep for `json:` on that file returned no matches.
+    - Go doc comments per naming rule 11 — package doc line 1, struct doc line 13, field docs lines 19/21/24/27, `Count` doc line 32 all begin with the identifier name.
+    - `Count(r io.Reader) (Counts, error)` signature exact — `internal/counting/counting.go:36`.
+    - Semantics parity with pre-2.1 `count` — compared new body (`counting.go:36-72`) to `git show 3cb4325:cmd/rak/root.go` pre-lift body: identical `bufio.NewReader` + `ReadRune` loop + `unicode.IsSpace` word split + `io.EOF` clean-exit. Line-for-line equivalent.
+    - Table-driven `TestCount` with all 7 acceptance tuples — `internal/counting/counting_test.go:16-50` (empty / hello / hello\n / hello world / hello world\nfoo bar\n / héllo\n UTF-8 / a\r\nb\r\n CRLF). Subtests via `t.Run(tc.name, ...)` at line 54 with descriptive snake_case names. `t.Parallel()` at both function (line 9) and subtest (line 55) levels — belt-and-suspenders for the race detector.
+    - `cmd/rak/root.go` no longer declares `Counts` or `count` — grep on `Counts|\bcount\b` returned no matches. Imports shrunk to `fmt` + `github.com/spf13/cobra` (lines 3-7); `bufio`, `io`, `unicode` dropped.
+    - F2 fold — `.golangci.yml` reduced to a single line `version: "2"`. Rationale comment block + `unused` exclusion rule both gone.
+    - F3 fold — `magefile.go:5` doc comment reads `"The ten canonical targets mirror the table"` (was "nine").
+    - PLAN.md Unit 2.1 state flipped to `done` at `drops/DROP_2_COUNTING_DOMAIN_RENDER_BOUNDARY/PLAN.md:55`.
+    - BUILDER_WORKLOG.md Unit 2.1 Round 1 entry at top, above the prior Unit 2.0 entry — most-recent-first ordering preserved.
+- **Mage targets run:**
+    - `mage build` from `main/` → pass (silent success).
+    - `mage test` from `main/` → pass; `internal/counting` green under `-race` (cached), `cmd/rak` `[no test files]` (expected pre-Unit-2.3).
+    - `mage lint` from `main/` → `0 issues.`
+    - `mage ci` from `main/` → `0 issues.` + tests green end-to-end.
+- **Findings:** none. Every acceptance bullet has file:line or command-output evidence. F2/F3/F4/F5 pins all held. Semantics preserved verbatim against the pre-lift `count` body in commit `3cb4325`.
+- **Hylla Feedback:** None — in-scope artifacts were either non-Go (`.golangci.yml`, `magefile.go` under `//go:build mage`, PLAN.md, BUILDER_WORKLOG.md) or changed-since-last-ingest (`cmd/rak/root.go` post-lift, new `internal/counting/*`). Evidence via `Read` + `git diff` + `git show 3cb4325:cmd/rak/root.go`. No miss.
+
 ## Unit 2.0 — Round 1
 
 - **QA agent:** go-qa-proof-agent

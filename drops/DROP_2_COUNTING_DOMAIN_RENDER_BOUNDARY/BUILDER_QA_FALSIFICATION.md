@@ -2,6 +2,42 @@
 
 Append a `## Unit N.M — Round K` section per QA attempt. See `main/drops/WORKFLOW.md`.
 
+## Unit 2.1 — Round 1
+
+- **QA agent:** go-qa-falsification-agent
+- **Verdict:** pass
+- **Attacks tried:**
+    1. **F4 JSON field tags** — mitigated. `grep json: internal/counting/` → zero hits. No tags on `Counts`.
+    2. **F4 field order** — mitigated. counting.go lines 20/23/26/29 declare `Bytes`, `Lines`, `Words`, `Chars` as `int64` in exact PLAN.md order.
+    3. **Test tuple accuracy** — mitigated. All 7 subtests match PLAN.md lines 67-73 verbatim; UTF-8 and CRLF F5 pin agree.
+    4. **Semantic drift from old `count`** — mitigated. `git show HEAD:cmd/rak/root.go` old `count` body byte-for-byte identical to new `Count`. No algorithmic change.
+    5. **CRLF hand-derivation** — mitigated. `"a\r\nb\r\n"`: `\r` is `unicode.IsSpace`, so words are "a" and "b" (2); `\n` occurrences (2) → Lines=2; 6 bytes = 6 chars (all ASCII). Test tuple agrees.
+    6. **Empty input** — mitigated. Tuple `{0,0,0,0}` with err=nil; `ReadRune` returns `io.EOF` → `return counts, nil`.
+    7. **Non-UTF-8 input** — accepted (not in acceptance). `bufio.Reader.ReadRune` returns U+FFFD size 1 on invalid bytes, guaranteeing progress. No risk of loop.
+    8. **root.go compilation** — mitigated. `mage build` exit 0. Imports shrunk to `fmt` + `cobra` only. No orphans.
+    9. **RunE stub** — mitigated (per plan line 65 "smallest change that keeps mage build green"; 2.3 re-adds io for stdin).
+    10. **`Long` description edit** — mitigated. root.go is a Unit 2.1 path per PLAN.md line 56, in-file prose is in-scope, new text is accurate (2.3 wiring deferred).
+    11. **`.golangci.yml` shrink F2** — mitigated. File is exactly `version: "2"`. `mage lint` 0 issues.
+    12. **`magefile.go` F3 fold** — mitigated. `magefile.go:5` says "ten canonical targets". `grep -n nine magefile.go` → no hits. CLAUDE.md table has 10 rows. `mage -l` lists 10 targets.
+    13. **Test parallelism / race** — mitigated. `t.Parallel()` at function + subtest level. `mage test` (runs `-race`) exit 0.
+    14. **Package doc comment** — mitigated. counting.go lines 1-4 carry proper package doc.
+    15. **Exported/unexported split** — mitigated. Only `Counts`, four fields, and `Count` exported. No incidental exports.
+    16. **`int64` discipline** — mitigated. All four fields `int64`; `+= int64(size)` + `int64` `++` idioms used. No plain `int`.
+    17. **YAGNI** — mitigated. No `CountString`, no `CountsSum`, no options struct. Minimal surface.
+- **Mage / shell invocations:**
+    - `mage build` → exit 0, no output.
+    - `mage test` → exit 0; `internal/counting` OK (cached); `cmd/rak` no test files (expected — tests land in 2.3).
+    - `mage lint` → `0 issues.`
+    - `mage ci` → exit 0 end-to-end (gofumpt clean, vet clean, golangci-lint 0 issues, tests pass).
+    - `mage -l` → 10 targets listed.
+    - `git diff --stat HEAD` → 5 files changed; scope matches Unit 2.1 paths (PLAN.md line 56) plus in-drop doc files.
+    - `git show HEAD:cmd/rak/root.go` → old `count` body byte-for-byte identical to new `Count` body.
+- **Findings:** none.
+- **Accepted trade-offs:**
+    - Non-UTF-8 input not covered by a test (attack 7). Not required by PLAN.md; `bufio.Reader.ReadRune` guarantees progress via U+FFFD substitution.
+    - RunE still returns "not implemented" stub (attack 9). Per PLAN.md line 65, smallest-change policy defers wiring to Unit 2.3.
+- **Hylla Feedback:** N/A — in-scope artifacts are either pre-ingest (`internal/counting/` brand new), changed-since-last-ingest (`cmd/rak/root.go`), or non-Go (`.golangci.yml`, `magefile.go` build-tagged, PLAN.md, BUILDER_WORKLOG.md). Evidence via `Read` + `git show` + `git diff` + live `mage` runs. No miss.
+
 ## Unit 2.0 — Round 1
 
 - **QA agent:** go-qa-falsification-agent
