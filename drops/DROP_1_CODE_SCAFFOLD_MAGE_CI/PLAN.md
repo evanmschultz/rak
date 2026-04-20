@@ -19,7 +19,7 @@ Three dev-installed Go tools must be present on the dev machine before Unit 1.4 
 
 - **`mage`** — `go install github.com/magefile/mage@latest`. Required so the magefile landed in 1.5 has a runner.
 - **`gofumpt`** — `go install mvdan.cc/gofumpt@latest`. Required by `mage format` and the `mage ci` empty-diff assertion in 1.5.
-- **`golangci-lint`** — `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`. Required by `mage lint` (composed into `mage ci`) in 1.5.
+- **`golangci-lint`** — `curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.11.4` (upstream maintainers explicitly recommend against `go install` for golangci-lint — see Context7 `/golangci/golangci-lint` + local/docs/welcome/install/local.md). Required by `mage lint` (composed into `mage ci`) in 1.5.
 
 If any tool is missing when Drop 1.4 / 1.5 starts, the builder pauses and surfaces the gap to the orchestrator rather than installing it from inside an agent.
 

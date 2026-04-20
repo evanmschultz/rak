@@ -340,3 +340,60 @@ All seven acceptance bullets clear.
 ### Hylla Feedback
 
 N/A — Unit 1.6 is YAML-only, a non-Go file. Hylla is Go-only by design (per main/CLAUDE.md § "Code Understanding Rules" rule 3: "Non-Go code (markdown, TOML, YAML, magefile, SQL): use `Read`, `Grep`, `Glob`, `Bash` directly"). No Hylla query was run and none would have applied. The Context7 query for `actions/setup-go` was the external-semantics lookup (third evidence tier), not a Hylla fallback.
+
+## Unit 1.6 — Round 2
+
+### Files touched
+
+- `main/.github/workflows/ci.yml` (line 37–38 step body rewritten: `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest` → `curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.11.4`).
+- `main/drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/PLAN.md` (line 22 dev-prereq bullet rewritten to match the install-script + v2.11.4 pin; Unit 1.6 state `done → in_progress → done`).
+- `main/drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/BUILDER_WORKLOG.md` (this append — Round 2 section).
+
+### Defect recap (what Phase 6 caught)
+
+Round 1's workflow step installed golangci-lint via `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`. That module path ships **v1** of golangci-lint. The project's `main/.golangci.yml` declares `version: "2"`, so the v1 binary rejected the config on the CI runner with:
+
+```
+Error: you are using a configuration file for golangci-lint v2 with golangci-lint v1: please use golangci-lint v2
+Error: mage lint: golangci-lint: running "golangci-lint run" failed with exit code 3
+```
+
+Failing CI run: id `24643888100`, sha `c2300004fa05f257dec77f4b52abc64ef53f6adb`. Local `mage ci` in Round 1 passed because the dev's `/Users/evanschultz/go/bin/golangci-lint` is v2.11.4, installed via the upstream script rather than `go install` — so Round 1 QA (both agents evaluated locally) missed the v1/v2 split.
+
+Documentation drift: drop `PLAN.md` line 22 listed the same wrong `go install ...@latest` command for the dev's local machine. Future devs setting up from the prereq list would hit the same v1/v2 split. Both files fixed in Round 2.
+
+### Commands run
+
+- `mage ci` from `main/` → exit 0. Output:
+  ```
+  0 issues.
+  ?   	github.com/evanmschultz/rak/cmd/rak	[no test files]
+  ```
+  (Local execution path unchanged — dev's existing v2.11.4 binary on PATH is what `mage lint` invokes locally; the workflow step only affects the CI runner's install path.)
+- `grep -n 'mage install' main/.github/workflows/ci.yml` → 0 hits. PASS (required 0).
+- `grep -ni coverage main/.github/workflows/ci.yml` → 0 hits. PASS (required 0).
+- `grep -n 'install.sh' main/.github/workflows/ci.yml` → 1 hit at line 38 (the new install step). PASS (required 1).
+- `grep -n 'v2.11.4' main/.github/workflows/ci.yml` → 1 hit at line 38 (same line as install.sh). PASS (required 1).
+
+No `git push`. No `mage install` invocation. No edit to the `Install mage` or `Install gofumpt` steps (explicitly out of scope; Drop 9 owns full tool-version pinning).
+
+### Design notes (why install.sh + v2.11.4 pin)
+
+Upstream golangci-lint maintainers explicitly recommend against `go install` / `go get` / `go tool` installs. Verbatim from Context7 `/golangci/golangci-lint` (already verified by orchestrator; re-using the citation here):
+
+> The maintainers of golangci-lint strongly recommend against installing the tool via 'go install', 'go get', or 'go tool' directives. These methods are discouraged because they compile the tool locally, meaning the resulting binary depends on your specific local Go version rather than a tested, standardized environment. Furthermore, using these methods can lead to dependency conflicts.
+
+Two alternatives considered, one picked:
+
+- **(A) Switch module path to `.../cmd/golangci-lint/v2@latest`.** Would flip the `go install` target to the v2 major. Rejected — still `go install`, still subject to upstream's explicit anti-pattern warning; still floats to whatever is tagged latest in the v2 line (same class of risk as Round 1's implicit v1 float).
+- **(B) Use the upstream install script, pinned to v2.11.4.** Picked. Matches upstream's documented install path, pins to the exact version the dev's local binary is on (`v2.11.4`, confirmed per orchestrator's `gh release list --repo golangci/golangci-lint` check), and eliminates both the v1/v2 ambiguity and the `@latest` float concern. The pin is one concrete version — future upgrades are an explicit version-bump commit.
+
+Scope note: `mage` and `gofumpt` installs in the workflow remain `go install ...@latest` per orch direction. Drop 9's follow-up (`main/PLAN.md` § "Follow-Ups" → "Pin `gofumpt` + `golangci-lint` versions in Drop 9") owns full tool-version pinning across the workflow; this Round 2 fix is narrowly scoped to the v1/v2 defect that broke Phase 6.
+
+### Surprises
+
+None. The edit is a single step-body swap plus a matching doc update; local `mage ci` already exercises the dev's v2.11.4 binary, so nothing local changed behavior.
+
+### Hylla Feedback
+
+None — YAML + markdown edits only, non-Go. Hylla is Go-only by design and would not cover either file. No Hylla query was run and none would have applied.
