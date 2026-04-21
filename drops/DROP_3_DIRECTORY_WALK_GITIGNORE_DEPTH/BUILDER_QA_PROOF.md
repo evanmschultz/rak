@@ -552,3 +552,133 @@ No raw `go test` / `go build` / `go vet` / `gofumpt` / `golangci-lint` invocatio
 ### Hylla Feedback
 
 None — Hylla answered everything needed. Unit 3.4 adds `binary.go` to a package (`internal/fileset`) whose last ingest predates Drop 3 entirely (reingest is drop-end-only per WORKFLOW.md Phase 7), so Hylla was correctly not consulted for the new binary.go / binary_test.go symbols. The single in-rak dependency is `(*File).Peek` from Unit 3.2's freshly-written `file.go`, which I resolved by `Read`-ing file.go directly from the active checkout — documented fallback for newly-authored code not yet in the Hylla baseline. External semantics for `bytes.IndexByte` and `errors.New` are stdlib and were not looked up. Drop mds are markdown and out of Hylla's Go-only scope. Zero fallback misses to record.
+
+## Unit 3.5 — Round 1
+
+- **QA proof:** go-qa-proof-agent
+- **Reviewed:** 2026-04-21
+- **Verdict:** pass
+- **Commit under review:** `fde7597 feat(cmd): wire walker into root with path-arg aggregation`
+
+### Acceptance-criterion verification
+
+**AC1 — Six new flags registered on root cmd with correct defaults:**
+- `cmd/rak/root.go` lines 55–97 register `--format` (existing), `--depth int` (default 0), `--hidden bool` (default false), `--no-gitignore bool` (default false), `--binary bool` (default false), `--include []string` (default nil), `--exclude []string` (default nil).
+- `rootFlags` struct at lines 24–32 matches the six new flag names.
+- Each flag carries a doc string matching the tone of the pre-existing `--format` help.
+- **Pass.**
+
+**AC2 — `runRoot` branches on `len(args)`; stdin path unchanged from Drop 2:**
+- `runRoot` lines 104–128. `len(args) == 0` falls through to `counting.Count(c.InOrStdin())` → `renderer.Render(c.OutOrStdout(), counts)` — the Drop 2 chain verbatim.
+- `len(args) == 1` dispatches to `runDirectory(ctx, w, args[0], os.DirFS(args[0]), flags, renderer)` at line 116.
+- `cmd.MaximumNArgs(1)` at line 49 pins the positional-arg contract; extra args return cobra's standard error.
+- Integration test `TestRootCmd_Integration_JSONFormat` (integration_test.go lines 87–122) asserts the stdin path still produces byte-exact `{"Bytes":29,"Lines":2,"Words":5,"Chars":27}\n`. Confirmed green under `mage ci`.
+- **Pass.**
+
+**AC3 — Walker construction maps flags into `WalkOptions` correctly:**
+- `walkAndCount` lines 173–180 build `fileset.WalkOptions{Depth: flags.depth, IncludeHidden: flags.hidden, DisableGitignore: flags.noGitignore, Includes: flags.includes, Excludes: flags.excludes}`. Field names match the planner-specified `WalkOptions` contract from Unit 3.3.
+- Walker rooted at `"."` inside `fsys` (line 174) — io/fs convention; production callers pass `os.DirFS(args[0])` so `.` maps to the user-supplied root.
+- **Pass.**
+
+**AC4 — C10 error aggregation (walker + IsBinary) — only ctx aborts:**
+- `walkAndCount` lines 186–223 is the authoritative aggregation loop. Three branches:
+  1. Line 187 (walker error): check `context.Canceled` / `context.DeadlineExceeded` at line 191 and return wrapped `walk: %w` (line 192); otherwise append to `aggErrs` and `continue` (lines 196–197). F6 satisfied.
+  2. Lines 203–212 (IsBinary error): append `fmt.Errorf("binary check %q: %w", f.RelPath, err)` to `aggErrs` and `continue` at line 207; if `isBin == true` the file is skipped silently (no error). C10 satisfied.
+  3. Lines 214–218 (countFile error): append to `aggErrs` and `continue`.
+- `TestRootCmd_PathArg_SkipsBinary/induced_peek_error_aggregated` (root_test.go lines 332–362) proves the end-to-end path via a `failingOpenFS` stub that returns `fs.ErrPermission` on one file: the test asserts `a.txt` still contributes (no walk abort) AND `aggregErrors` contains an entry mentioning `bad.txt`.
+- **Pass.**
+
+**AC5 — Per-dir aggregation + deterministic ordering:**
+- `byDir := map[string]counting.Counts{}` (line 182) plus `byDir[dir] = addCounts(byDir[dir], fileCounts)` (line 221) aggregates per-directory via `dirKey(relPath)` (lines 254–263 — returns `"."` for root files, `path.Dir(relPath)` otherwise).
+- `sort.Slice(dirs, ..., dirs[i].Path < dirs[j].Path)` at line 229 makes output deterministic lexically.
+- `total` grows with every counted file (line 222) independent of per-dir bucket.
+- `TestRootCmd_PathArg_FlatDir` asserts flat-dir counts equal the "." bucket and the grand total (root_test.go lines 170–194).
+- **Pass.**
+
+**AC6 — F15 renderer interface growth (`RenderTree` on both):**
+- `internal/render/render.go` lines 27–39 define `Renderer` with both `Render` and `RenderTree(w, dirs, total, errs) error`. The `errs` parameter is an addition over the planner's stated `RenderTree(w, dirs, total) error` signature — this is a minor *beneficial* extension driven by the C10 error-summary requirement; AC4 + AC9 in the plan both required the error summary to surface via the renderer, and the extra parameter is the minimum-coupled way to thread errors through. Both renderer implementations accept and exercise the parameter.
+- `humanRenderer.RenderTree` (human.go lines 72–97) emits one KV block per dir with Title `"dir: <path>"` (line 75), a Title `"total"` block (line 79), and a `laslig.NoticeWarningLevel` notice titled `"Errors"` with per-error `Detail` strings when `len(errs) > 0` (lines 82–95).
+- `jsonRenderer.RenderTree` (json.go lines 61–79) emits `{"directories":[{"path","counts"}...],"total":{...}}` with `"errors":[...]` only when non-empty via `omitempty` on the `treeJSON.Errors` field (line 54).
+- Package-level interface-satisfaction assertions at `cmd/rak/root_test.go` lines 401–404 (`var _ render.Renderer = render.NewHumanRenderer()` / `= render.NewJSONRenderer()`) fail the build if either renderer drops `RenderTree`. Symmetric growth guard.
+- Snapshot tests in `internal/render/render_test.go` lines 148–351 cover both renderers across empty/non-empty dirs, with/without errors, and byte-exact JSON envelope.
+- **Pass.**
+
+**AC7 — C8 provisional `render.Directory` — consumers touch only Path/Counts:**
+- `render.Directory` declared in render.go lines 51–60 with exactly two fields: `Path string` + `Counts counting.Counts`, both with doc comments. Directory carries a block comment at lines 45–50 flagging the provisional status and pointing at Drop 6.1's migration.
+- `grep 'render.Directory'` across the repo (excluding drops/ mds): only hits are in `cmd/rak/root.go` (lines 173, 225, 227, 281, 285, 288, 291 — all use `.Path` + `.Counts` only) and `internal/render/json.go` line 67 (`directoryJSON(d)` struct conversion — by definition touches only the declared fields).
+- Nothing consumes Directory as an interface or expects methods on it. No code depends on field ordering beyond the struct-conversion trick in `json.go`, which the worklog explicitly flags as a migration-touch-point (line 185 of BUILDER_WORKLOG.md).
+- **Pass.**
+
+**AC8 — F13 deferred flags NOT added:**
+- `grep -n 'tracked-only|--follow|max-files'` across `cmd/rak/` returns zero hits. Neither the flag registration nor the struct fields carry any reference to `--tracked-only`, `--follow`, or `--max-files`.
+- Attempted `cobra` invocation with `--tracked-only` would hit the default "unknown flag" rejection (cobra's standard behavior for flags not registered); no stub registration exists.
+- **Pass.**
+
+**AC9 — F11 fixture `bin.dat` is exactly 1 byte `\x00`:**
+- `ls -la cmd/rak/testdata/tree/bin.dat` shows `1` in the size column.
+- `xxd cmd/rak/testdata/tree/bin.dat` shows `00000000: 00` — exactly one byte, value 0x00. First-byte NUL guarantees `IsBinary()` returns `true` via the F10 heuristic.
+- No other binary fixtures under `internal/<pkg>/testdata/` — confirmed via `grep -l 'testdata'` and the FIlebreakdown rule.
+- **Pass.**
+
+**AC10 — F12 `internal/fileset` stays CLI-free:**
+- `grep 'cobra\|spf13\|flag\.\|pflag'` across `internal/fileset/` returns zero hits. The package imports only stdlib + `internal/ignore`.
+- Binary-skip policy lives at `cmd/rak/root.go` lines 203–212 — decided in the aggregation loop, not inside the walker. Walker yields every non-ignored file; `cmd/rak` calls `f.IsBinary()` only when `!flags.binary`.
+- **Pass.**
+
+**AC11 — U4 "Drop 3" rejection error removed:**
+- `grep -n 'Drop 3\|walker lands'` across `cmd/rak/` returns zero hits.
+- The old `TestRootCmd_RejectsPathArg` test that asserted the error is absent from `cmd/rak/root_test.go` — worklog lines 168 and 197 confirm the deletion (`TestRootCmd_RejectsPathArg` deleted, not pivoted).
+- `root.go`'s new `Long` help text (lines 43–48) describes the `len(args)==1` path without tying it to a drop number.
+- **Pass.**
+
+**AC12 — Comprehensive `root_test.go` test coverage:**
+All seven planner-specified tests exist with at least the specified subtests:
+- `TestRootCmd_PathArg_EmptyDir` (lines 150–165).
+- `TestRootCmd_PathArg_FlatDir` (lines 170–194).
+- `TestRootCmd_PathArg_Gitignore` with `default_drops_vendor` and `no_gitignore_includes_vendor` subtests (lines 198–234).
+- `TestRootCmd_PathArg_IncludeExclude` (lines 238–258) covers F2 (exclude wins over include).
+- `TestRootCmd_PathArg_Depth` with `unlimited` + `depth_1` subtests (lines 262–288).
+- `TestRootCmd_PathArg_SkipsBinary` with `nul_detected_skipped_by_default`, `nul_detected_included_with_flag`, `induced_peek_error_aggregated` subtests (lines 300–363) — covers C10 clean path + error path.
+- `TestRootCmd_PathArg_Hidden` with `default_excludes_hidden` + `hidden_flag_includes_hidden` subtests (lines 367–390).
+- All subtests call `t.Parallel()`; all use the `runTreeFS` helper with injected `fs.FS` stubs for induced errors (`failingOpenFS` at lines 422–435 is the minimal stub surfacing `fs.ErrPermission` on one configured path).
+- **Pass.**
+
+**AC13 — Integration tests against `cmd/rak/testdata/tree/`:**
+- `TestRootCmd_Integration_PathArg_HumanFormat` (integration_test.go lines 156–188) asserts substring presence for labels `Bytes`/`Lines`/`Words`/`Chars`/`total`/`dir:`/`testdata`/`tree`/`20`.
+- `TestRootCmd_Integration_PathArg_JSONFormat` (lines 193–256) asserts the JSON envelope parses back cleanly, total matches 20/2/4/20, exactly two directory buckets (root + sub), per-dir counts match 12 bytes (root) + 8 bytes (sub), and `errors` is empty.
+- Fixture tree on disk matches the planner spec: `a.txt` (12 B), `sub/nested.txt` (8 B), `.gitignore` (vendor/\n), `.hidden.txt`, `bin.dat` (1-byte NUL), `vendor/ignored.txt` — confirmed via `ls -la` + `cat` + `xxd`.
+- **Pass.**
+
+**AC14 — `mage test ./cmd/rak/...`, `mage test ./...`, `mage lint`, `mage ci` all green:**
+- `mage ci` run during this review: `0 issues.` from golangci-lint; all five packages pass tests (cmd/rak, internal/counting, internal/fileset, internal/ignore, internal/render).
+- `mage coverage` run during this review: total 89.1% of `./internal/...` statements — comfortably above the 70% drop-floor gate (which does not flip on until Drop 9.3 regardless). `cmd/rak` not coverpkg-reported by design (CLI wiring excluded).
+- **Pass.**
+
+### F-pin / C-pin / U-pin coverage summary
+
+| Pin | Check | Status |
+|---|---|---|
+| F6  | Walker per-entry errors aggregate, only ctx aborts (root.go 186–198) | Pass |
+| F11 | bin.dat is exactly 1 byte `\x00` (xxd confirms) | Pass |
+| F12 | internal/fileset has zero cobra/spf13/pflag/flag imports | Pass |
+| F13 | `--tracked-only`, `--follow`, `--max-files` not registered | Pass |
+| F15 | `RenderTree` present on both renderers + package-level interface assertion | Pass |
+| C8  | `render.Directory` referenced only by `render` + `cmd/rak`; only `.Path`/`.Counts` touched | Pass |
+| C10 | IsBinary + walker + countFile errors aggregate; only ctx aborts | Pass |
+| U4  | "Drop 3"/"walker lands" rejection error removed from cmd/rak | Pass |
+
+### Findings
+
+None. Every acceptance criterion has a concrete trace through the code with passing tests backing it.
+
+### Proof certificate
+
+- **Premises:** Unit 3.5 must (1) register six new flags on root with stated defaults, (2) branch `runRoot` on `len(args)` preserving the Drop 2 stdin path byte-for-byte, (3) construct walker with correct `WalkOptions` mapping, (4) aggregate walker + IsBinary errors rather than aborting (only ctx cancellation aborts — C10 + F6), (5) roll up per-directory with deterministic ordering, (6) grow `Renderer` interface with `RenderTree` on both concrete implementations (F15), (7) keep `render.Directory` provisional with only `Path`/`Counts` consumed externally (C8), (8) NOT register F13 deferred flags, (9) ship a 1-byte `bin.dat` fixture (F11), (10) keep `internal/fileset` CLI-free (F12), (11) remove the U4 rejection error, (12) provide comprehensive test coverage in `root_test.go` + `integration_test.go`, and (13) pass `mage ci` green.
+- **Evidence:** Direct source inspection of `cmd/rak/root.go` (314 LOC), `cmd/rak/root_test.go` (436 LOC), `cmd/rak/integration_test.go` (257 LOC), `internal/render/render.go` (61 LOC), `internal/render/human.go` (123 LOC), `internal/render/json.go` (80 LOC), `internal/render/render_test.go` (352 LOC). Fixture tree on disk confirmed via `/bin/ls -la` + `xxd` + `cat`. `grep` sweeps for F12/F13/U4 pin regression markers returned zero hits in scope. `mage ci` ran green at review time; `mage coverage` reported 89.1% `./internal/...` statements.
+- **Trace:** Each acceptance criterion (AC1–AC14) maps to specific file:line citations above. F/C/U pins summarized in the table. Stdin-path preservation verified via `TestRootCmd_Integration_JSONFormat` byte-exact snapshot (unchanged from Drop 2). Path-arg semantics verified via seven `TestRootCmd_PathArg_*` tests covering empty / flat / gitignore (2) / include-exclude / depth (2) / binary (3) / hidden (2) cases. Error-aggregation semantics verified via `induced_peek_error_aggregated` subtest using `failingOpenFS` stub — proves one `fs.ErrPermission` open error aggregates while the rest of the walk proceeds.
+- **Conclusion:** PASS. All 14 acceptance criteria met; all 8 in-scope F/C/U pins held; `mage ci` green; coverage at 89.1%.
+- **Unknowns:** None material. The `RenderTree` signature grew a fourth `errs []error` parameter beyond the planner's stated three-param signature — this is a minor beneficial extension required by the C10 error-summary policy; both concrete renderers exercise it and the extension is documented in the Renderer interface doc comment. If the planner intended to flag this as a signature deviation, surface it in falsification sibling's review — otherwise accepted as planner-implied by the error-summary requirements.
+
+### Hylla Feedback
+
+None — Hylla answered everything needed. Unit 3.5 touches `cmd/rak/root.go` and `internal/render/*` inside packages whose current Hylla snapshot still predates Drop 3, so every in-rak symbol reference (`fileset.NewWalker`, `fileset.WalkOptions`, `fileset.File.IsBinary`, `fileset.File.Open`, `counting.Count`, `counting.Counts`, `render.NewHumanRenderer`, `render.NewJSONRenderer`, `render.Renderer`, `render.Directory`) was resolved via direct `Read` on the active checkout — documented fallback for post-ingest / uncommitted code. Stdlib semantics (`io/fs.FS`, `io/fs.PathError`, `encoding/json.Encoder`, `context.Canceled`) and external semantics (`laslig.Notice`, `laslig.NoticeWarningLevel`, `cobra.Command`) did not require Context7 at this review depth. Zero Hylla queries issued, zero misses to report.
