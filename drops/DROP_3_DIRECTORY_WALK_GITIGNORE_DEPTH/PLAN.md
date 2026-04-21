@@ -49,7 +49,7 @@ Import DAG (reconfirms main/CLAUDE.md § "Project Structure" → "Import DAG"): 
 
 ### Unit 3.2 — internal/fileset.File: Open + Peek + hidden helper
 
-**State:** todo
+**State:** done
 **Paths:** `main/internal/fileset/file.go`, `main/internal/fileset/file_test.go`
 **Packages:** `github.com/evanmschultz/rak/internal/fileset` (new)
 **Blocked by:** 3.0
