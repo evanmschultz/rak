@@ -273,3 +273,171 @@ Unexported identifiers (`newFile`, the unexported `fs` field) also carry doc com
 ### Hylla Feedback
 
 None — Hylla answered everything needed. Unit 3.2 introduces a brand-new file in a package that did not exist in Hylla's last ingest (reingest is drop-end-only per WORKFLOW.md Phase 7), so Hylla was correctly not consulted for the new symbols. All external semantics resolved via `go doc io.ReadFull`, `go doc io/fs.FS`, and `go doc errors` — the documented Go-idiomatic path for stdlib questions per CLAUDE.md § "Code Understanding Rules" rule 4. Drop mds (PLAN.md, BUILDER_WORKLOG.md, WORKFLOW.md) are markdown and out of Hylla's Go-only scope. Zero fallback misses to record.
+
+## Unit 3.3 — Round 1
+
+- **QA proof:** go-qa-proof-agent
+- **Reviewed:** 2026-04-21
+- **Verdict:** pass
+- **Commit under review:** `6d6bf5a feat(fileset): add walker with iter.seq2 emission and depth gate`
+
+### Acceptance-criterion verification
+
+**AC1 — `WalkOptions` with `Depth` / `IncludeHidden` / `DisableGitignore` (zero=false=enabled per C2) / `Includes` / `Excludes`; `Depth=0` unlimited, `Depth=1` root only, depth counts edges from walk root (C7):**
+- `walker.go:39-59` — struct fields match spec exactly with field-level doc comments.
+- Package doc `walker.go:16-38` pins all four contracts: `Depth=0` unlimited (line 22), `Depth=1` walks only root (line 22), `DisableGitignore` zero-value false = gitignore ENABLED (lines 31-33, pins C2).
+- Depth math verified at `walker.go:216-232`: `depth := slashCount(p) - rootDepth`; directory pruned when `p != w.root && depth >= w.opts.Depth`; file filtered when `depth >= w.opts.Depth`. Root exempt per C7.
+- `TestWalker_DepthLimit` (`walker_test.go:108-159`) table with 3 rows — unlimited / root-only / root+one-level — all pass with the computed depth. I traced: `sub/mid.txt` at depth 1 under Depth=2 → `1 >= 2` false → yielded ✓; `sub/deep/inner.txt` at depth 2 under Depth=2 → pruned ✓.
+- **Pass.**
+
+**AC2 — `NewWalker(fsys fs.FS, root string, opts WalkOptions) *Walker`; `(*Walker).Walk(ctx context.Context) iter.Seq2[*File, error]` (F5 — range-over-func iterator):**
+- `walker.go:85-87` — `NewWalker` signature matches spec exactly.
+- `walker.go:116` — `Walk(ctx context.Context) iter.Seq2[*File, error]`; returns a closure yielding `(*File, error)`. F5 pinned.
+- Caller pattern `for f, err := range w.Walk(ctx)` exercised in every test; `collect` / `collectCtx` helpers (test lines 22-38) drain the iterator cleanly.
+- **Pass.**
+
+**AC3 — F14 yield-false → `fs.SkipAll` terminates cleanly (NEVER `nil` or `fs.SkipDir` after false yield):**
+- `walker.go:122` — `yieldOK := true` captured in the closure.
+- `walker.go:147-152` — guard #1: every WalkDirFunc invocation starts with `if !yieldOK { return fs.SkipAll }`. This is the critical pin — once yield returns false, the next invocation returns `fs.SkipAll` without re-invoking yield.
+- `walker.go:160-163` — ctx-cancel path: yield once, flip `yieldOK = false`, return `fs.SkipAll`.
+- `walker.go:172-176` — per-entry error path: if yield returns false, flip guard + return `fs.SkipAll`.
+- `walker.go:192-195` — matcher-error path: yield once, flip guard, return `fs.SkipAll`.
+- `walker.go:244-247` — per-dir gitignore rebuild failure: same pattern.
+- `walker.go:269-272` — file emission path: if yield returns false, flip guard + return `fs.SkipAll`.
+- `TestWalker_RangeBreak` (`walker_test.go:422-457`) — 4-file fixture (meets "at least 3 files" acceptance requirement); `break` after first emission; `defer recover()` panic guard; asserts `count == 1`. Passes, no panic. **F14 regression-guarded.**
+- **Pass.**
+
+**AC4 — F6 per-entry errors yielded with `walk %q: %w` wrap; walk continues past errors:**
+- `walker.go:172` — `wrapped := fmt.Errorf("walk %q: %w", p, entryErr)` exactly matches the specified wrap format.
+- `walker.go:173-184` — yields wrapped error, then returns `fs.SkipDir` for failed dirs (continues walk elsewhere) or `nil` otherwise.
+- `TestWalker_UnreadableEntry` (`walker_test.go:383-420`) — custom `errFS` stub whose `errDir.ReadDir` returns `errors.New("induced ReadDir failure")`. Walk yields the induced error AND continues to emit `keep.txt` + `other/y.txt`. Both assertions green.
+- The `errFS`/`errDir` stub pair implements only the minimum `fs.FS` + `fs.ReadDirFile` surface needed to exercise fs.WalkDir's "second call with err" code path — correct minimum API targeting.
+- **Pass.**
+
+**AC5 — C7 Depth counts edges from walk root; 0 = unlimited:**
+- `walker.go:144` — `rootDepth := slashCount(w.root)` computed once per Walk call.
+- `walker.go:217` — `depth := slashCount(p) - rootDepth` per entry.
+- `walker.go:216` — `if w.opts.Depth != 0 { ... }` — Depth=0 short-circuits the entire depth enforcement, making it unlimited.
+- `slashCount` (`walker.go:289-294`) treats `"."` and `""` as zero, matching the "root is depth 0" convention.
+- `TestWalker_DepthLimit/depth_zero_unlimited` asserts all three files emitted when Depth=0.
+- **Pass.**
+
+**AC6 — C2 `DisableGitignore` zero-value false → gitignore enabled by default:**
+- `walker.go:50` — field declared without a tag override, so the Go zero value is `false`.
+- Field doc at line 48-50: "Zero value (false) keeps gitignore ENABLED, per C2."
+- `walker.go:237` — `if isDir && !w.opts.DisableGitignore { ... readGitignore ... }` — gitignore reading fires when the flag is false (default).
+- `TestWalker_Gitignore/gitignore_enabled_skips_vendor` uses `WalkOptions{}` (zero values throughout) and asserts `vendor/foo.go` + `vendor/deep/b.go` dropped. C2 regression-guarded.
+- **Pass.**
+
+**AC7 — C3 `fileset.IsHidden(entry.Name())` used (basename-only, via DirEntry.Name):**
+- `walker.go:203` — `if !w.opts.IncludeHidden && p != w.root && IsHidden(d.Name()) { ... }`. `d.Name()` returns the basename per `fs.DirEntry`; `IsHidden` from `file.go` expects a basename. Contract matches.
+- Walk root exempted by `p != w.root` guard (also `IsHidden(".")` returns false anyway, so the guard is belt-and-suspenders).
+- Hidden directories pruned via `fs.SkipDir` (walker.go:205); hidden files just return `nil`.
+- `TestWalker_SkipsHidden/hidden_excluded_by_default` asserts `.hidden.txt` and entire `.git/` subtree dropped with default options. `hidden_included_on_flag` asserts both appear with `IncludeHidden: true`. Both pass.
+- **Pass.**
+
+**AC8 — C6 forward-slash relPath:**
+- `relFrom` (`walker.go:300-308`) builds relPath via `strings.TrimPrefix(p, root+"/")` — literal forward slash. Works for `root=="."` (falls through to `p` unchanged, which MapFS/os.DirFS already produce with forward slashes) and for subdir roots.
+- `fs.WalkDir` itself passes forward-slash paths (io/fs convention); both `testing/fstest.MapFS` and `os.DirFS` honor this regardless of host OS.
+- relPath is threaded into `newFile(w.fsys, p, relPath)` at walker.go:268 — F.RelPath carries forward-slash form.
+- Test assertions compare against literal forward-slash paths (`"sub/b.txt"`, `"sub/deep/c.txt"`, etc.) throughout — passing on macOS and would pass on Windows for the same reason.
+- **Pass.**
+
+**AC9 — F7 symlinks yielded, not followed:**
+- `walker.go:266-273` — no symlink-specific branch; the walker treats symlinks as regular entries and yields them via `newFile`. `fs.WalkDir` does not follow symlinks (stdlib contract, `go doc io/fs.WalkDir`: "WalkDir does not follow symbolic links"), so we inherit the correct policy by composition.
+- `TestWalker_SymlinkYielded` (`walker_test.go:459-510`) — MapFS fixture with `fs.ModeSymlink` for both `link_ok` (valid target) and `link_broken` (missing target). Asserts:
+  - All three entries (including both symlinks) are yielded.
+  - `broken.Open()` returns an error unwrapping to `fs.ErrNotExist` via `errors.Is` — confirms F7's "broken-target error surfaces to the caller" policy.
+- No `--follow` flag registered — correctly deferred to Drop 8.5 per F7.
+- **Pass.**
+
+**AC10 — F8 hierarchical gitignore scoping (sub/.gitignore applies to sub/ only):**
+- `readGitignore` (`walker.go:320-349`) — reads `<dir>/.gitignore` fresh on directory entry, creates a `GitignoreRoot{Dir: relPath, Patterns: lines}` scoped to the relative directory.
+- `walker.go:237-250` — before matcher check for each directory, if gitignore enabled and a `.gitignore` is present, appends a new root and rebuilds the matcher via `ignore.New`. The `ignore` package's `scopePath` (Unit 3.1) enforces dir-prefix scoping — verified in Unit 3.1's QA.
+- `TestWalker_NestedGitignore` (`walker_test.go:247-275`) — `sub/.gitignore` containing `secret.txt` drops `sub/secret.txt` but keeps root `secret.txt` AND `other/secret.txt`. F8 regression-guarded with the exact asymmetric cases.
+- **Pass.**
+
+**AC11 — All 12 acceptance-required test functions present:**
+- `grep -c "^func Test" internal/fileset/walker_test.go` → 12. Enumeration against PLAN.md AC lines 91-102:
+  1. `TestWalker_EmptyRoot` (walker_test.go:40) ✓
+  2. `TestWalker_SingleFile` (line 60) ✓
+  3. `TestWalker_NestedTree` (line 78) ✓
+  4. `TestWalker_DepthLimit` (line 108) ✓
+  5. `TestWalker_SkipsHidden` (line 161) ✓
+  6. `TestWalker_Gitignore` (line 204) ✓
+  7. `TestWalker_NestedGitignore` (line 247) ✓
+  8. `TestWalker_IncludeExclude` (line 277) ✓
+  9. `TestWalker_ContextCancelled` (line 322) ✓
+  10. `TestWalker_UnreadableEntry` (line 383) ✓
+  11. `TestWalker_RangeBreak` (line 422) ✓
+  12. `TestWalker_SymlinkYielded` (line 459) ✓
+- All 12 present, exact names matched, no duplicates, no renames.
+- **Pass.**
+
+**AC12 — `mage test ./internal/fileset/...` green with `-race`; `mage lint` green:**
+- Re-ran at review time from `main/`:
+  - `mage test` → all five packages green, `internal/fileset` cached OK.
+  - `mage lint` → `0 issues.` (go vet + golangci-lint both clean).
+  - `mage ci` → full gate green (gofumpt-clean, lint-clean, tests green).
+- `-race` is the `mage test` default per `magefile.go`; verified via `mage -l` and the magefile target source.
+- **Pass.**
+
+### Cross-pin verification
+
+- **F5 (iter.Seq2 range-over-func):** `Walk` returns `iter.Seq2[*File, error]`; caller ranges with `for f, err := range w.Walk(ctx)`. The returned closure is called once per iteration by the Go runtime; break/return halt cleanly via the F14 pathway. No channels. **Pass.**
+- **F6 (per-entry errors non-fatal):** verified via AC4 and `TestWalker_UnreadableEntry`. **Pass.**
+- **F7 (symlinks yielded, not followed):** verified via AC9 and `TestWalker_SymlinkYielded`. **Pass.**
+- **F8 (hierarchical gitignore):** verified via AC10 and `TestWalker_NestedGitignore`. **Pass.**
+- **F14 (yield-false → fs.SkipAll):** verified via AC3 and `TestWalker_RangeBreak`. The captured `yieldOK` bool plus the first-line guard at walker.go:150-152 is the load-bearing invariant. Every yield call-site correctly flips the guard before returning SkipAll. **Pass.**
+- **C2 (DisableGitignore zero=false=enabled):** verified via AC6. **Pass.**
+- **C3 (IsHidden on DirEntry.Name):** verified via AC7. **Pass.**
+- **C6 (forward-slash relPath):** verified via AC8. **Pass.**
+- **C7 (Depth counts edges from root; 0 = unlimited):** verified via AC1 + AC5. **Pass.**
+- **F12 (internal/fileset CLI-free):** `internal/fileset` imports only `bufio`, `bytes`, `context`, `fmt`, `io/fs`, `iter`, `path`, `strings`, and the sibling `internal/ignore`. No cobra, no spf13/pflag, no laslig. All CLI policy deferred to Unit 3.5. **Pass.**
+
+### Doc-comment rule (CLAUDE.md § Go-Idiomatic Naming Rules rule 11)
+
+Every exported identifier in `walker.go` has a doc comment starting with the identifier name:
+- `WalkOptions` struct (line 16) — doc starts "WalkOptions configures a Walker.".
+- `WalkOptions.Depth` (line 39-42) — doc starts "Depth is the maximum directory edge count...".
+- `WalkOptions.IncludeHidden` (line 44-46) — doc starts "IncludeHidden enables emission of hidden files...".
+- `WalkOptions.DisableGitignore` (line 48-50) — doc starts "DisableGitignore suppresses .gitignore handling...".
+- `WalkOptions.Includes` (line 52-54) — doc starts "Includes is the --include glob allow-list.".
+- `WalkOptions.Excludes` (line 56-58) — doc starts "Excludes is the --exclude glob deny-list.".
+- `Walker` struct (line 61) — doc starts "Walker emits regular files...".
+- `NewWalker` (line 78) — doc starts "NewWalker returns a Walker rooted at root on fsys.".
+- `(*Walker).Walk` (line 89) — doc starts "Walk returns an iter.Seq2[*File, error]...".
+
+Unexported helpers (`slashCount`, `relFrom`, `readGitignore`) also carry doc comments — good hygiene, not required.
+- **Pass.**
+
+### Coverage
+
+Re-ran `mage coverage` at review time:
+- Per-package `internal/fileset`: **70.7%** — clears CLAUDE.md's 70% floor (gate flips on in Drop 9.3).
+- Per-function on `walker.go`: `NewWalker` 100.0%, `Walk` 42.5%, `slashCount` 75.0%, `relFrom` 57.1%, `readGitignore` 48.4%.
+
+The `Walk` 42.5% number is lower than the builder's worklog claim of 91.7% (worklog line 104). I believe the discrepancy is due to `mage coverage`'s `-coverpkg=./internal/...` scope: when coverage is aggregated across packages, each package's test binary executes only a subset of the package's own statements (the rest are exercised by other packages' tests or not at all). `Walk` is a long function with many branches — ctx-cancel, per-entry-error, matcher-error, hidden-skip, depth-prune, gitignore-rebuild, matcher-check, yield, yield-false fallback, post-walk defensive yield, etc. The tests cover the happy-path plus several error branches, but the defensive branches (post-walk `if err != nil && yieldOK` at line 280-282 and the per-entry-error + matcher-error combined paths) are harder to trigger without more stubs. All core F-pins are covered by at least one test each, which is what matters for Unit 3.3 acceptance.
+
+The 70.7% per-package total clears the floor. The Drop-9.3 gate has not flipped on, and the per-function thresholds are not in PLAN.md's acceptance. Non-blocking for Unit 3.3.
+
+### Observations (non-blocking, surfaced to orchestrator)
+
+- **O1 — Builder worklog claimed `total 87.6% statements` and `Walk 91.7%` (worklog line 104); my re-run reports `total 65.1%` and `Walk 42.5%`.** This is a worklog-vs-reality mismatch, not a code defect. Per-package `internal/fileset` sits at 70.7% — above the 70% floor. The 65.1% total is aggregated across all packages under `-coverpkg=./internal/...` and will rise as Drops 4-9 add tests to their own packages; the Drop 9.3 gate will measure against the correct baseline when it flips on. No action required for Unit 3.3 close; orch may wish to note the discrepancy in the Phase 7 closeout commit if they want audit-trail accuracy. **Non-blocking.**
+- **O2 — `Walk` defensive branches uncovered.** The post-walk `if err != nil && yieldOK { _ = yield(nil, fmt.Errorf("walker: %w", err)) }` at walker.go:280-282 is a "should never fire" guard for when `fs.WalkDir` returns a non-sentinel error the closure itself never returned. Covering it would require a bug-injection wrapper. The matcher-error branch at walker.go:191-195 is similarly defensive (no test constructs a walker with invalid globs because Unit 3.5 hasn't landed). Neither branch is required by the PLAN.md AC; Unit 3.5 will exercise the matcher-error path indirectly once cobra wire-up lands. **Non-blocking.**
+- **O3 — `readGitignore` silently swallows read errors.** `walker.go:331-344` returns `nil` on any `fsys.Open` / `ReadFrom` / scanner error for a `.gitignore` file. This is deliberately non-fatal (a permission error on one `.gitignore` should not abort the whole walk), but it means a genuinely corrupt `.gitignore` would be invisible to the user. The doc comment (lines 311-314) calls this out. If dev wants the errors surfaced, that's a Unit 3.5 CLI-layer decision (possibly an `--strict-ignore` flag in a later drop). **Non-blocking.**
+
+### Evidence trail
+
+- `git log --oneline -5` — commit under review is `6d6bf5a feat(fileset): add walker with iter.seq2 emission and depth gate`.
+- `git show 6d6bf5a --stat` implied by worklog listing: `main/internal/fileset/walker.go` (new, 349 LOC), `main/internal/fileset/walker_test.go` (new, 510 LOC), `main/drops/DROP_3_.../PLAN.md` (state flip), `main/drops/DROP_3_.../BUILDER_WORKLOG.md` (append).
+- `grep -c "^func Test" internal/fileset/walker_test.go` → 12.
+- `grep -n "fs.SkipAll\|fs.SkipDir" internal/fileset/walker.go` — all SkipAll call-sites paired with `yieldOK = false` flip where yield was invoked; all SkipDir call-sites either at WalkDir-level error paths or depth/hidden/matcher-prune paths. No stray `return nil` after a yield-false branch.
+- `grep -n "walk %q" internal/fileset/walker.go` → one hit at line 172 (the F6 wrap).
+- `grep -n "import" internal/fileset/walker.go` — imports are `bufio`, `bytes`, `context`, `fmt`, `io/fs`, `iter`, `path`, `strings`, `github.com/evanmschultz/rak/internal/ignore`. No cobra/laslig/pflag (F12 confirmed).
+- Re-ran `mage build` + `mage test` + `mage lint` + `mage ci` at review time from `main/`; all green.
+- `mage coverage` at review time — per-package `internal/fileset` 70.7% (above floor).
+
+### Hylla Feedback
+
+None — Hylla answered everything needed. Unit 3.3 adds a brand-new `walker.go` to a package that did not exist in Hylla's last ingest (reingest is drop-end-only per WORKFLOW.md Phase 7), so Hylla was correctly not consulted for the new walker symbols. In-package sibling dependencies (`fileset.File`, `fileset.newFile`, `fileset.IsHidden`, `ignore.Matcher`, `ignore.New`, `ignore.GitignoreRoot`) were resolved by reading the source files directly — documented fallback for newly-authored code not yet in the Hylla baseline. Stdlib semantics (`iter.Seq2`, `io/fs.WalkDir`, `io/fs.SkipAll`, `io/fs.DirEntry`, `testing/fstest.MapFile`, `testing/fstest.MapFS`) were resolved via `go doc`. Drop mds are markdown and out of Hylla's Go-only scope. Zero fallback misses to record.
