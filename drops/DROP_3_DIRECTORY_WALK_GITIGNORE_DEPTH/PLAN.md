@@ -38,10 +38,10 @@ Import DAG (reconfirms main/CLAUDE.md § "Project Structure" → "Import DAG"): 
 **Packages:** `github.com/evanmschultz/rak/internal/ignore` (new)
 **Blocked by:** 3.0
 **Acceptance:**
-- `ignore.go` defines `Matcher` interface: `Match(relPath string, isDir bool) bool` (returns true when the path should be **ignored / filtered out**; F1). One concrete constructor `New(roots []GitignoreRoot, includes []string, excludes []string) (Matcher, error)` that composes the three sub-matchers.
+- `ignore.go` defines `Matcher` interface: `Match(relPath string, isDir bool) bool` (returns true when the path should be **ignored / filtered out**; F1). `relPath` uses forward-slash separators per `io/fs` convention (C6); gitignore patterns match forward-slash paths on all platforms, so matchers never see OS-native separators. One concrete constructor `New(roots []GitignoreRoot, includes []string, excludes []string) (Matcher, error)` that composes the three sub-matchers.
 - `GitignoreRoot` struct carries `{Dir string, Patterns []string}` (pre-parsed). The walker populates this per directory it enters (3.3 reads `.gitignore` at each dir before descending).
 - `gitignore.go` wraps `github.com/sabhiram/go-gitignore` (`ignore.CompileIgnoreLines`). Supports negation `!pattern`, dir-only `pattern/`, double-star `**`, character classes `[abc]`. Hierarchical resolution: a pattern in `foo/.gitignore` applies to files under `foo/` only.
-- `glob.go` uses `github.com/bmatcuk/doublestar/v4.Match` for `--include` / `--exclude`. `--include` is an allow-list (empty = allow everything); `--exclude` is a deny-list (empty = deny nothing). Exclude wins on conflict (F2).
+- `glob.go` uses `github.com/bmatcuk/doublestar/v4.PathMatch` for `--include` / `--exclude` (O2 — `/`-sensitive matching is required because relative paths like `src/foo.go` need to match `src/**/*.go` patterns correctly; `doublestar.Match` is shell-style and treats `/` as a literal). `--include` is an allow-list (empty = allow everything); `--exclude` is a deny-list (empty = deny nothing). Exclude wins on conflict (F2).
 - Precedence order (F3): `--exclude` → `.gitignore` → `--include`. If `--include` is non-empty and a path does NOT match any include, it's ignored (unless already gitignored by then — order doesn't matter because both mean "drop"). If `--exclude` matches, ignored regardless of `--include`. Escape hatch `--no-gitignore` is the cobra flag that omits the gitignore matcher at construction time (wired in 3.5, not here — this unit just has to tolerate the zero-gitignore case).
 - `ignore_test.go` is table-driven and covers: empty matcher (allows all), gitignore-only, include-only, exclude-only, all three combined, negation (`!foo.go` re-includes after `*.go`), dir-only pattern (`node_modules/` matches dir but not a file named `node_modules`), `**/vendor` double-star, precedence-wins cases (exclude beats gitignore-negate, include does not override exclude).
 - No direct test of a real `.gitignore` file from disk — this unit takes pre-read patterns. Disk IO belongs to 3.3's Walker.
@@ -75,12 +75,13 @@ Import DAG (reconfirms main/CLAUDE.md § "Project Structure" → "Import DAG"): 
 **Blocked by:** 3.1, 3.2
 **Acceptance:**
 - `walker.go` defines:
-  - `type WalkOptions struct { Depth int; IncludeHidden bool; GitignoreEnabled bool; Includes []string; Excludes []string }` — `Depth == 0` means "no limit"; `Depth == 1` means walk only the root directory (no subdirs). `IncludeHidden == false` (default) skips hidden files/dirs via `File.IsHidden`. `GitignoreEnabled == false` corresponds to `--no-gitignore`.
+  - `type WalkOptions struct { Depth int; IncludeHidden bool; DisableGitignore bool; Includes []string; Excludes []string }` — `Depth == 0` means "no limit" (unlimited descent); `Depth == 1` means walk only the root directory (no subdirs). `Depth` counts **directory edges from the walk root**: `root/file.txt` is depth 0; `root/sub/file.txt` is depth 1 (C7). `IncludeHidden == false` (default) skips hidden files/dirs via `fileset.IsHidden(entry.Name())` (C3 — package-level helper, called on `DirEntry.Name()` inside the `WalkDirFunc` before any `*File` allocation). `DisableGitignore bool` — zero value is **false** so gitignore is ENABLED by default, matching decision 10 (C2). `--no-gitignore` sets `DisableGitignore: true` (wired in 3.5).
   - `type Walker struct { ... }` with `func NewWalker(fsys fs.FS, root string, opts WalkOptions) *Walker`.
   - `func (w *Walker) Walk(ctx context.Context) iter.Seq2[*File, error]` — returns a range-over-func iterator (F5: uses `iter.Seq2` per decision 27(a)). Implementation wraps `fs.WalkDir`. The iterator:
-    1. Before descending into a dir, reads that dir's `.gitignore` (if present + `GitignoreEnabled`) and builds / composes `ignore.Matcher` roots hierarchically.
+    0. **Yield-false handling (F14)**: the `WalkDirFunc` tracks whether the last `yield(...)` returned false. Once false, it returns `fs.SkipAll` to terminate `fs.WalkDir` cleanly. Returning `nil` (or `fs.SkipDir`) after a false yield would re-invoke `yield` and panic per `go doc iter`. See F14 in cross-unit pins.
+    1. Before descending into a dir, reads that dir's `.gitignore` (if present **and** `!DisableGitignore` — F-pin per C2: flag is ENABLED by default) and builds / composes `ignore.Matcher` roots hierarchically.
     2. At each entry: check `ctx.Done()` first — on cancel, yield `(nil, ctx.Err())` and stop.
-    3. Skip hidden entries when `!IncludeHidden` (via `File.IsHidden`).
+    3. Skip hidden entries when `!IncludeHidden` (via `fileset.IsHidden(entry.Name())` — package-level helper on `DirEntry.Name()`, per C3).
     4. Skip entries that match the `Matcher`. For directories that match, return `fs.SkipDir` from the WalkDir func so subtree is pruned (performance + correctness).
     5. Enforce `Depth` — count edges from the walk root; when a dir exceeds `Depth`, return `fs.SkipDir` for that dir.
     6. For regular files that survive filtering: yield `(&File{...}, nil)`.
@@ -97,7 +98,8 @@ Import DAG (reconfirms main/CLAUDE.md § "Project Structure" → "Import DAG"): 
   - `TestWalker_IncludeExclude` — `Includes=["*.go"]` + tree with `.go`, `.md`, `.txt` → only `.go` emitted. `Excludes=["*_test.go"]` → test files dropped.
   - `TestWalker_ContextCancelled` — `ctx` cancelled before `Walk` is consumed; first iteration yields `ctx.Err()` and terminates.
   - `TestWalker_UnreadableEntry` — simulate a `fs.WalkDir` error via a custom `fs.FS` stub, verify the iterator yields the wrapped error and continues.
-  - `TestWalker_RangeBreak` — `for f, err := range w.Walk(ctx) { break }` cleanly stops (F5 — iter.Seq2 semantics; the yield function's false return must halt the iteration).
+  - `TestWalker_RangeBreak` — fixture tree has **at least 3 files**. Loop breaks after the first emission: `for f, err := range w.Walk(ctx) { count++; break }`. Asserts exactly one file was yielded (count == 1), no panic occurred, and the walker terminated cleanly (F5 + F14 — iter.Seq2 yield-false semantics require the `WalkDirFunc` to return `fs.SkipAll` after a false yield; returning `nil` would panic).
+  - `TestWalker_SymlinkYielded` (C4 — F7 regression guard): MapFS fixture with (a) one regular file `target.txt`, (b) one symlink `link_ok` → `target.txt` (MapFile with `Mode: fs.ModeSymlink`, `Data: []byte("target.txt")`), (c) one symlink `link_broken` → `missing.txt`. Walker yields all three entries. Asserts `fs.DirEntry.Type()&fs.ModeSymlink != 0` is true for both symlink entries. Asserts `File.Open` on `link_broken` returns an error that unwraps to `fs.ErrNotExist` via `errors.Is` (wrapped with the `open %q: %w` prefix from 3.2).
 - `mage test ./internal/fileset/...` green with race detector (`-race` is on by default per `mage test`). `mage lint` green.
 
 ### Unit 3.4 — Binary file detection via Peek(512) + ErrBinaryFile
@@ -109,8 +111,9 @@ Import DAG (reconfirms main/CLAUDE.md § "Project Structure" → "Import DAG"): 
 **Acceptance:**
 - `binary.go` defines:
   - `var ErrBinaryFile = errors.New("binary file")` — sentinel per CLAUDE.md § "Errors". Inspected by callers via `errors.Is(err, ErrBinaryFile)` — never string-matched (F9).
-  - `func (f *File) IsBinary() (bool, error)` — calls `f.Peek(512)` and applies the heuristic: if the peek buffer contains a NUL byte (`\x00`) in the first 512 bytes, it's binary. **Match rationale**: git's own `buffer_is_binary` (in `xdiff-interface.c`) + `ripgrep`'s `searcher/src/searcher/core.rs` both use the NUL-byte test as the single fast gate. UTF-16 is already misdetected by git itself; rak matches git here (F10). Open the file on-demand via `Peek`; do not re-open in `IsBinary`.
+  - `func (f *File) IsBinary() (bool, error)` — calls `f.Peek(512)` and applies the heuristic: if the peek buffer contains a NUL byte (`\x00`) in the first 512 bytes, it's binary. **Match rationale**: matches git's and ripgrep's standard NUL-byte test as the single fast gate (C5 — no upstream source-file citation, only the standard-behavior reference). UTF-16 is already misdetected by git itself; rak matches git here (F10). Open the file on-demand via `Peek`; do not re-open in `IsBinary`.
   - Empty file → not binary (len(peek) == 0 → false).
+  - `IsBinary` only returns errors from `Peek(512)`'s open-read-close chain (C10 — no other error paths). NUL-detection on the returned buffer is a pure string scan and cannot itself fail.
 - `binary_test.go` table-driven:
   - `TestFile_IsBinary` cases: empty → false; pure ASCII "hello world" → false; UTF-8 "café" → false; buffer starting with "\x00..." → true; 512 bytes of random ASCII → false; 513 bytes ASCII followed by NUL at position 520 → false (only first 512 sniffed, F10); PNG-like "\x89PNG\r\n\x1a\n..." → true.
   - Fixtures live **inline** in the test via `fstest.MapFS` — no binary files in `testdata/` (they bloat git history and leak into snapshots; F11).
@@ -137,7 +140,7 @@ Import DAG (reconfirms main/CLAUDE.md § "Project Structure" → "Import DAG"): 
   - `TestRootCmd_PathArg_Gitignore` — dir with `.gitignore` excluding `vendor/` → files under `vendor/` don't contribute to totals.
   - `TestRootCmd_PathArg_IncludeExclude` — `--include '*.go'` + `--exclude '*_test.go'` filters correctly.
   - `TestRootCmd_PathArg_Depth` — nested tree + `--depth 1` counts only root-level files.
-  - `TestRootCmd_PathArg_SkipsBinary` — tree containing a file with NUL byte → excluded by default; included when `--binary` passed.
+  - `TestRootCmd_PathArg_SkipsBinary` — tree containing a file with NUL byte → excluded by default; included when `--binary` passed. C10 contract: if `IsBinary()` returns an error, the file is **skipped (not counted)** and the error is aggregated into the render's error summary. It does NOT abort the walk. The test exercises both the clean-NUL-detected path and an induced `Peek` error (e.g. via an `fs.FS` stub whose `Open` returns `fs.ErrPermission`) and asserts the error is collected, not fatal.
   - `TestRootCmd_PathArg_Hidden` — `.hidden.txt` excluded by default; included with `--hidden`.
   - Drive tests against a fixture tree under `cmd/rak/testdata/tree/` (new). Minimal shape: `tree/a.txt`, `tree/vendor/ignored.txt`, `tree/.gitignore` (`vendor/`), `tree/sub/nested.txt`, `tree/.hidden.txt`, `tree/bin.dat` (one-byte `\x00` — stored as is; F11 allows a **deliberately tiny** binary fixture in `cmd/rak/testdata/` for the integration surface only, per CLAUDE.md § "Tests" → "two-tier testdata rule").
   - Retire / update `TestRootCmd_RejectsPathArg` — the "walker lands in Drop 3" error message is gone. Either delete the test (the rejection is no longer semantic) or pivot it into a positive path test. Builder picks deletion; QA falsification validates nothing else string-matches "Drop 3" in `cmd/rak`.
@@ -166,10 +169,14 @@ Import DAG (reconfirms main/CLAUDE.md § "Project Structure" → "Import DAG"): 
 - **F11**: No binary fixtures in `internal/fileset/testdata/`. Unit tests build binary content inline via `fstest.MapFS` + `[]byte{0x00, ...}` literals. `cmd/rak/testdata/tree/bin.dat` is the single exception — a deliberately tiny (1–4 bytes) fixture for the end-to-end integration test, per CLAUDE.md § "Tests" → "two-tier testdata rule".
 - **F12**: `internal/fileset` is CLI-free. No cobra imports, no flag parsing, no `--binary` logic. The Walker yields every non-ignored file; the aggregation layer (cmd/rak) decides to drop binaries when the flag says so. F12 enforces the layered DAG.
 - **F13**: Deferred flags not added in Drop 3: `--tracked-only` (Drop 8.4), `--follow` (Drop 8.5), `--max-files` (Drop 8.3). Cobra rejects them as unknown flags until those drops land. Unit 3.5 must not pre-register stub flags "for later" — YAGNI.
+- **F14**: When `yield(...)` returns false, the `WalkDirFunc` MUST return `fs.SkipAll` so `fs.WalkDir` terminates cleanly. Returning `nil` after a false yield re-invokes yield and panics per `go doc iter`. (C1 mitigation.) The walker tracks yield-return via a captured bool in the closure; the first false-yield flips the bool and the next `WalkDirFunc` invocation short-circuits with `fs.SkipAll`. `TestWalker_RangeBreak` is the regression guard.
+- **F15**: Renderer interface growth is acceptable within `internal/` scope; external implementers do not exist pre-v1.0, so adding methods to the interface is safe. (C9 — addresses the implicit-interface-satisfaction concern raised by 3.5's `RenderTree` addition. Revisit at v1.0 if a public API surface emerges.)
 
 ### Render surface growth (3.5)
 
 Unit 3.5 extends `render.Renderer` with a new `RenderTree(w, dirs, total) error` method. This grows the interface; existing callers (Drop 2's stdin path) still use the single-input `Render(w, counts)` method, which stays. The builder must add `RenderTree` to **both** `humanRenderer` and `jsonRenderer`. Snapshot tests for the tree output live in `internal/render/render_test.go` (extend) — not in `cmd/rak/root_test.go`, which sticks to behavioral / wire-up assertions per Drop 2's precedent.
+
+**C8 breadcrumb**: `render.Directory` is **provisional**. It migrates to the canonical `summary.Summary` type in Drop 6.1; at that point Drop 6.1 refactors both renderer implementations to consume the new type. Treat the Drop 3 shape as a minimal stand-in, not a stable contract — no external code under `internal/` should grow a dependency on `render.Directory`'s field layout beyond what 3.5 itself needs.
 
 ### Deferred items
 
@@ -179,6 +186,10 @@ Unit 3.5 extends `render.Renderer` with a new `RenderTree(w, dirs, total) error`
 - `--tracked-only` via `git ls-files` → Drop 8.4.
 - Language detection → Drop 4.1 (consumes `File.Peek(512)` per F4).
 - Tokens per file → Drop 7.x.
+
+### Drop-end docs updates
+
+- **O1** (from Round 1 plan-QA proof): `main/CLAUDE.md` § "Project Structure" → "File Breakdown" table currently lists `file.go` / `walker.go` / `walker_test.go` but does NOT list `binary.go` / `binary_test.go`. Drop 3 closeout MUST add two rows to that table (~80 LOC each) — one for `internal/fileset/binary.go` (sentinel `ErrBinaryFile` + `(*File).IsBinary`) and one for `internal/fileset/binary_test.go` (table-driven coverage). This is orch-side docs work at drop-end, not a builder-unit concern.
 
 ### Open Unknowns for Phase 3 dev discussion
 
