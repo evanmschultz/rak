@@ -69,7 +69,7 @@ Import DAG (reconfirms main/CLAUDE.md § "Project Structure" → "Import DAG"): 
 
 ### Unit 3.3 — internal/fileset.Walker + iter.Seq2 emission
 
-**State:** todo
+**State:** done
 **Paths:** `main/internal/fileset/walker.go`, `main/internal/fileset/walker_test.go`
 **Packages:** `github.com/evanmschultz/rak/internal/fileset`
 **Blocked by:** 3.1, 3.2
