@@ -154,3 +154,122 @@ None — no Hylla queries were needed for this review. Unit 3.0 touched only `go
 ### Hylla Feedback
 
 None — Unit 3.1 is net-new code that did not exist in the last Hylla ingest (reingest is drop-end only per WORKFLOW.md Phase 7), so Hylla was correctly not consulted for this package. External-library semantics for `sabhiram/go-gitignore` and `doublestar/v4` were validated via the builder's `go doc` + scratch-module probe (worklog line 52) and cross-checked against the in-source doc comments at review time — the documented third-party fallback path per CLAUDE.md § "Code Understanding Rules" rule 4. Non-Go drop mds (PLAN.md, BUILDER_WORKLOG.md, WORKFLOW.md) are out of Hylla's Go-only scope. Zero fallback misses to record.
+
+## Unit 3.2 — Round 1
+
+- **QA proof:** go-qa-proof-agent
+- **Reviewed:** 2026-04-21
+- **Verdict:** pass
+- **Commit under review:** `a794aee feat(fileset): add file type with open, peek, and hidden helper`
+
+### Acceptance-criterion verification
+
+**AC1 — `file.go` defines `File` struct with `Path string`, `RelPath string`, unexported `fs fs.FS`:**
+- `file.go:36-46` — `type File struct { Path string; RelPath string; fs fs.FS }`. Exported fields `Path` / `RelPath` each have individual field doc comments (lines 37-40). Unexported `fs fs.FS` field with the in-package rationale doc (lines 44-45) — keeps callers from bypassing `Open` / `Peek`.
+- Zero-value rationale spelled out in the struct's type doc (lines 24-35): "Zero-value File is not useful; construct via newFile (unexported)."
+- `newFile` constructor at `file.go:52-58` is the only sanctioned way to build a `*File`; unexported so external callers must go through the Walker (Unit 3.3).
+- **Pass.**
+
+**AC2 — `Open() (io.ReadCloser, error)` opens via `fs.FS.Open`, wraps errors with `open %q: %w`:**
+- `file.go:67-73` — `Open` calls `f.fs.Open(f.Path)`, wraps any error via `fmt.Errorf("open %q: %w", f.Path, err)`.
+- Returning the underlying `fs.File` directly is valid: `io/fs` declares `type File interface { Stat(); Read([]byte); Close() }`, a superset of `io.ReadCloser`.
+- `TestFile_Open_NotFound` (`file_test.go:40-60`) asserts both:
+  - `errors.Is(err, fs.ErrNotExist)` holds through the `%w` chain (line 52-54).
+  - Text prefix `open "missing.txt":` present (line 57-59).
+- **Pass.**
+
+**AC3 — `Peek(n int) ([]byte, error)` tolerates short-file via `io.ErrUnexpectedEOF` + `io.EOF`, open-read-close per call, F4 stateless:**
+- `file.go:87-106` — implementation opens via `Open`, reads up to `n` via `io.ReadFull`, closes via deferred `_ = rc.Close()`.
+- Short-file tolerance at line 102: `if err == nil || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) { return buf[:k], nil }`. Uses `errors.Is` (not `==`) — future-proof against stdlib wrapping per CLAUDE.md § "Errors" ("Inspect with `errors.Is` ... never string-match").
+- Per-call open-read-close confirms F4 statelessness: no cached bytes, no cursor on `*File`.
+- `io.ReadFull` stdlib contract (verified via `go doc io.ReadFull`): "On return, n == len(buf) if and only if err == nil. If r returns an error having read at least len(buf) bytes, the error is dropped. … If at least one byte is read and an error is hit, the returned error is io.ErrUnexpectedEOF. … If no bytes are read, io.EOF." Peek's three-branch tolerance covers exactly these three outcomes.
+- `TestFile_Peek` table (`file_test.go:62-121`) covers five rows: empty_file_returns_empty (n=512 vs 0 bytes), short_file_returns_all_bytes (n=512 vs 2 bytes), exact_match_returns_all_bytes (n=8 vs 8 bytes), long_file_returns_first_n_bytes (n=8 vs 16 bytes, asserts first 8), one_byte_file_n_one (edge). All subtests assert zero error + exact byte payload.
+- Close-error path: `defer func() { _ = rc.Close() }()` deliberately discards the Close error with an inline explanation at lines 95-97 — CLAUDE.md § "Errors" permits "If you genuinely want to discard an error, assign to `_` with a one-line comment explaining why."
+- **Pass.**
+
+**AC4 — Multiple Peek calls on same *File return identical bytes (F4 no stateful cursor):**
+- `TestFile_Peek_MultipleCalls` (`file_test.go:123-147`) — calls `Peek(10)` twice on the same `*File`, asserts `bytes.Equal(first, second)` AND that the returned bytes are the first 10 of the payload (`"determinis"`).
+- Implementation backs this by re-opening via `Open` on every call; no cached slice on the struct.
+- F4 pinned contract satisfied — binary detection (3.4) and Drop-4.1 shebang sniff both depend on this.
+- **Pass.**
+
+**AC5 — `IsHidden(name string) bool` excludes `.` and `..`; true iff final element starts with `.`:**
+- `file.go:117-122` — `IsHidden` returns false for `""`, `"."`, `".."`; otherwise `strings.HasPrefix(name, ".")`.
+- Doc comment (lines 108-116) explicitly documents:
+  - Input is a basename (single path element), not a full path.
+  - `.` and `..` excluded — "not hidden entries in any shell's sense."
+  - Walker (Unit 3.3) calls `IsHidden(DirEntry.Name())` with `IncludeHidden=false`.
+- `TestIsHidden` (`file_test.go:149-175`) table covers all six required cases from PLAN.md AC:
+  - `.` → false
+  - `..` → false
+  - `.git` → true
+  - `.hidden.txt` → true
+  - `normal.txt` → false
+  - `""` → false
+- **Pass.**
+
+**AC6 — Five test functions present:**
+- `grep -n "^func Test" file_test.go` returns exactly 5 functions at lines 13, 40, 62, 123, 149:
+  - `TestFile_Open` (line 13)
+  - `TestFile_Open_NotFound` (line 40)
+  - `TestFile_Peek` (line 62)
+  - `TestFile_Peek_MultipleCalls` (line 123)
+  - `TestIsHidden` (line 149)
+- All five match the PLAN.md AC bullet list exactly.
+- `t.Parallel()` on every top-level test function and every table subcase — race-safe by construction.
+- **Pass.**
+
+**AC7 — `mage test ./internal/fileset/...` green; `mage lint` green:**
+- Re-ran at review time from `main/` with `go clean -testcache` first to force uncached run:
+  - `mage ci` → full green pipeline: gofumpt-clean, lint `0 issues.`, tests all five packages pass including `internal/fileset 1.199s` under `-race`.
+  - `mage test` (post-clean) → `ok github.com/evanmschultz/rak/internal/fileset 1.199s` under `-race`.
+  - `mage lint` → `0 issues.` (go vet + golangci-lint both clean on the new package).
+- **Pass.**
+
+### Cross-pin verification
+
+- **F4 (Peek stateless, multi-call identical):** `Peek` re-opens via `Open` on every call; no cached buffer on `*File`. `TestFile_Peek_MultipleCalls` confirms two calls on the same `*File` return byte-equal slices. Binary detection (3.4) and shebang sniff (Drop 4.1) can safely both call `Peek(512)`. **Pass.**
+- **C3 (IsHidden excludes `.`/`..`):** `file.go:118` explicitly short-circuits on `""`, `"."`, `".."` before the dot-prefix check. `TestIsHidden` covers `.` and `..` → false + `.git` / `.hidden.txt` → true. Walker (3.3) will call `IsHidden(DirEntry.Name())` — basename-only, matching the doc-comment contract. **Pass.**
+- **C6 (forward-slash paths):** Package doc (lines 11-13) pins "All paths carried by File use forward-slash separators regardless of host OS, matching the io/fs convention. The Walker (Unit 3.3) is responsible for normalizing OS-native separators before constructing File values." `Open` passes `f.Path` straight to `f.fs.Open`, which respects the `io/fs` forward-slash convention. **Pass.**
+- **CLAUDE.md § Errors — `errors.Is` for inspection, `%w` for wrapping, discarded errors get a comment:** `Open` wraps with `%w`; `Peek` uses `errors.Is` against both `io.ErrUnexpectedEOF` and `io.EOF`; `TestFile_Open_NotFound` uses `errors.Is(err, fs.ErrNotExist)` not string-match; Close-error discard at line 95-97 has the required inline comment. **Pass.**
+
+### Doc-comment rule (CLAUDE.md § Go-Idiomatic Naming Rules rule 11)
+
+Every exported identifier in `file.go` has a doc comment starting with the identifier name:
+- `package fileset` (line 1) — package doc present.
+- `File` struct (line 24) — doc starts "File names a single regular file…".
+- `File.Path` field (line 37) — doc starts "Path is the walk-relative path…".
+- `File.RelPath` field (line 40) — doc starts "RelPath is the path relative to the walk root…".
+- `(*File).Open` method (line 60) — doc starts "Open opens the file for reading.".
+- `(*File).Peek` method (line 75) — doc starts "Peek opens the file, reads up to n bytes…".
+- `IsHidden` function (line 108) — doc starts "IsHidden reports whether a single path element…".
+
+Unexported identifiers (`newFile`, the unexported `fs` field) also carry doc comments by convention, which is good hygiene but not required. **Pass.**
+
+### Coverage
+
+`mage coverage` at review time reported line coverage per function:
+- `newFile` — 100.0%
+- `Open` — 100.0%
+- `Peek` — 75.0% (uncovered branches: `n <= 0` short-circuit and the non-tolerated-error wrap path; both are edge/error paths not required by the PLAN.md AC bullets)
+- `IsHidden` — 100.0%
+
+75% on `Peek` clears CLAUDE.md's 70% floor (which doesn't flip into a gate until Drop 9.3). The uncovered branches are minor and already flagged as observations below.
+
+### Observations (non-blocking, surfaced to orchestrator)
+
+- **O1 — `Peek(n <= 0)` uncovered.** `file.go:88-90` short-circuits on non-positive `n` and returns `(nil, nil)` without opening. No unit test drives this path. Doc comment (line 83-84) documents the behavior, and the planner's AC bullets don't demand coverage for it. Adding a 1-line subcase to `TestFile_Peek` would hit 100% on this branch — mention it to orch in case a future drop wants the coverage bump. Non-blocking for Unit 3.2.
+- **O2 — Non-short-EOF Peek error wrap uncovered.** `file.go:105` (the `return nil, fmt.Errorf("open %q: %w", f.Path, err)` at the end of `Peek`) covers the case where `io.ReadFull` returns an error that is neither `io.ErrUnexpectedEOF` nor `io.EOF`. Inducing this via `fstest.MapFS` is awkward (MapFS doesn't surface mid-read I/O errors easily). A custom `fs.FS` returning a failing `fs.File.Read` could hit it; again, not required by PLAN.md AC. Non-blocking.
+
+### Evidence trail
+
+- `git log --oneline -5` — commit under review is `a794aee feat(fileset): add file type with open, peek, and hidden helper`.
+- `git show a794aee --stat` — files touched match the worklog exactly: `main/internal/fileset/file.go` (new, 123 lines), `main/internal/fileset/file_test.go` (new, 176 lines), `main/drops/DROP_3_.../PLAN.md` (state flip), `main/drops/DROP_3_.../BUILDER_WORKLOG.md` (append).
+- `grep -n "^func Test" internal/fileset/file_test.go` — exactly 5 `Test*` functions.
+- `grep -n "^func\|^type\|^package" internal/fileset/file.go` — `File` struct, `newFile`, `(*File).Open`, `(*File).Peek`, `IsHidden` — every exported name has a preceding doc comment.
+- `go clean -testcache && mage ci` at review time — green end-to-end (gofumpt + lint + race-enabled tests).
+- `mage coverage` — `Peek` 75.0%, other `file.go` funcs 100.0%; total 93.3% across the whole module.
+
+### Hylla Feedback
+
+None — Hylla answered everything needed. Unit 3.2 introduces a brand-new file in a package that did not exist in Hylla's last ingest (reingest is drop-end-only per WORKFLOW.md Phase 7), so Hylla was correctly not consulted for the new symbols. All external semantics resolved via `go doc io.ReadFull`, `go doc io/fs.FS`, and `go doc errors` — the documented Go-idiomatic path for stdlib questions per CLAUDE.md § "Code Understanding Rules" rule 4. Drop mds (PLAN.md, BUILDER_WORKLOG.md, WORKFLOW.md) are markdown and out of Hylla's Go-only scope. Zero fallback misses to record.
