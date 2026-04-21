@@ -1,6 +1,6 @@
 # DROP_3 — DIRECTORY_WALK_GITIGNORE_DEPTH
 
-**State:** planning
+**State:** building
 **Blocked by:** DROP_2
 **Paths (expected):** `main/internal/fileset/` (new package — `File` type, `Walker`), `main/internal/ignore/` (new package — gitignore + include/exclude globs), `main/cmd/rak/root.go` (wire `len(args)==1` path case into walker), `main/cmd/rak/root_test.go` (extend) or `main/cmd/rak/integration_test.go` (extend fixture tree), `main/cmd/rak/testdata/` (may grow a real directory fixture), plus per-package `*_test.go` files
 **Packages (expected):** `github.com/evanmschultz/rak/internal/fileset` (new), `github.com/evanmschultz/rak/internal/ignore` (new), `github.com/evanmschultz/rak/cmd/rak`
