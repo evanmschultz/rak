@@ -104,7 +104,7 @@ Import DAG (reconfirms main/CLAUDE.md § "Project Structure" → "Import DAG"): 
 
 ### Unit 3.4 — Binary file detection via Peek(512) + ErrBinaryFile
 
-**State:** todo
+**State:** done
 **Paths:** `main/internal/fileset/binary.go`, `main/internal/fileset/binary_test.go`
 **Packages:** `github.com/evanmschultz/rak/internal/fileset`
 **Blocked by:** 3.2
