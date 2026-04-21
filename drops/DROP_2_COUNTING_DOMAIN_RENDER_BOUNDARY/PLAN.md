@@ -1,13 +1,13 @@
 # DROP_2 — COUNTING_DOMAIN_RENDER_BOUNDARY
 
-**State:** building
+**State:** done
 **Blocked by:** —
 **Paths (expected):** `main/magefile.go` (new `AddDep` target), `main/cmd/rak/root.go` (lift `count` out), `main/internal/counting/` (new package), `main/internal/render/` (new package), `main/cmd/rak/testdata/` (integration fixture), `main/CLAUDE.md` (mage targets table row), plus per-package `*_test.go` files
 **Packages (expected):** `github.com/evanmschultz/rak/cmd/rak`, `github.com/evanmschultz/rak/internal/counting` (new), `github.com/evanmschultz/rak/internal/render` (new)
 **PLAN.md ref:** main/PLAN.md → `DROP_2_COUNTING_DOMAIN_RENDER_BOUNDARY` row
 **Workflow:** main/drops/WORKFLOW.md
 **Started:** 2026-04-19
-**Closed:** —
+**Closed:** 2026-04-21
 
 ## Scope
 
