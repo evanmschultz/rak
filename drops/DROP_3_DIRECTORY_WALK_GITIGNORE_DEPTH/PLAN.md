@@ -21,7 +21,7 @@ Import DAG (reconfirms main/CLAUDE.md § "Project Structure" → "Import DAG"): 
 
 ### Unit 3.0 — Add gitignore + glob deps via mage addDep
 
-**State:** todo
+**State:** done
 **Paths:** `main/go.mod`, `main/go.sum`
 **Packages:** — (dep-management only)
 **Blocked by:** —
