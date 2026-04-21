@@ -2,6 +2,31 @@
 
 Append a `## Unit N.M — Round K` section per QA attempt. See `main/drops/WORKFLOW.md`.
 
+## Unit 2.3 — Round 1
+
+- **QA agent:** go-qa-falsification-agent
+- **Verdict:** pass
+- **Attacks attempted:**
+    1. **F9 `os.Stdin` bypass** — blocked. `grep -n 'os\.Stdin' cmd/rak/` returns only `root_test.go:10`, a comment documenting the F9 pin. Production path uses `c.InOrStdin()` at `root.go:63`.
+    2. **Flag double-registration panic** — blocked. `newRootCmd` constructs a fresh `*cobra.Command` literal each call (`root.go:22`); cobra lazily builds `cmd.Flags()` on first access; `StringVarP(&format, ...)` binds into that fresh pflag FlagSet. Two concurrent calls cannot collide.
+    3. **Closure format-var capture** — blocked. `var format string` lives inside `newRootCmd` body (`root.go:20`); `StringVarP(&format, ...)` captures its address per-factory-call; `RunE` closure passes `format` by value to `runRoot(c, args, format)` at invocation time, after cobra has parsed flags into it. Parallel subtests each own their own `format` cell.
+    4. **Error-wrap string drift** — blocked. `root.go:65` reads `fmt.Errorf("count input: %w", err)`; `root.go:74` reads `fmt.Errorf("render counts: %w", err)`. Both exact matches for PLAN bullets 114 + 116.
+    5. **Fang signal wiring regression** — blocked. `main.go:13-17` still wires `fang.Execute(ctx, newRootCmd(), fang.WithNotifySignal(os.Interrupt, syscall.SIGTERM))`. Unit 2.3's scope was `root.go` + `root_test.go` only; `main.go` untouched.
+    6. **`SilenceUsage` / `SilenceErrors` regression** — accepted. Neither is set on the new `cmd`, so cobra prints usage+error on RunE failure. `git show 3cb4325:cmd/rak/root.go` (pre-2.3 baseline) also did not set them — no regression introduced by 2.3, no change to the established CLI error-display behavior. If the dev wants fail-silent-usage behavior later, that's a separate follow-up, not a Unit 2.3 break.
+    7. **Format-validation ordering (drain stdin before reject)** — accepted. `runRoot` calls `counting.Count` before `selectRenderer`, so `cat huge | rak --format=xml` consumes stdin before erroring. PLAN bullet 117 says "Values validated in PersistentPreRunE or inline — invalid value returns wrapped error" — both orderings permitted, no fail-fast requirement. `TestRootCmd_InvalidFormat` still proves the error surface. Not a plan violation.
+    8. **Dead imports / staticcheck QF1011 / gofumpt drift** — blocked. `mage ci` green: gofumpt clean, `go vet` clean, `golangci-lint` 0 issues, tests pass. Worklog confirms the QF1011 on `var reader io.Reader = ...` was surfaced by ci and fixed before completion. Final import set (`fmt`, `cobra`, `counting`, `render`) all reachable.
+    9. **`_ = c.Context()` dead-op lint** — blocked. `mage lint` reports 0 issues; Go linters do not flag method-call-to-discard when the intent (forward-compat) is documented inline (`root.go:50-52`).
+    10. **`MaximumNArgs(1)` + args==1 coverage** — blocked. `TestRootCmd_RejectsPathArg` invokes with `[]string{"./somepath"}`, asserts the returned error mentions "Drop 3". args==2 case is cobra-framework territory (rejected before RunE) — not Unit 2.3's to retest.
+    11. **`t.Parallel()` + shared state race** — blocked. Every test builds its own `newRootCmd()`, `bytes.Buffer`, `strings.NewReader`. No package-level var is written by any test. `mage test` (always `-race`) green.
+    12. **`root.go` LOC budget** — blocked. `wc -l cmd/rak/root.go` → 93; PLAN bullet 118 ceiling is ~150.
+    13. **F11 `root_test.go` ≤150 LOC pin** — blocked. `wc -l cmd/rak/root_test.go` → 108; F11 ceiling is 150. Headroom preserved for Unit 2.4's integration test if it lands here instead of a new file.
+    14. **Default `--format=auto` vs TTY semantics** — blocked. `selectRenderer("auto")` returns `render.NewHumanRenderer()` (`root.go:87`); laslig's per-call printer construction inside `Render` runs `ResolveMode` against the real `c.OutOrStdout()` (a `bytes.Buffer` in tests, a TTY in production). Matches PLAN bullet 115 + Unit 2.2 design notes.
+    15. **Exported doc-comment drift** — blocked. No exported identifiers in `root.go` / `root_test.go` (everything is package-private `main`). `newRootCmd`, `runRoot`, `selectRenderer` all carry descriptive unexported doc comments. Test functions carry leading doc comments describing each scenario.
+    16. **`invalid --format` error mentions "format"** — blocked. `root.go:91` returns `fmt.Errorf("invalid --format %q: want auto | human | json", format)`; `TestRootCmd_InvalidFormat` asserts `err.Error()` contains `"format"` — the literal flag name guarantees it.
+- **Findings / counterexamples:** none.
+- **Hylla Feedback:**
+    - N/A — this review touched only `main/cmd/rak/*.go` files that are either changed since last ingest (per CLAUDE.md § "Code Understanding Rules" rule 2, use `git diff` / `Read`) or brand new. Cobra + laslig APIs cross-checked against the worklog's citations rather than Hylla. No Hylla query attempted, no miss to record.
+
 ## Unit 2.2 — Round 1
 
 - **QA agent:** go-qa-falsification-agent

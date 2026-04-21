@@ -102,7 +102,7 @@ Minimal cut: `2.0 → 2.2 → 2.3 → 2.4`, with `2.1` parallel to `2.0` (2.1 ha
 
 ### Unit 2.3 — Wire `cmd/rak/root.go` `RunE` to counting + render
 
-- **State:** todo
+- **State:** done
 - **Paths:** `main/cmd/rak/root.go` (rewrite `RunE`), `main/cmd/rak/root_test.go` (new or extended — arg/flag parsing + renderer-selection coverage)
 - **Packages:** `github.com/evanmschultz/rak/cmd/rak`
 - **Blocked by:** 2.1, 2.2

@@ -2,6 +2,30 @@
 
 Append a `## Unit N.M — Round K` section per QA attempt. See `main/drops/WORKFLOW.md`.
 
+## Unit 2.3 — Round 1
+
+- **QA agent:** go-qa-proof-agent
+- **Verdict:** pass
+- **Verified acceptance bullets:**
+    - `runRoot` factored at `cmd/rak/root.go:49-77`; `RunE` closure at `:31-33` captures closure-local `format` var at `:20` (not package-level — test isolation pin).
+    - `selectRenderer` at `cmd/rak/root.go:84-93` maps `"auto"`/`"human"` → `render.NewHumanRenderer()`, `"json"` → `render.NewJSONRenderer()`, default → wrapped `invalid --format %q` error.
+    - `cobra.MaximumNArgs(1)` at `cmd/rak/root.go:30`. `len(args)==1` rejected inside `runRoot` (`:55-61`) with Drop-3 error.
+    - F9 pin: `c.InOrStdin()` at `cmd/rak/root.go:63`; `grep os\.Stdin` on root.go → zero hits.
+    - F4 pin: `grep json:` on `internal/counting/counting.go` → zero hits. `Counts` tagless.
+    - F11 pin: `root_test.go` = 108 LOC ≤ 150. `root.go` = 93 LOC ≤ 150.
+    - Error wraps exact: `fmt.Errorf("count input: %w", err)` at `:65`; `fmt.Errorf("render counts: %w", err)` at `:74`.
+    - `--format` flag: `StringVarP(&format, "format", "f", "auto", "output format: auto | human | json")` at `cmd/rak/root.go:36-42`.
+    - 4 required tests present: `TestRootCmd_ReadsStdin_RendersHumanDefault` (`root_test.go:15`), `TestRootCmd_FormatJSON` (`:43`), `TestRootCmd_InvalidFormat` (`:68`), `TestRootCmd_RejectsPathArg` (`:91`). Each calls `newRootCmd()` fresh; `t.Parallel()` at function level.
+    - PLAN.md Unit 2.3 state: `done` (line 105).
+    - BUILDER_WORKLOG.md Unit 2.3 Round 1 entry at top (line 5), above Unit 2.2 entry.
+- **Mage targets run:**
+    - `mage build` → pass.
+    - `mage test` → pass (cmd/rak, internal/counting, internal/render all green under `-race`).
+    - `mage lint` → pass (0 issues).
+    - `mage ci` → pass (0 issues + tests green).
+- **Findings:** none. PLAN.md acceptance bullet 1 suggests `ctx := c.Context()`; builder used `_ = c.Context()` — semantically identical placeholder; not a finding (builder documents rationale in worklog).
+- **Hylla Feedback:** None — task touched files either changed-since-last-ingest (`cmd/rak/root.go`) or new (`cmd/rak/root_test.go`) per CLAUDE.md § "Code Understanding Rules" rule 2. Evidence via `Read` + `Grep` + mage stdout. No Hylla miss to record.
+
 ## Unit 2.2 — Round 1
 
 - **QA agent:** go-qa-proof-agent
