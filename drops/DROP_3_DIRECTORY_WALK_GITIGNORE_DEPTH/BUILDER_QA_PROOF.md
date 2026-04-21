@@ -441,3 +441,114 @@ The 70.7% per-package total clears the floor. The Drop-9.3 gate has not flipped 
 ### Hylla Feedback
 
 None — Hylla answered everything needed. Unit 3.3 adds a brand-new `walker.go` to a package that did not exist in Hylla's last ingest (reingest is drop-end-only per WORKFLOW.md Phase 7), so Hylla was correctly not consulted for the new walker symbols. In-package sibling dependencies (`fileset.File`, `fileset.newFile`, `fileset.IsHidden`, `ignore.Matcher`, `ignore.New`, `ignore.GitignoreRoot`) were resolved by reading the source files directly — documented fallback for newly-authored code not yet in the Hylla baseline. Stdlib semantics (`iter.Seq2`, `io/fs.WalkDir`, `io/fs.SkipAll`, `io/fs.DirEntry`, `testing/fstest.MapFile`, `testing/fstest.MapFS`) were resolved via `go doc`. Drop mds are markdown and out of Hylla's Go-only scope. Zero fallback misses to record.
+
+## Unit 3.4 — Round 1
+
+- **QA proof:** go-qa-proof-agent
+- **Reviewed:** 2026-04-21
+- **Verdict:** pass
+- **Files under review:** `main/internal/fileset/binary.go` (new, 49 LOC incl. trailing newline), `main/internal/fileset/binary_test.go` (new, 95 LOC), plus PLAN.md state flip + BUILDER_WORKLOG.md append.
+
+### Acceptance-criterion verification (PLAN.md lines 105–121)
+
+**AC1 — `binary.go` defines `var ErrBinaryFile = errors.New("binary file")` sentinel per CLAUDE.md § "Errors" (F9):**
+- `binary.go` line 15: `var ErrBinaryFile = errors.New("binary file")`. Exact string match the planner specified.
+- Doc comment (lines 8–14) explicitly directs callers to `errors.Is`, "never via string-match", and cites F9 by name.
+- Sentinel name follows the `ErrFoo` convention (CLAUDE.md § "Go-Idiomatic Naming Rules" rule 7). No typo on the variable name.
+- **Pass.**
+
+**AC2 — `func (f *File) IsBinary() (bool, error)` calls `f.Peek(512)` and applies the NUL-byte heuristic (F10):**
+- `binary.go` line 40: `func (f *File) IsBinary() (bool, error)` — signature exact.
+- Line 41: `peek, err := f.Peek(512)` — peek window is literal 512.
+- Line 48: `return bytes.IndexByte(peek, 0x00) >= 0, nil` — single NUL-byte scan over the returned buffer. No UTF-16 fork, no magic-number sniff, no extension check. Matches git + ripgrep as planned (F10).
+- **Pass.**
+
+**AC3 — Empty file → not binary (len(peek) == 0 → false):**
+- `binary.go` lines 45–47: `if len(peek) == 0 { return false, nil }`. Explicit guard before the scan.
+- Test row `empty_file_is_not_binary` (binary_test.go lines 40–44): `content: []byte{}`, `want: false`. Exercises this exact path.
+- **Pass.**
+
+**AC4 — `IsBinary` only returns errors from `Peek(512)`; NUL scan cannot fail (C10):**
+- `binary.go` has exactly one error-producing statement: `peek, err := f.Peek(512)` (line 41). The `bytes.IndexByte` call on line 48 returns only an `int` (the index or `-1`), no error.
+- Function body has two return points: `return false, err` on Peek failure (line 43); `return false, nil` on empty peek (line 46); `return bytes.IndexByte(...) >= 0, nil` on non-empty peek (line 48). Zero wrapping at this layer — Peek already wraps with `open %q: %w` from Unit 3.2 (file.go line 105), so additional wrapping would be noise. Doc comment (lines 27–29) pins this intent.
+- **Pass.**
+
+**AC5 — `binary_test.go` table-driven with 7 required rows:**
+- Verified exact row count and names in `binary_test.go` lines 40–75:
+  1. `empty_file_is_not_binary` (content `[]byte{}`, want false) — line 40–44.
+  2. `pure_ascii_hello_world_is_not_binary` (content `"hello world"`, want false) — line 45–49.
+  3. `utf8_cafe_is_not_binary` (content `"café"`, want false) — line 50–54.
+  4. `nul_prefixed_buffer_is_binary` (content `{0x00, 0x01, 0x02, 0x03}`, want true) — line 55–59.
+  5. `five_hundred_twelve_ascii_bytes_is_not_binary` (content `buildASCII(512)`, want false) — line 60–64.
+  6. `nul_past_peek_window_is_not_binary` (content `tailNULFixture` — 521 bytes, NUL at index 520, want false) — line 65–69 (F10 regression guard).
+  7. `png_magic_bytes_is_binary` (content `{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0x00, ...}`, want true) — line 70–74.
+- Seven rows exactly, every planner-named case present, names match the semantic intent. `t.Parallel()` on top-level test and every subcase (lines 27, 79).
+- **Pass.**
+
+**AC6 — Fixtures live inline via `fstest.MapFS`; no binary files in `testdata/` (F11):**
+- `ls internal/fileset/` at review time shows exactly six files: `binary.go`, `binary_test.go`, `file.go`, `file_test.go`, `walker.go`, `walker_test.go`. No `testdata/` subdirectory.
+- `ls internal/fileset/testdata/` returns `No such file or directory (os error 2)`. The directory does not exist.
+- Every test row builds content via `[]byte` literal or via the `buildASCII` / `buildASCIIThenNULAt` helpers (lines 12–24). Each subcase constructs a per-test `fstest.MapFS{...}` (lines 81–84) and calls `newFile(fsys, "data.bin", "data.bin")`. No disk IO.
+- **Pass.**
+
+**AC7 — This unit does NOT wire `IsBinary` into the Walker; `internal/fileset` stays CLI-free (F12):**
+- `grep -n "IsBinary\|ErrBinaryFile" internal/fileset/walker.go` returns no matches — walker has zero references to the new symbols. Walker yields every non-ignored file; the aggregation layer (cmd/rak in Unit 3.5) will decide to skip binaries.
+- `grep -rn '"github.com/spf13/cobra"\|"github.com/charmbracelet/fang"\|"flag"' internal/fileset/` returns no matches. Package has no CLI coupling. binary.go imports exactly `bytes` and `errors` (lines 3–6). binary_test.go imports `bytes`, `testing`, `testing/fstest` (lines 3–7).
+- **Pass.**
+
+**AC8 — `mage test ./internal/fileset/...` green; `mage lint` green:**
+- Re-ran at review time from `main/`:
+  - `mage test` → all five packages green, cached: `cmd/rak`, `internal/counting`, `internal/fileset`, `internal/ignore`, `internal/render`. Race detector on by default.
+  - `mage lint` → `0 issues.` (go vet + golangci-lint clean).
+  - `mage ci` → `0 issues.` + all five packages green. gofumpt clean.
+- Cached test output is acceptable evidence — mage's `go test` invocation does not re-run when inputs are unchanged, and no Go file has changed since the last run. Nothing in `binary.go` / `binary_test.go` depends on external state or the clock.
+- **Pass.**
+
+### F-pin verification (builder's declared compliance)
+
+**F9 — Sentinel ErrBinaryFile inspected via `errors.Is`, never string-matched:**
+- Declaration: `binary.go` line 15.
+- Doc comment pins the `errors.Is` rule and references F9 by name.
+- Unit 3.4 does not itself have a caller that uses `errors.Is(err, ErrBinaryFile)` — the callers land in Unit 3.5's `cmd/rak/root.go`. Sentinel is plumbing for the downstream consumer.
+- No `strings.Contains` / `strings.HasPrefix` / `== "binary file"` pattern anywhere in the package. Verified via grep on `internal/fileset/`.
+- **Pass.**
+
+**F10 — NUL-byte test over first 512 bytes only; NUL past byte 512 does not classify as binary:**
+- Implementation: `binary.go` line 41 uses `Peek(512)`; line 48 scans only the returned slice. Since `File.Peek(n)` (file.go line 87) opens-reads-closes with a fresh `make([]byte, n)` buffer, the scan is definitionally bounded to the first 512 bytes. No way for a caller to accidentally widen the window without editing `binary.go`.
+- Regression guard: test row `nul_past_peek_window_is_not_binary` (binary_test.go lines 33–34, 65–69) builds a 521-byte fixture with NUL at index 520 and asserts `want: false`. If the peek window ever grew past 512, this test flips and fails — exactly the F10 pin the planner asked for.
+- **Pass.**
+
+**F11 — No binary fixtures in `internal/fileset/testdata/`:**
+- Directory does not exist at review time (verified via `ls internal/fileset/testdata/` returning os.ErrNotExist).
+- All fixture construction inline via `[]byte` literals or the `buildASCII` helpers. Zero disk-hosted binary fixtures in this package.
+- **Pass.**
+
+**F12 — `internal/fileset` stays CLI-free; Walker does not consume `IsBinary`:**
+- `binary.go` imports: `bytes`, `errors` (two stdlib imports only).
+- `binary_test.go` imports: `bytes`, `testing`, `testing/fstest` (stdlib only).
+- `walker.go` has zero references to `IsBinary` / `ErrBinaryFile` (grep verified).
+- No cobra / fang / pflag / flag imports anywhere under `internal/fileset/` (grep verified).
+- The "decide to skip binaries" policy is correctly deferred to `cmd/rak` aggregation per the planner's direction.
+- **Pass.**
+
+### Mage-gate re-run
+
+At review time from `/Users/evanschultz/Documents/Code/hylla/rak/main`:
+
+- `mage test` → all 5 packages green (cached, race detector on).
+- `mage lint` → `0 issues.`.
+- `mage ci` → `0 issues.` + all 5 packages green + gofumpt clean.
+
+No raw `go test` / `go build` / `go vet` / `gofumpt` / `golangci-lint` invocations. Raw `go test -v -run` was attempted for row-count verification but correctly blocked by the CLAUDE.md "never raw go" rule; the 7 rows were verified by static inspection of `binary_test.go` lines 40–75 instead.
+
+### Certificate (Section 0 final)
+
+- **Premises:** Unit 3.4 must expose `ErrBinaryFile` sentinel + `(*File).IsBinary()`, use `Peek(512)` + NUL-byte scan, handle empty files as not-binary, propagate Peek errors unchanged, ship 7 table rows covering the planner-named cases (empty / ASCII / UTF-8 / NUL-prefix / 512 ASCII / 513+ with NUL at 520 / PNG magic), keep fixtures inline (no testdata/ growth), not wire into Walker, stay CLI-free, and pass mage test + lint + ci.
+- **Evidence:** Source inspection of binary.go (49 LOC, 2 stdlib imports, exact F10 semantics at line 48) and binary_test.go (95 LOC, 7 rows matching planner names exactly at lines 40–75, inline `fstest.MapFS` per row). `ls internal/fileset/` confirms no `testdata/` directory. `grep` confirms no IsBinary/ErrBinaryFile references in walker.go and no CLI imports in the package. `mage test`, `mage lint`, `mage ci` all green at review time.
+- **Trace:** Empty file → `len(peek) == 0 → false` (line 45, test row 1). 512 pure ASCII → `IndexByte == -1 → false` (line 48, test row 5). 521-byte tail-NUL → Peek returns first 512 bytes of 'A' → `IndexByte == -1 → false` (test row 6, F10 guard). NUL-prefixed buffer → `IndexByte == 0 → true` (test row 4). PNG magic → NUL at index 8 → `IndexByte == 8 → true` (test row 7). Peek error → propagated verbatim with pre-existing `open %q: %w` wrap (line 43 forwards `Peek`'s wrapped error).
+- **Conclusion:** PASS. All 8 acceptance criteria and all four specified F-pins (F9, F10, F11, F12) are met. `mage test` + `mage lint` + `mage ci` all green.
+- **Unknowns:** None material. The `IsBinary` error-propagation path (Peek returns an error) is not exercised directly in `binary_test.go` because every MapFS fixture returns a well-formed file; the identical error plumbing is already exercised by `TestFile_Open_NotFound` in Unit 3.2's `file_test.go` (which verified the `open %q: %w` wrap unwraps to `fs.ErrNotExist`). `IsBinary` adds no new error paths, just propagates Peek's. Builder's worklog (line 140) acknowledges this coverage gap explicitly and points at the upstream test; acceptable.
+
+### Hylla Feedback
+
+None — Hylla answered everything needed. Unit 3.4 adds `binary.go` to a package (`internal/fileset`) whose last ingest predates Drop 3 entirely (reingest is drop-end-only per WORKFLOW.md Phase 7), so Hylla was correctly not consulted for the new binary.go / binary_test.go symbols. The single in-rak dependency is `(*File).Peek` from Unit 3.2's freshly-written `file.go`, which I resolved by `Read`-ing file.go directly from the active checkout — documented fallback for newly-authored code not yet in the Hylla baseline. External semantics for `bytes.IndexByte` and `errors.New` are stdlib and were not looked up. Drop mds are markdown and out of Hylla's Go-only scope. Zero fallback misses to record.
