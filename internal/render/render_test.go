@@ -2,6 +2,9 @@ package render
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/evanmschultz/laslig"
@@ -139,5 +142,210 @@ func TestJSONRenderer_Table(t *testing.T) {
 				t.Fatalf("snapshot mismatch\nwant: %q\ngot:  %q", tc.want, got)
 			}
 		})
+	}
+}
+
+// TestHumanRenderer_RenderTree_Labels verifies the laslig KV output for a
+// multi-directory rollup carries:
+//   - one "dir: <path>" title per supplied Directory, in caller order
+//   - a final "total" block
+//   - the four canonical count labels (Bytes, Lines, Words, Chars)
+//   - the numeric values reported for each directory plus the grand total
+//
+// Substring assertions (rather than byte-exact snapshot) because KV Title
+// layout with multiple blocks is more sensitive to laslig formatter changes
+// than the titleless single-block case; the existing TablePlain snapshot
+// already pins the inner KV shape. This test's job is to prove RenderTree
+// composes the blocks in the right order with the right labels.
+func TestHumanRenderer_RenderTree_Labels(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := newHumanRendererWithMode(testHumanMode)
+	dirs := []Directory{
+		{Path: ".", Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12}},
+		{Path: "sub", Counts: counting.Counts{Bytes: 4, Lines: 1, Words: 1, Chars: 4}},
+	}
+	total := counting.Counts{Bytes: 16, Lines: 2, Words: 3, Chars: 16}
+	if err := r.RenderTree(&buf, dirs, total, nil); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+
+	got := buf.String()
+	for _, want := range []string{
+		"dir: .",
+		"dir: sub",
+		"total",
+		"Bytes", "Lines", "Words", "Chars",
+		"12", "4", "16",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("RenderTree output missing %q; got:\n%s", want, got)
+		}
+	}
+
+	// Block ordering: "dir: ." must precede "dir: sub" must precede "total".
+	idxRoot := strings.Index(got, "dir: .")
+	idxSub := strings.Index(got, "dir: sub")
+	idxTotal := strings.Index(got, "total")
+	if idxRoot < 0 || idxSub < 0 || idxTotal < 0 {
+		t.Fatalf("missing required titles; got:\n%s", got)
+	}
+	if idxRoot >= idxSub || idxSub >= idxTotal {
+		t.Errorf("block order wrong: root=%d sub=%d total=%d; got:\n%s", idxRoot, idxSub, idxTotal, got)
+	}
+}
+
+// TestHumanRenderer_RenderTree_NoErrors verifies an empty errs slice does
+// NOT emit a warning section.
+func TestHumanRenderer_RenderTree_NoErrors(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := newHumanRendererWithMode(testHumanMode)
+	dirs := []Directory{
+		{Path: ".", Counts: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1}},
+	}
+	if err := r.RenderTree(&buf, dirs, dirs[0].Counts, nil); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	got := buf.String()
+	if strings.Contains(got, "WARNING") {
+		t.Errorf("no-errors case should not emit a WARNING notice; got:\n%s", got)
+	}
+	if strings.Contains(strings.ToLower(got), "errors") {
+		t.Errorf("no-errors case should not mention errors; got:\n%s", got)
+	}
+}
+
+// TestHumanRenderer_RenderTree_WithErrors verifies a non-empty errs slice
+// emits a WARNING-level Notice whose detail includes each error's message.
+func TestHumanRenderer_RenderTree_WithErrors(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := newHumanRendererWithMode(testHumanMode)
+	dirs := []Directory{
+		{Path: ".", Counts: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1}},
+	}
+	errs := []error{errors.New("walk \"foo\": permission denied"), errors.New("walk \"bar\": not a directory")}
+	if err := r.RenderTree(&buf, dirs, dirs[0].Counts, errs); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	got := buf.String()
+	for _, want := range []string{"WARNING", "Errors", "permission denied", "not a directory"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("RenderTree output missing %q; got:\n%s", want, got)
+		}
+	}
+}
+
+// TestHumanRenderer_RenderTree_EmptyDirs verifies passing zero directories
+// still emits a "total" block — the empty-directory user case should report
+// zeroed totals rather than blank output.
+func TestHumanRenderer_RenderTree_EmptyDirs(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := newHumanRendererWithMode(testHumanMode)
+	if err := r.RenderTree(&buf, nil, counting.Counts{}, nil); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	got := buf.String()
+	for _, want := range []string{"total", "Bytes", "Lines", "Words", "Chars", "0"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("empty-dirs RenderTree missing %q; got:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "dir:") {
+		t.Errorf("empty-dirs RenderTree should not emit any dir: blocks; got:\n%s", got)
+	}
+}
+
+// TestJSONRenderer_RenderTree_Snapshot pins the JSON envelope shape for a
+// multi-directory rollup. Unlike the human path, JSON output is fully
+// deterministic so byte-exact matching is appropriate.
+func TestJSONRenderer_RenderTree_Snapshot(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := NewJSONRenderer()
+	dirs := []Directory{
+		{Path: ".", Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12}},
+		{Path: "sub", Counts: counting.Counts{Bytes: 4, Lines: 1, Words: 1, Chars: 4}},
+	}
+	total := counting.Counts{Bytes: 16, Lines: 2, Words: 3, Chars: 16}
+	if err := r.RenderTree(&buf, dirs, total, nil); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	got := buf.String()
+	want := `{"directories":[` +
+		`{"path":".","counts":{"Bytes":12,"Lines":1,"Words":2,"Chars":12}},` +
+		`{"path":"sub","counts":{"Bytes":4,"Lines":1,"Words":1,"Chars":4}}` +
+		`],"total":{"Bytes":16,"Lines":2,"Words":3,"Chars":16}}` + "\n"
+	if got != want {
+		t.Fatalf("snapshot mismatch\nwant: %q\ngot:  %q", want, got)
+	}
+}
+
+// TestJSONRenderer_RenderTree_Empty verifies the no-directories case emits
+// a well-formed envelope with an empty directories array and zero totals.
+// The directories field is always present (not omitted) so JSON consumers
+// can rely on its presence.
+func TestJSONRenderer_RenderTree_Empty(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := NewJSONRenderer()
+	if err := r.RenderTree(&buf, nil, counting.Counts{}, nil); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	got := buf.String()
+	want := `{"directories":[],"total":{"Bytes":0,"Lines":0,"Words":0,"Chars":0}}` + "\n"
+	if got != want {
+		t.Fatalf("snapshot mismatch\nwant: %q\ngot:  %q", want, got)
+	}
+}
+
+// TestJSONRenderer_RenderTree_WithErrors verifies the errors key is emitted
+// only when errs is non-empty, and carries each error's Error() string.
+func TestJSONRenderer_RenderTree_WithErrors(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := NewJSONRenderer()
+	dirs := []Directory{
+		{Path: ".", Counts: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1}},
+	}
+	errs := []error{errors.New("walk \"foo\": permission denied")}
+	if err := r.RenderTree(&buf, dirs, dirs[0].Counts, errs); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	got := buf.String()
+
+	// Parse back and verify structure: the exact field order of encoding/json
+	// is declaration-order, so a byte-match is safe, but we also want to
+	// verify the errors array content.
+	var parsed struct {
+		Directories []directoryJSON `json:"directories"`
+		Total       counting.Counts `json:"total"`
+		Errors      []string        `json:"errors"`
+	}
+	if err := json.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("json.Unmarshal: %v (body: %s)", err, got)
+	}
+	if len(parsed.Errors) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(parsed.Errors), parsed.Errors)
+	}
+	if !strings.Contains(parsed.Errors[0], "permission denied") {
+		t.Errorf("error message missing expected text; got: %q", parsed.Errors[0])
+	}
+
+	// Byte-exact to pin field order (directories → total → errors).
+	want := `{"directories":[{"path":".","counts":{"Bytes":1,"Lines":0,"Words":0,"Chars":1}}],` +
+		`"total":{"Bytes":1,"Lines":0,"Words":0,"Chars":1},` +
+		`"errors":["walk \"foo\": permission denied"]}` + "\n"
+	if got != want {
+		t.Fatalf("snapshot mismatch\nwant: %q\ngot:  %q", want, got)
 	}
 }

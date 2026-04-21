@@ -122,7 +122,7 @@ Import DAG (reconfirms main/CLAUDE.md § "Project Structure" → "Import DAG"): 
 
 ### Unit 3.5 — cmd/rak wire-up: root.go path handling + flags + per-dir aggregation
 
-**State:** todo
+**State:** done
 **Paths:** `main/cmd/rak/root.go`, `main/cmd/rak/root_test.go`, `main/cmd/rak/integration_test.go`, `main/cmd/rak/testdata/` (grows a small tree)
 **Packages:** `github.com/evanmschultz/rak/cmd/rak`
 **Blocked by:** 3.3, 3.4
