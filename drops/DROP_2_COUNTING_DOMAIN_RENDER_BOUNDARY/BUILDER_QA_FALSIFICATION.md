@@ -2,6 +2,32 @@
 
 Append a `## Unit N.M — Round K` section per QA attempt. See `main/drops/WORKFLOW.md`.
 
+## Unit 2.4 — Round 1
+
+- **QA agent:** go-qa-falsification-agent
+- **Verdict:** pass
+- **Attacks attempted:**
+    1. Fixture byte pollution (BOM / CRLF / trailing whitespace) — blocked (`xxd` shows 29 clean bytes, no BOM, LF-only, trailing `\n` present).
+    2. Counts math error — blocked (manual `ReadRune` walk yields `{29,2,5,27}`).
+    3. `é` / `ï` NFC-vs-NFD encoding drift — blocked (`é` = `c3 a9` NFC, `ï` = `c3 af` NFC, both 2 bytes / 1 rune).
+    4. F12 fixture coverage gap — blocked (multi-line, multi-word, multi-byte UTF-8 all present; Bytes > Chars 29 > 27).
+    5. Human assertion tolerance weakness — accepted (`strings.Contains` on `"2"` is subsumed by `"29"` / `"27"`, carries no independent signal; builder documented the asymmetry at `integration_test.go:69` and worklog; PLAN.md line 138 is ambiguous enough to permit it).
+    6. `t.Parallel()` file-handle / buffer race — blocked (fresh `*os.File` and `bytes.Buffer` per subtest, fresh `newRootCmd` factory avoids shared flag state).
+    7. Wrong renderer selected — blocked (byte-exact JSON assertion would diverge immediately on a human-renderer leak).
+    8. F11 pin creep — blocked (`root_test.go` unchanged at 108 LOC, `git diff` empty).
+    9. Fixture path portability — blocked (`filepath.Join` + Go test CWD = package dir per `go help test`).
+    10. `mage ci` green claim — blocked (fresh `mage ci` / `mage test` / `mage lint` / `mage build` all pass from `main/`).
+    11. gofumpt / golangci-lint drift — blocked (`mage lint` 0 issues fresh).
+    12. Race detector coverage — blocked (`magefile.go:29` `go test -race ./...`, integration tests included).
+    13. Unused / shadowed imports in `integration_test.go` — blocked (all 5 imports used; `mage lint` would have caught either).
+    14. LOC claim drift — accepted-minor (worklog says 119, file is 121; cosmetic, no acceptance cap on `integration_test.go`).
+    15. Doc-comment rule 11 regression — blocked (both `Test*` funcs have `// TestRootCmd_Integration_*` doc comments starting with identifier name).
+    16. Fixture trailing-newline semantics — blocked (`xxd` shows trailing `0a`; Lines=2 as expected).
+    17. `testdata` idiom spelling — blocked (directory is `testdata/`, not `test-data/` or `fixtures/`).
+    18. `mage install` invocation anywhere — blocked (no occurrences in diff or test).
+- **Findings / counterexamples:** none (2 minor surface-level notes: worklog LOC undercount cosmetic; human-assertion `"2"` substring weak-but-documented. Neither blocks acceptance).
+- **Hylla Feedback:** N/A — Unit 2.4 touched only a text fixture + a new `_test.go` file in a package changed since last ingest per CLAUDE.md § "Code Understanding Rules" rule 2; Go-symbol verification went via `Read` / `Grep` / `xxd` / mage targets directly.
+
 ## Unit 2.3 — Round 1
 
 - **QA agent:** go-qa-falsification-agent

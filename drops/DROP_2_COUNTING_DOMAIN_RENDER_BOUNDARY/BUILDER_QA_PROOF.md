@@ -2,6 +2,31 @@
 
 Append a `## Unit N.M — Round K` section per QA attempt. See `main/drops/WORKFLOW.md`.
 
+## Unit 2.4 — Round 1
+
+- **QA agent:** go-qa-proof-agent
+- **Verdict:** pass
+- **Verified acceptance bullets:**
+    - `testdata/` dir + stable fixture — `main/cmd/rak/testdata/hello.txt` (29 bytes, `wc -c` confirmed).
+    - F12 fixture coverage — `od -c` confirms 2 `\n` (multi-line), 5 whitespace-delimited tokens (multi-word), `é` (0xC3 0xA9) + `ï` (0xC3 0xAF) multi-byte UTF-8 runes; Bytes=29 > Chars=27.
+    - Opens via `os.Open(filepath.Join("testdata", "hello.txt"))` — `main/cmd/rak/integration_test.go:48`, `:89`.
+    - Wires via `cmd.SetIn(file)` + `cmd.SetOut(&out)` through `newRootCmd()` — `integration_test.go:55-58`, `:96-99`.
+    - Covers both format paths — `--format=human` at `integration_test.go:59`; `--format=json` at `integration_test.go:100`.
+    - Counts derivation verified by walking `counting.Count` semantics (`counting.go:36-72`) against fixture bytes: Bytes=29 (sum UTF-8 widths), Lines=2 (`\n` count), Words=5 (IsSpace-delimited tokens), Chars=27 (rune count).
+    - JSON byte-exact snapshot `{"Bytes":29,"Lines":2,"Words":5,"Chars":27}\n` — `integration_test.go:107`; matches stdlib `encoding/json.Encoder.Encode` output with `Counts` declaration-order fields and no struct tags.
+    - PLAN.md Unit 2.4 state = `done` at `main/drops/DROP_2_COUNTING_DOMAIN_RENDER_BOUNDARY/PLAN.md:131`.
+    - BUILDER_WORKLOG.md Unit 2.4 Round 1 at TOP (`:5`, above Unit 2.3 at `:36`).
+    - F4 pin held — grep `json:` in `internal/counting/counting.go` returns no matches.
+    - F9 pin held — grep `os.Stdin` in `cmd/rak/root.go` returns no matches.
+    - F11 pin held — `cmd/rak/root_test.go` = 108 LOC (≤ 150); untouched by Unit 2.4 (builder split into new `integration_test.go` instead of extending `root_test.go`).
+- **Mage targets run:**
+    - `mage build` → pass.
+    - `mage test` → pass (cmd/rak, internal/counting, internal/render all ok under `-race`).
+    - `mage lint` → pass (0 issues).
+    - `mage ci` → pass (0 issues + tests green).
+- **Findings:** none.
+- **Hylla Feedback:** None — Unit 2.4 touched only a non-Go fixture + a new `_test.go` in a package changed since last ingest, so per CLAUDE.md § "Code Understanding Rules" rule 2 evidence routed through `Read` / `Grep` / mage stdout. No miss to record.
+
 ## Unit 2.3 — Round 1
 
 - **QA agent:** go-qa-proof-agent

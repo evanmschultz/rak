@@ -128,7 +128,7 @@ Minimal cut: `2.0 → 2.2 → 2.3 → 2.4`, with `2.1` parallel to `2.0` (2.1 ha
 
 ### Unit 2.4 — End-to-end integration test via `cmd/rak/testdata/`
 
-- **State:** todo
+- **State:** done
 - **Paths:** `main/cmd/rak/testdata/hello.txt` (new fixture — contents stable and documented in test; see coverage hint below), `main/cmd/rak/integration_test.go` (new) OR `main/cmd/rak/root_test.go` (extended — builder's call based on root_test.go's remaining LOC budget from F11 pin above)
 - **Packages:** `github.com/evanmschultz/rak/cmd/rak`
 - **Blocked by:** 2.3
