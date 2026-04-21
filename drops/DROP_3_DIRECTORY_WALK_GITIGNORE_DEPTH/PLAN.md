@@ -33,7 +33,7 @@ Import DAG (reconfirms main/CLAUDE.md § "Project Structure" → "Import DAG"): 
 
 ### Unit 3.1 — internal/ignore: Matcher interface + gitignore + include/exclude globs
 
-**State:** todo
+**State:** done
 **Paths:** `main/internal/ignore/ignore.go`, `main/internal/ignore/gitignore.go`, `main/internal/ignore/glob.go`, `main/internal/ignore/ignore_test.go`
 **Packages:** `github.com/evanmschultz/rak/internal/ignore` (new)
 **Blocked by:** 3.0
