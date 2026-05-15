@@ -1,6 +1,6 @@
 # DROP_8 — SAFETY_RAILS
 
-**State:** building
+**State:** done
 **Tier:** B
 **Blocked by:** DROP_7
 **Paths (expected):** `main/cmd/rak/root.go` (add `--max-files int` flag + abort logic in walkAndCount), `main/cmd/rak/root_test.go` (flag-parsing + abort-behavior tests)
@@ -8,7 +8,7 @@
 **PLAN.md ref:** main/PLAN.md → `DROP_8_SAFETY_RAILS` row
 **Workflow:** main/drops/WORKFLOW.md
 **Started:** 2026-05-15
-**Closed:** —
+**Closed:** 2026-05-15 (CI run 25943131873 green; Hylla ingest task task-346c727ad6254892 at commit a3c8e73)
 
 ## Scope
 

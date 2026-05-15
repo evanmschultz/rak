@@ -75,7 +75,7 @@ The plan below is the working shape. Each row is a level_1 container drop. **Eac
 | `DROP_5_LANGUAGE_DETECTION_CODE_SPLITS` | A | done | DROP_4 | `main/drops/DROP_5_LANGUAGE_DETECTION_CODE_SPLITS/` |
 | `DROP_6_STDIN_PIPE_BEHAVIOR` | C | done (no-op close — ratified Drop 2/4 behavior) | DROP_5 | `main/drops/DROP_6_STDIN_PIPE_BEHAVIOR/` |
 | `DROP_7_SUMMARY_SORTING` | A | done | DROP_6 | `main/drops/DROP_7_SUMMARY_SORTING/` |
-| `DROP_8_SAFETY_RAILS` | B | todo | DROP_7 | `main/drops/DROP_8_SAFETY_RAILS/` |
+| `DROP_8_SAFETY_RAILS` | B | done | DROP_7 | `main/drops/DROP_8_SAFETY_RAILS/` |
 | `DROP_9_RELEASE_DOCS` | B (mixed; 9.4 + 9.5 are C) | todo | DROP_8 | `main/drops/DROP_9_RELEASE_DOCS/` |
 
 ### Deferred to v0.2
@@ -160,7 +160,7 @@ DROP_7 — Summary + sorting  (DONE — closed 2026-05-15)
       (decision 19). Note: `tokens` is NOT a sort key in v0.1.0 (decision 30 defer).
   • [DEFERRED to v0.2+: tree view, TSV output — decision 26]
 
-DROP_8 — Safety rails  (was DROP_8; tier B; slimmed per decision 30)
+DROP_8 — Safety rails  (DONE — closed 2026-05-15)
   8.1 --max-files safety rail (orchestrator aborts with wrapped error when crossed).
   • [CUT per decision 30: parallel walk (was 8.1), spinner / progress indication (was 8.2),
     --tracked-only as opt-in (now default per decision 32), --follow symlinks (was 8.5)]
@@ -180,11 +180,11 @@ DROP_9 — Release + docs  (slimmed per decision 30; mixed tier)
 
 ## Immediate Next Step
 
-Drops 0/1/2/3/4/5/6/7 are done. Drop 7 closed 2026-05-15 at commit `92d5a07`, CI run 25939674606, Hylla task `task-2ca675dc1803694b`. The orchestrator's next moves, in order:
+Drops 0/1/2/3/4/5/6/7/8 are done. Drop 8 closed 2026-05-15 at commit `a3c8e73`, CI run 25943131873, Hylla task `task-346c727ad6254892`. Only **Drop 9 (RELEASE_DOCS — slim per decision 30)** remains for v0.1.0.
 
-1. **Stamp Drop 8** (SAFETY_RAILS — tier B, slim): copy `main/drops/_TEMPLATE/` → `main/drops/DROP_8_SAFETY_RAILS/`. Set `state: planning`, `Tier: B`. Per the drop tree, Drop 8 is slimmed to just `--max-files` safety rail per decision 30 (parallel walk, spinner, --tracked-only opt-in, --follow all cut). Likely one unit.
-2. **Tier B planning** (per WORKFLOW.md § "Cascade Tiering"): orch writes the Planner section inline (no planner subagent). Tier B build-QA is falsification-only per unit.
-3. Continue through Phase 4 build + Phase 5 falsification-QA + Phases 6–7.
+1. **Stamp Drop 9**: copy `main/drops/_TEMPLATE/` → `main/drops/DROP_9_RELEASE_DOCS/`. Set `state: planning`, `Tier: B` (mixed; 9.4 + 9.5 are C — dev-manual GitHub flips). Per main/PLAN.md the slim Drop 9 contents: 9.1 README rewrite, 9.2 `--version` via `fang.WithVersion`, 9.3 flip `mage coverage` to gate (70% floor), 9.4 flip repo public (dev-manual), 9.5 tag v0.1.0.
+2. Per WORKFLOW.md Cascade Tiering Tier B/C mechanics: orch inline plan (no planner subagent); falsification-only build-QA for tier-B units; orch-direct + dev review for tier-C units (9.4 + 9.5).
+3. Drop 9 close = v0.1.0 ship.
 
 ## Follow-Ups / Outstanding Orchestration Tasks
 
