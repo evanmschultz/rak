@@ -15,6 +15,33 @@ import (
 	"github.com/evanmschultz/rak/internal/ignore"
 )
 
+// gitCleanEnv returns os.Environ() with GIT_DIR, GIT_WORK_TREE, and
+// GIT_INDEX_FILE stripped out. When a caller (e.g. a test framework or IDE
+// shell) has GIT_DIR set to an absolute path, git subprocess invocations
+// that set cmd.Dir to a different directory fail with exit status 128 because
+// git resolves the object database relative to the inherited GIT_DIR rather
+// than the cmd.Dir worktree. Stripping these variables lets git discover the
+// repository from cmd.Dir as intended.
+func gitCleanEnv() []string {
+	strip := map[string]bool{
+		"GIT_DIR":        true,
+		"GIT_WORK_TREE":  true,
+		"GIT_INDEX_FILE": true,
+	}
+	env := os.Environ()
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		key := kv
+		if i := strings.IndexByte(kv, '='); i >= 0 {
+			key = kv[:i]
+		}
+		if !strip[key] {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
 // GitLister enumerates files tracked by git under a walk root. It runs
 // "git ls-files --full-name -z" to obtain the list of tracked paths, then
 // applies the same per-path filters that fileset.Walker applies (hidden
@@ -48,6 +75,7 @@ func newGitLister(ctx context.Context, root string, opts fileset.WalkOptions) (*
 
 	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
 	cmd.Dir = absRoot
+	cmd.Env = gitCleanEnv()
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("lister: new git lister: %w", err)
@@ -100,6 +128,7 @@ func (g *GitLister) List(ctx context.Context) iter.Seq2[*fileset.File, error] {
 		// Run git ls-files to collect all tracked paths.
 		cmd := exec.CommandContext(ctx, "git", "ls-files", "--full-name", "-z")
 		cmd.Dir = g.absRoot
+		cmd.Env = gitCleanEnv()
 		stdout, err := cmd.Output()
 		if err != nil {
 			// Distinguish context cancellation from a git failure.

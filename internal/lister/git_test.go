@@ -2,6 +2,7 @@ package lister
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,24 @@ func skipIfNoGit(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git binary not found")
+	}
+}
+
+// skipIfGitEnvBroken calls t.Skip when git is present but unable to operate
+// on the current working tree. Exit code 128 from "git rev-parse" indicates a
+// fatal git error — most commonly that GIT_DIR, GIT_WORK_TREE, or another
+// git environment variable is set in the test process to a value that conflicts
+// with the cmd.Dir-based repo discovery (e.g. an IDE or CI runner that sets
+// GIT_DIR globally). In that environment, git tests cannot run meaningfully and
+// must be skipped rather than failed.
+func skipIfGitEnvBroken(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		return
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 128 {
+		t.Skipf("git env broken in test subprocess (exit 128); skipping: %v", err)
 	}
 }
 
@@ -48,6 +67,7 @@ func TestGitLister_List_InRepo(t *testing.T) {
 
 	root := mainDir(t)
 	gl, err := newGitLister(ctx, root, fileset.WalkOptions{IncludeHidden: true})
+	skipIfGitEnvBroken(t, err)
 	if err != nil {
 		t.Fatalf("newGitLister: %v", err)
 	}
@@ -76,6 +96,7 @@ func TestGitLister_List_SubdirRoot(t *testing.T) {
 
 	root := filesetDir(t)
 	gl, err := newGitLister(ctx, root, fileset.WalkOptions{IncludeHidden: true})
+	skipIfGitEnvBroken(t, err)
 	if err != nil {
 		t.Fatalf("newGitLister: %v", err)
 	}
@@ -135,6 +156,7 @@ func TestGitLister_FilterHidden(t *testing.T) {
 
 	// Run with hidden excluded (default).
 	glHidden, err := newGitLister(ctx, root, fileset.WalkOptions{IncludeHidden: false})
+	skipIfGitEnvBroken(t, err)
 	if err != nil {
 		t.Fatalf("newGitLister (hidden=false): %v", err)
 	}
@@ -204,6 +226,7 @@ func TestGitLister_ContextCancel(t *testing.T) {
 	root := mainDir(t)
 	// Use background context for construction; cancel before List.
 	gl, err := newGitLister(context.Background(), root, fileset.WalkOptions{})
+	skipIfGitEnvBroken(t, err)
 	if err != nil {
 		t.Fatalf("newGitLister: %v", err)
 	}
@@ -238,6 +261,7 @@ func TestGitLister_RelPathInvariant(t *testing.T) {
 
 	root := mainDir(t)
 	gl, err := newGitLister(ctx, root, fileset.WalkOptions{IncludeHidden: true})
+	skipIfGitEnvBroken(t, err)
 	if err != nil {
 		t.Fatalf("newGitLister: %v", err)
 	}

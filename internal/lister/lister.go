@@ -32,7 +32,7 @@ type FileLister interface {
 // already been applied by git itself, so --no-gitignore has no effect.
 // Callers branch on this condition via errors.Is(err, lister.ErrNoGitignoreInRepo);
 // never string-match the message.
-var ErrNoGitignoreInRepo = errors.New("rak: --no-gitignore has no effect when run inside a git repository. rak counts git-tracked files in this mode. To count untracked files, run rak outside the repository.")
+var ErrNoGitignoreInRepo = errors.New("rak: --no-gitignore has no effect when run inside a git repository; rak counts git-tracked files in this mode. To count untracked files, run rak outside the repository")
 
 // Detect resolves the concrete FileLister for root. It resolves root to an
 // absolute path, then probes whether root sits inside a git repository by
@@ -59,6 +59,7 @@ func Detect(ctx context.Context, root string, opts fileset.WalkOptions) (FileLis
 
 	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--is-inside-work-tree")
 	cmd.Dir = absRoot
+	cmd.Env = gitCleanEnv()
 	runErr := cmd.Run()
 
 	if runErr == nil {

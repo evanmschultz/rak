@@ -86,7 +86,7 @@ Import DAG extension: `lister → fileset, ignore, os/exec` (new leaf-ish mid-ti
 
 ### Unit 4.3 — internal/lister.WalkLister: Walker adapter + exported constructor
 
-- **State:** todo
+- **State:** done
 - **Paths:** `main/internal/lister/walk.go`, `main/internal/lister/walk_test.go`
 - **Packages:** `github.com/evanmschultz/rak/internal/lister`
 - **Acceptance:**
