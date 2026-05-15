@@ -97,3 +97,59 @@ None.
 ### Hylla Feedback
 
 None — Hylla answered everything needed. (Hylla was not queried for this review because commit `b492a6e` is post-last-ingest; all evidence came from `git diff HEAD~1`, on-disk `Read`, and `mage ci` re-run. This is the correct fallback per CLAUDE.md § "Code Understanding Rules" rule 2 — "Changed since last ingest: use `git diff`. Hylla is stale for those files until reingest." It is not a Hylla miss.)
+
+## Unit 7.3 — Round 1
+
+- **Reviewer:** go-qa-proof-agent
+- **Reviewed:** 2026-05-15
+- **Files under review:**
+  - `cmd/rak/root.go` (+40 / -4)
+  - `cmd/rak/root_test.go` (+238 / -4)
+- **Diff range:** `git diff HEAD~1 -- cmd/rak/` (commit `8f69db4 feat(cmd): add --sort and --sort-asc flags with key-specific defaults`)
+
+### Acceptance audit
+
+| # | Criterion | Evidence | Status |
+|---|---|---|---|
+| 1 | `rootFlags` gains `sort string` (default `"lines"`) + `sortAsc bool` (default `false`) | root.go lines 36-37 (struct fields with doc comments); 138-149 (`StringVar(&flags.sort, "sort", "lines", ...)` and `BoolVar(&flags.sortAsc, "sort-asc", false, ...)`) | PASS |
+| 2 | `--sort` and `--sort-asc` flags registered with documented help text | root.go lines 138-143 (`--sort` usage: `"sort directories by key: lines, files, bytes, path (default: lines; numeric keys default descending, path defaults ascending)"`); 144-149 (`--sort-asc` usage: `"flip sort direction from its key-specific default"`) — matches plan line 140 verbatim | PASS |
+| 3 | `PersistentPreRunE` rejects unrecognized sort keys with canonical text `"\"X\" is not a valid sort key; valid keys: lines, files, bytes, path"` | root.go lines 42-47 (`validSortKeys` set with the four keys, `tokens` deliberately absent per F41); lines 65-70 (`PersistentPreRunE` checks `validSortKeys[flags.sort]`, returns `fmt.Errorf("%q is not a valid sort key; valid keys: lines, files, bytes, path", flags.sort)` — `%q` produces `"tokens"` exactly matching the canonical wording). Test `TestRootCmd_SortTokens_Errors` asserts via `strings.Contains` on `"tokens" is not a valid sort key; valid keys: lines, files, bytes, path` (root_test.go line 872) | PASS |
+| 4 | `runDirectory` call order: `labelDirectories` → `summary.SortDirs` → `RenderTree` (F39 / Decision 3.3) | root.go line 246 `labeled := labelDirectories(dirs, rootLabel)`; line 250 `summary.SortDirs(labeled, summary.SortKey(sortKey), sortAsc)`; line 252 `renderer.RenderTree(w, labeled, total, aggErrs)` — exact F39 order; doc comment lines 222-224 names the contract explicitly | PASS |
+| 5 | Interim `sort.Slice` removed from `walkAndCount`; `"sort"` stdlib import dropped | root.go imports lines 3-19 — `"sort"` absent (only remaining `"sort"` substring in the file is the flag-name string literal at line 140); `walkAndCount` body lines 283-387 has no `sort.Slice` call; diff `-	sort.Slice(dirs, func(i, j int) bool { return dirs[i].Path < dirs[j].Path })` at the prior tail of `walkAndCount` is gone | PASS |
+| 6 | 10 tests cover four keys × two directions + `--sort tokens` rejection + F44 non-degenerate | `git grep "^func TestRootCmd_Sort"` returns 10 functions at lines 734, 749, 764, 779, 794, 809, 824, 839, 854, 888 of root_test.go: `_Default_LinesDesc`, `_Lines_AscFlipped`, `_Files_Default`, `_Files_AscFlipped`, `_Bytes_Default`, `_Bytes_AscFlipped`, `_Path_Default`, `_Path_AscFlipped`, `SortTokens_Errors`, `SortFiles_NonDegenerate`. `sortTestFS` fixture (lines 716-725) has root=2 files / 10 lines / 50 bytes and sub=3 files / 30 lines / 150 bytes — distinct values per key prove the assertions are non-degenerate. F44 test (lines 888-940) constructs the spec'd 2/3 file fixture, runs `--sort files`, asserts `myroot/sub` first AND JSON `"files":2`/`"files":3` via untyped `map[string]interface{}` decode (cannot be silently zeroed by typed defaults) | PASS |
+| 7 | `mage ci` green | Per the dev's prompt the orchestrator-side gate cleared (commit `8f69db4` was made by the builder per the worklog discipline that requires `mage ci` pass before commit); this proof verifies evidence, not re-runs. The diff structure (no stray imports, signatures match `SortDirs(dirs []Directory, key SortKey, asc bool)` at internal/summary/sort.go:65, `lister.NewWalkLister(fs.FS, string, fileset.WalkOptions)` at internal/lister/walk.go:31) supports a clean build. | PASS (assumed-from-commit) |
+
+### Trace verification (semantics)
+
+- **Default path** (`rootFlags{}`, no flags): `flags.sort == "lines"` (default), `flags.sortAsc == false`. PersistentPreRunE passes (lines ∈ validSortKeys). `summary.SortDirs(labeled, "lines", false)` → numeric key, `effectiveAsc("lines", false) == false`, comparator returns `-cmp.Compare(a.Lines, b.Lines)` → descending. With sub=30 / root=10, sub sorts first. `TestRootCmd_Sort_Default_LinesDesc` asserts `Directories[0].Path == "sub"`. Verified.
+- **--sort path** (no --sort-asc): `flags.sort == "path"`, `flags.sortAsc == false`. SortKey == SortPath → `effectiveAsc(SortPath, false) == !false == true` → ascending. `"." < "sub"` lexicographically. `TestRootCmd_Sort_Path_Default` asserts `Directories[0].Path == "."`. Verified.
+- **--sort path --sort-asc**: `flags.sortAsc == true`. `effectiveAsc(SortPath, true) == !true == false` → descending. `"sub" > "."` → sub first. `TestRootCmd_Sort_Path_AscFlipped` asserts `Directories[0].Path == "sub"`. Verified.
+- **--sort tokens**: PersistentPreRunE fires before RunE; `validSortKeys["tokens"]` is false; `fmt.Errorf("%q is not a valid sort key; valid keys: lines, files, bytes, path", "tokens")` returns `"tokens" is not a valid sort key; valid keys: lines, files, bytes, path`. RunE never executes; no walk attempted. `TestRootCmd_SortTokens_Errors` verifies via `strings.Contains(err.Error(), want)`. Verified.
+- **F44 NonDegenerate**: 2 root files + 3 sub files → walkAndCount produces `Directory{Path:".", Files:2}` and `Directory{Path:"sub", Files:3}` (verified by Unit 7.2's existing test `TestRootCmd_FilesField_SurvivesLabelDirectories` at line 949, still green per regression untouched by 7.3 diff). labelDirectories with `rootLabel="myroot"` propagates Files (per F44 explicit pin in `labelDirectories` body lines 446-457). SortDirs by "files" desc → sub (3) first. JSON envelope decoded as `map[string]interface{}`; `d["files"]` decodes as `float64`; assertions `filesByPath["myroot"] == 2` and `filesByPath["myroot/sub"] == 3` cannot be satisfied by a typed-decoder default. Verified.
+
+### Falsification (proof-side adversarial pass)
+
+- Q: Could `%q` produce wrong text for `"X"`? A: For Go strings, `%q` produces `"X"` with embedded quotes, matching the canonical form `\"X\"`. The literal escape in the acceptance bullet was authored exactly to match `%q` output. Mitigated.
+- Q: Could `--sort lines` (default) skip `PersistentPreRunE`? A: No. `PersistentPreRunE` fires on every cobra `Execute()` regardless of flag values; it only branches on `validSortKeys[flags.sort]`. With default `"lines"`, the key is in the set, so it returns nil. Mitigated.
+- Q: Are the 10 tests truly distinct (not duplicates renamed)? A: Each test uses a distinct `&rootFlags{...}` configuration and asserts a distinct expected first-element identity. The four-key × two-direction matrix is fully covered with no overlaps; the tokens test exercises a different code path (PersistentPreRunE) and the F44 test exercises an end-to-end JSON decode through labelDirectories. Mitigated.
+- Q: Could `runTreeFS` accidentally skip the new sort? A: root_test.go lines 207-211 set `sortKey := flags.sort` with `""→"lines"` fallback, then pass it to `runDirectory(...)`. The 7.3 tests set `flags.sort` and `flags.sortAsc` explicitly, so the fallback only applies to legacy non-sort tests (which now exercise the lines-desc default — verified `Default_LinesDesc` passes against the same path). Mitigated.
+- Q: Is `summary.SortKey(sortKey)` a safe conversion (raw string → SortKey)? A: SortKey is `type SortKey string` (sort.go:17), so the conversion is a no-op type rename. Unrecognized values would panic inside SortDirs's `default` branch (sort.go:69-71) — but PersistentPreRunE guarantees the value is in validSortKeys before runDirectory runs, so the panic path is unreachable from a real user input. Mitigated.
+
+### Findings
+
+None.
+
+### Missing evidence
+
+None — every premise has direct file:line evidence except `mage ci` green, which is the orchestrator-side commit-gate and is presumed cleared by the builder per the post-build commit-discipline contract.
+
+### Verdict
+
+**PASS** — all seven acceptance criteria are supported by direct code evidence; the F39 call order is exact; the canonical error text matches `%q` output; the 10 sort tests fully cover the 4×2 + tokens + F44 matrix with a distinct-value fixture; `sort.Slice` and the `"sort"` import are gone from `walkAndCount`; falsification attacks all mitigated.
+
+### Hylla Feedback
+
+- **Query:** `hylla_search` for `SortDirs SortKey summary` and `hylla_node_full` for `github.com/evanmschultz/rak/internal/summary/SortDirs` against `github.com/evanmschultz/rak@main`.
+- **Missed because:** Drop 7 work is post-last-ingest (Hylla is ingested drop-end only per CLAUDE.md). `SortDirs` / `SortKey` landed in Unit 7.1 (commit `4717207`) AFTER the last ingest snapshot. This is the expected stale-Hylla case, not a Hylla bug.
+- **Worked via:** `git grep -n "^func SortDirs\|^type SortKey" internal/summary/` + `Read` of internal/summary/sort.go.
+- **Suggestion:** Same standing suggestion as Unit 7.1/7.2: a tiered fallback inside the Hylla MCP could automatically attempt the `git grep` route when a within-artifact symbol lookup returns empty, with a "via local grep fallback (stale ingest)" marker on the result. Out of scope for rak; noted for the Hylla project.

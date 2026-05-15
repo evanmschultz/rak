@@ -128,3 +128,60 @@ None. Zero CONFIRMED counterexamples across 8 named attack surfaces and 10 Go-qu
 - **Trace or cases:** 8 attack surfaces from the spawn prompt + 10 Go-quality attack families. All REFUTED with reproducible evidence or EXHAUSTED with reason.
 - **Conclusion:** PASS. No CONFIRMED counterexample. Unit 7.2's claim that `render.Directory` is fully migrated to `summary.Directory` with F43 field-order parity and F44 Files-propagation across all reconstruction sites is upheld.
 - **Unknowns:** `omitempty`-on-zero edge for non-walker callers (cosmetic, not a unit-7.2 defect); Hylla snapshot staleness (expected, fallback to `git diff` + `Read` covered the gap).
+
+---
+
+## Unit 7.3 — Round 1
+
+**Date:** 2026-05-15
+**Verdict:** PASS (no CONFIRMED counterexamples)
+**Files reviewed:**
+- `cmd/rak/root.go` (+40/-4)
+- `cmd/rak/root_test.go` (+238/-4)
+**Commit:** `8f69db4 feat(cmd): add --sort and --sort-asc flags with key-specific defaults`
+**Evidence:** `git diff HEAD~1 -- cmd/rak/`, direct `Read` of `root_test.go` sort-block (lines 800–940), `git diff HEAD~1 -- ':!cmd/rak/' ':!drops/'` (empty), `mage ci` (green).
+
+### Attack pass
+
+| # | Attack surface | Outcome | Notes |
+|---|---|---|---|
+| 1 | F41 canonical error text — exact match between source and test assertion | REFUTED | Source: `fmt.Errorf("%q is not a valid sort key; valid keys: lines, files, bytes, path", flags.sort)` in `root.go` PersistentPreRunE. Test assertion in `TestRootCmd_SortTokens_Errors` (line 872): wants `` `"tokens" is not a valid sort key; valid keys: lines, files, bytes, path` ``. `%q` on `"tokens"` produces `"tokens"` with surrounding double quotes — character-for-character match with the test's `want` string. Single canonical form. |
+| 2 | `PersistentPreRunE` actually fires before `RunE` | REFUTED | Cobra's documented execution order is PersistentPreRunE → PreRunE → RunE (cobra `Command.Execute` chain). `TestRootCmd_SortTokens_Errors` drives `cmd.Execute()` with `--sort tokens .` and `cmd.SetIn(strings.NewReader(""))`. If the validator did not fire before `runRoot`, the test would either succeed silently (no error returned), fail with a different error (e.g. walk error on `.`), or hang on stdin. None occur — the test expects and gets the canonical validator error. The path arg `.` ensures `RunE` would otherwise reach `runDirectory`, so the validator is the only thing that can short-circuit. |
+| 3 | F44 e2e depth: ordering AND JSON content both asserted | REFUTED | `TestRootCmd_SortFiles_NonDegenerate` (lines 888–940) asserts BOTH (a) `firstPath == "myroot/sub"` after `--sort files` default desc (ordering on `Files` field, proving SortDirs uses real Files data, not a degenerate field where 0==0), AND (b) `filesByPath["myroot"] == 2` and `filesByPath["myroot/sub"] == 3` (JSON envelope carries non-zero Files through labelDirectories reconstruction). Both halves use unmarshalled JSON, not stub values. F44 is a real end-to-end smoke. |
+| 4 | `--sort path --sort-asc` flip behavior (the C1 trap) | REFUTED | `TestRootCmd_Sort_Path_AscFlipped` (lines 839–850) explicitly asserts `res.Directories[0].Path == "sub"` (not `"."`) under `&rootFlags{sort: "path", sortAsc: true}`. Because path's key-specific default is asc, `--sort-asc` flips to descending; `"sub"` > `"."` lexicographically, so `"sub"` lands first. Test directly exercises the inversion-vs-numeric-keys asymmetry; the C1 trap is caught. Companion `TestRootCmd_Sort_Path_Default` (lines 824–835) confirms the unflipped path-asc default ordering. |
+| 5 | `runDirectory` call ordering invariant: sort AFTER labelDirectories (F39 / Decision 3.3) | REFUTED | Diff at `runDirectory` body: `labelDirectories(...)` returns `labeled`, then comment "Apply user-controlled sort AFTER labelDirectories so SortDirs operates on the final user-facing paths (Decision 3.3, F39)", then `summary.SortDirs(labeled, summary.SortKey(sortKey), sortAsc)`, then `renderer.RenderTree(w, labeled, ...)`. Order: labelDirectories → SortDirs → RenderTree. Matches F39 / Decision 3.3 verbatim. |
+| 6 | No leftover `sort.Slice` in `walkAndCount` (would double-sort with path tiebreaker) | REFUTED | Diff in `walkAndCount`: `-sort.Slice(dirs, func(i, j int) bool { return dirs[i].Path < dirs[j].Path })` (removed). Also `-"sort"` in the import block (the std `sort` package is no longer imported by `root.go`). Confirms no leftover pre-sort that would change tiebreaker behavior for `slices.SortFunc` (which is not stable). |
+| 7 | Drop 5/6 surface preservation (cmd/rak-only touch) | REFUTED | `git diff HEAD~1 -- ':!cmd/rak/' ':!drops/'` returns empty. Only `cmd/rak/root.go` (+40/-4) and `cmd/rak/root_test.go` (+238/-4) changed. No leakage into `internal/lang/`, `internal/summary/`, `internal/render/`, `internal/fileset/`, `internal/lister/`, or any other package. |
+| 8 | `mage ci` re-verify | REFUTED | Re-ran `mage ci`: golangci-lint `0 issues`; `go test -race ./... ` all 9 packages `ok` (most cached, `cmd/rak` re-run with new tests). |
+| 9 | Shipped-but-not-wired (validator without consumer) | REFUTED | F41 has schema (`validSortKeys` map), resolver (PersistentPreRunE closure), AND integration test (`TestRootCmd_SortTokens_Errors` drives full `cmd.Execute()`). F44 has schema (`Files` field in summary.Directory, threaded since unit 7.2), resolver (`summary.SortDirs` with `SortFiles` key), AND integration test (`TestRootCmd_SortFiles_NonDegenerate` decoding real JSON). All four steps (schema/resolver/consumer/integration test) present for both load-bearing claims. |
+| 10 | Error wrapping (`%w` vs `%q`) at validator | REFUTED | Validator uses `fmt.Errorf("%q is not a valid sort key; ...", flags.sort)` with no `%w`. CLAUDE.md § "Errors" mandates `%w` "at every boundary that adds information" to an existing error. Here there is no underlying error to wrap — the validator constructs a fresh user-facing message from a flag value. No sentinel callers `errors.Is` against this either (the only consumer is cobra surfacing the error to the user). Not a CLAUDE.md violation. |
+| 11 | Concurrency / shared mutable state | REFUTED | `validSortKeys` is a package-level `map[string]struct{}` populated at package init via a literal, never mutated thereafter. Map reads from multiple goroutines are safe when no writer is active. No other shared state introduced by the unit. |
+| 12 | Hidden init / package-level side effects | REFUTED | No `init()` added. `validSortKeys` is a literal var declaration; no ordering coupling. |
+| 13 | YAGNI on `validSortKeys` (4-entry map vs slice + linear scan) | EXHAUSTED, no counterexample found | A 4-entry slice with linear scan would work. But map-set is the idiomatic Go choice for membership tests and v0.2 will add `tokens` per Decision 30. The map costs ~32B more than a slice — not a defect. |
+| 14 | Empty-`--sort` value handling | REFUTED | Cobra default `"lines"` from `cmd.Flags().StringVar(&flags.sort, "sort", "lines", ...)`. If a user explicitly passes `--sort ""`, the validator rejects (`""` not in `validSortKeys`) and returns the canonical error with empty quotes — `"" is not a valid sort key; ...`. Consistent rejection, no panic. |
+| 15 | `runTreeFS` default-injection vs. cobra default parity | REFUTED | `runTreeFS` injects `sortKey = "lines"` when `flags.sort == ""`; cobra also defaults `flags.sort` to `"lines"` via `StringVar`. Production path and test path use identical defaults — existing test assertions in unrelated tests (e.g. `TestRootCmd_PerLangRollup`) remain valid because lines-desc preserves the pre-Drop-7 default path-asc-ish order only by coincidence on a single-dir fixture (one dir, no tiebreak needed). Confirmed by green `mage ci`. |
+
+### Prompt-injection family
+
+DORMANT — pre-team-feature. Rak does not expose contributor-authored content to agent spawn prompts. No active attack vectors.
+
+### Cascade-vocabulary attacks
+
+N/A — rak does not use the Tillsyn cascade vocabulary.
+
+### Plan-level attacks
+
+N/A — this is `build-qa-falsification`, not `plan-qa-falsification`.
+
+### Hylla Feedback
+
+N/A — Unit 7.3 touched only `cmd/rak/root.go` and `cmd/rak/root_test.go`. All evidence gathered via `git diff` + direct `Read` + `mage ci`. No Hylla queries attempted, no fallbacks recorded. (Hylla is Go-aware but the diff-based audit is the natural primary evidence for a 2-file, single-commit unit; Hylla would only be consulted for cross-package reference confirmation, which was not needed.)
+
+### Falsification certificate
+
+- **Premises:** Unit 7.3 must (a) introduce `--sort` (default `lines`) + `--sort-asc` (default `false`) on the root cobra command; (b) reject any `--sort` value not in `{lines, files, bytes, path}` with the exact F41 canonical text in a `PersistentPreRunE`; (c) thread `sortKey` and `sortAsc` into `runDirectory`; (d) call `summary.SortDirs(labeled, ...)` AFTER `labelDirectories` and BEFORE `renderer.RenderTree` (F39 / Decision 3.3); (e) remove the interim `sort.Slice(dirs, ...)` from `walkAndCount`; (f) preserve key-specific defaults (numeric keys desc; path asc) and the `--sort-asc` inversion (the C1 trap); (g) ship an F44 non-degenerate end-to-end test asserting both ordering on `Files` and non-zero JSON Files values through labelDirectories; (h) confine the change to `cmd/rak/`; (i) `mage ci` green.
+- **Evidence:** `git diff HEAD~1 -- cmd/rak/root.go` (validator + flag wiring + runDirectory threading + sort.Slice removal); `Read` of `cmd/rak/root_test.go` lines 800–940 (all 6 sort-key/direction tests, error test, F44 e2e test); `git diff HEAD~1 -- ':!cmd/rak/' ':!drops/'` (empty — no cross-package leakage); `mage ci` re-run (golangci-lint 0 issues, all 9 packages `ok`).
+- **Trace or cases:** 15 attack surfaces (8 from spawn prompt + 7 Go-quality / discipline). 13 REFUTED with reproducible evidence, 2 EXHAUSTED with stated reason (YAGNI + Hylla N/A). No CONFIRMED counterexamples.
+- **Conclusion:** PASS. Unit 7.3's claim — `--sort` / `--sort-asc` wired with F41 validation, F39 ordering, F44 end-to-end coverage, no Drop 5/6 spillover, mage ci green — is upheld under active adversarial attack.
+- **Unknowns:** None routed. The cobra-execution-order claim (PersistentPreRunE before RunE) is asserted from cobra documentation rather than Hylla-grounded source; an LSP verification would close that residual but the test's observable behavior (`cmd.Execute()` returns the validator error before any walk runs) is itself sufficient evidence.
+
