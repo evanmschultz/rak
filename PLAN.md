@@ -71,7 +71,7 @@ The plan below is the working shape. Each row is a level_1 container drop. **Eac
 | `DROP_1_CODE_SCAFFOLD_MAGE_CI` | A (hindsight) | done | — | `main/drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/` |
 | `DROP_2_COUNTING_DOMAIN_RENDER_BOUNDARY` | A (hindsight) | done | DROP_1 | `main/drops/DROP_2_COUNTING_DOMAIN_RENDER_BOUNDARY/` |
 | `DROP_3_DIRECTORY_WALK_GITIGNORE_DEPTH` | A (hindsight) | done | DROP_2 | `main/drops/DROP_3_DIRECTORY_WALK_GITIGNORE_DEPTH/` |
-| `DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON` | A | todo | DROP_3 | `main/drops/DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON/` |
+| `DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON` | A | done | DROP_3 | `main/drops/DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON/` |
 | `DROP_5_LANGUAGE_DETECTION_CODE_SPLITS` | A | todo | DROP_4 | `main/drops/DROP_5_LANGUAGE_DETECTION_CODE_SPLITS/` |
 | `DROP_6_STDIN_PIPE_BEHAVIOR` | C | todo (no-op close expected) | DROP_5 | `main/drops/DROP_6_STDIN_PIPE_BEHAVIOR/` |
 | `DROP_7_SUMMARY_SORTING` | A | todo | DROP_6 | `main/drops/DROP_7_SUMMARY_SORTING/` |
@@ -122,7 +122,7 @@ DROP_3 — Directory walk + gitignore + depth  (DONE — closed 2026-05-15)
   3.5 cmd/rak wire-up: --depth/--hidden/--no-gitignore/--binary/--include/--exclude flags +
       per-dir aggregation.
 
-DROP_4 — Default behavior: tracked-only source + TOON renderer  (NEW; tier A)
+DROP_4 — Default behavior: tracked-only source + TOON renderer  (DONE — closed 2026-05-15)
   • Pulls forward decisions 32 + 33: when in a git repo, count what git tracks; emit TOON by
     default for LLM consumption.
   4.0 mage addDep github.com/toon-format/toon-go.
@@ -180,11 +180,11 @@ DROP_9 — Release + docs  (slimmed per decision 30; mixed tier)
 
 ## Immediate Next Step
 
-Drops 0/1/2/3 are done (Drop 3 closed 2026-05-15 at commit `cf021ac`, CI run 25898996914, Hylla task `task-1bbf641644105060`). The orchestrator's next moves, in order:
+Drops 0/1/2/3/4 are done. Drop 4 closed 2026-05-15 at commit `36cad7f`, CI run 25904809116, Hylla task `task-aef92863fd98cca7`. The orchestrator's next moves, in order:
 
-1. **Stamp Drop 4**: copy `main/drops/_TEMPLATE/` → `main/drops/DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON/`. Set its `PLAN.md` header `state: planning`, `Tier: A`. Commit (`docs(drop-4): scaffold drop dir from template`).
-2. **Spawn `go-planning-agent`** per WORKFLOW.md § "Phase 1 — Plan" with the paradigm-override preamble. Planner decomposes Drop 4 into the six expected units (4.0–4.5 in the Drop Tree section above), each with `paths` / `packages` / `acceptance` / `blocked_by`.
-3. Continue through Phase 2 (parallel plan-QA — Drop 4 is tier A), Phase 3 (discuss + cleanup), looping until plan accepted, then Phases 4–7 unit by unit.
+1. **Stamp Drop 5**: copy `main/drops/_TEMPLATE/` → `main/drops/DROP_5_LANGUAGE_DETECTION_CODE_SPLITS/`. Set its `PLAN.md` header `state: planning`, `Tier: A`. Commit (`docs(drop-5): scaffold drop dir from template`).
+2. **Spawn `go-planning-agent`** per WORKFLOW.md § "Phase 1 — Plan". Planner decomposes Drop 5 into the four expected units (5.1 internal/lang detection / 5.2 code-aware splits / 5.3 per-type aggregation / 5.4 --lang walk filter), each with `paths` / `packages` / `acceptance` / `blocked_by`. Note: 5.2 and 5.4 are eligible to run in parallel after 5.1 closes (per [[feedback-parallelize-aggressively]]).
+3. Continue through Phase 2 (parallel plan-QA — Drop 5 is tier A), Phase 3 (discuss + cleanup), looping until plan accepted, then Phases 4–7 unit by unit.
 
 ## Follow-Ups / Outstanding Orchestration Tasks
 
