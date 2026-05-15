@@ -307,6 +307,13 @@ func TestJSONRenderer_RenderTree_Empty(t *testing.T) {
 	}
 }
 
+// Compile-time interface assertions — verify all three renderers satisfy Renderer.
+var (
+	_ Renderer = humanRenderer{}
+	_ Renderer = jsonRenderer{}
+	_ Renderer = toonRenderer{}
+)
+
 // TestJSONRenderer_RenderTree_WithErrors verifies the errors key is emitted
 // only when errs is non-empty, and carries each error's Error() string.
 func TestJSONRenderer_RenderTree_WithErrors(t *testing.T) {
@@ -347,5 +354,87 @@ func TestJSONRenderer_RenderTree_WithErrors(t *testing.T) {
 		`"errors":["walk \"foo\": permission denied"]}` + "\n"
 	if got != want {
 		t.Fatalf("snapshot mismatch\nwant: %q\ngot:  %q", want, got)
+	}
+}
+
+// TestTOONRenderer_Render verifies a single counting.Counts value marshals to
+// TOON output containing the expected key-value lines. Substring assertions
+// are used (not byte-exact snapshot) so the test is robust against toon-go
+// formatting tweaks across patch versions.
+func TestTOONRenderer_Render(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := NewTOONRenderer()
+	if err := r.Render(&buf, counting.Counts{Bytes: 12, Lines: 2, Words: 2, Chars: 12}); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	got := buf.String()
+	for _, want := range []string{"bytes: 12", "lines: 2", "words: 2", "chars: 12"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Render output missing %q; got:\n%s", want, got)
+		}
+	}
+}
+
+// TestTOONRenderer_RenderTree verifies a multi-directory rollup contains the
+// "directories" array key and the supplied directory paths.
+func TestTOONRenderer_RenderTree(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := NewTOONRenderer()
+	dirs := []Directory{
+		{Path: ".", Counts: counting.Counts{Bytes: 5, Lines: 1, Words: 1, Chars: 5}},
+		{Path: "sub", Counts: counting.Counts{Bytes: 3, Lines: 1, Words: 1, Chars: 3}},
+	}
+	total := counting.Counts{Bytes: 8, Lines: 2, Words: 2, Chars: 8}
+	if err := r.RenderTree(&buf, dirs, total, nil); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	got := buf.String()
+	for _, want := range []string{"directories", ".", "sub"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("RenderTree output missing %q; got:\n%s", want, got)
+		}
+	}
+}
+
+// TestTOONRenderer_RenderTree_WithErrors verifies that a non-empty errs slice
+// causes the output to contain an "errors" field.
+func TestTOONRenderer_RenderTree_WithErrors(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := NewTOONRenderer()
+	dirs := []Directory{
+		{Path: ".", Counts: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1}},
+	}
+	errs := []error{errors.New("walk \"foo\": permission denied")}
+	if err := r.RenderTree(&buf, dirs, dirs[0].Counts, errs); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "errors") {
+		t.Errorf("RenderTree with errors missing \"errors\" key; got:\n%s", got)
+	}
+}
+
+// TestTOONRenderer_RenderTree_NoErrors verifies that a nil/empty errs slice
+// does NOT emit an "errors" key in the output.
+func TestTOONRenderer_RenderTree_NoErrors(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := NewTOONRenderer()
+	dirs := []Directory{
+		{Path: ".", Counts: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1}},
+	}
+	if err := r.RenderTree(&buf, dirs, dirs[0].Counts, nil); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	got := buf.String()
+	if strings.Contains(got, "errors") {
+		t.Errorf("RenderTree no-errors case must not emit \"errors\" key; got:\n%s", got)
 	}
 }

@@ -1,0 +1,129 @@
+package render
+
+import (
+	"fmt"
+	"io"
+
+	"github.com/toon-format/toon-go"
+
+	"github.com/evanmschultz/rak/internal/counting"
+)
+
+// toonRenderer renders counting.Counts values as TOON (Token-Oriented Object
+// Notation) output using github.com/toon-format/toon-go. It is a zero-allocation
+// value type whose marshaling options are fixed at construction: pipe delimiter
+// for both document and array fields (F20). Production callers obtain one via
+// NewTOONRenderer.
+type toonRenderer struct{}
+
+// NewTOONRenderer returns a Renderer that writes counts in TOON format using
+// pipe as the field delimiter. TOON is the default output format for rak
+// (decision 33) — compact, human-readable, and token-efficient for LLM
+// consumption.
+func NewTOONRenderer() Renderer {
+	return toonRenderer{}
+}
+
+// toonCounts is the TOON document shape for a single counting.Counts value.
+// Field names are lowercase per TOON convention; field types are int64 to
+// match counting.Counts exactly.
+type toonCounts struct {
+	Bytes int64 `toon:"bytes"`
+	Lines int64 `toon:"lines"`
+	Words int64 `toon:"words"`
+	Chars int64 `toon:"chars"`
+}
+
+// toonDirectory is a single row in the directories array for RenderTree
+// output. It combines the walk-relative path with the four count fields so
+// the tabular array has all five columns per row.
+type toonDirectory struct {
+	Path  string `toon:"path"`
+	Bytes int64  `toon:"bytes"`
+	Lines int64  `toon:"lines"`
+	Words int64  `toon:"words"`
+	Chars int64  `toon:"chars"`
+}
+
+// toonTree is the top-level envelope for RenderTree. The directories field is
+// a tabular TOON array; the total_* scalar fields carry the grand total;
+// errors is omitted entirely (via omitempty) when the caller passes a nil or
+// empty errs slice — spike-confirmed: toon-go omitempty drops zero/empty
+// fields from output (C7).
+type toonTree struct {
+	Directories []toonDirectory `toon:"directories"`
+	TotalBytes  int64           `toon:"total_bytes"`
+	TotalLines  int64           `toon:"total_lines"`
+	TotalWords  int64           `toon:"total_words"`
+	TotalChars  int64           `toon:"total_chars"`
+	Errors      []string        `toon:"errors,omitempty"`
+}
+
+// Render marshals a single counting.Counts value as a TOON document to w.
+// The output uses pipe as the document delimiter (F20). Any marshal or write
+// error is wrapped with context so cmd/rak can add its own layer.
+func (toonRenderer) Render(w io.Writer, counts counting.Counts) error {
+	v := toonCounts{
+		Bytes: counts.Bytes,
+		Lines: counts.Lines,
+		Words: counts.Words,
+		Chars: counts.Chars,
+	}
+	b, err := toon.Marshal(
+		v,
+		toon.WithDocumentDelimiter(toon.DelimiterPipe),
+	)
+	if err != nil {
+		return fmt.Errorf("render counts as toon: %w", err)
+	}
+	if _, err := w.Write(b); err != nil {
+		return fmt.Errorf("render counts as toon: %w", err)
+	}
+	return nil
+}
+
+// RenderTree marshals a per-directory rollup plus a grand total and optional
+// errors as a TOON document to w. The directories slice is emitted as a
+// tabular TOON array (pipe-delimited columns — F20); grand total fields are
+// emitted as flat scalar keys prefixed with "total_"; errors are omitted when
+// the caller passes nil or an empty slice. The emitted directory order exactly
+// matches the caller-supplied dirs slice; sorting is the caller's
+// responsibility.
+func (toonRenderer) RenderTree(w io.Writer, dirs []Directory, total counting.Counts, errs []error) error {
+	rows := make([]toonDirectory, 0, len(dirs))
+	for _, d := range dirs {
+		rows = append(rows, toonDirectory{
+			Path:  d.Path,
+			Bytes: d.Counts.Bytes,
+			Lines: d.Counts.Lines,
+			Words: d.Counts.Words,
+			Chars: d.Counts.Chars,
+		})
+	}
+	payload := toonTree{
+		Directories: rows,
+		TotalBytes:  total.Bytes,
+		TotalLines:  total.Lines,
+		TotalWords:  total.Words,
+		TotalChars:  total.Chars,
+	}
+	if len(errs) > 0 {
+		msgs := make([]string, 0, len(errs))
+		for _, e := range errs {
+			msgs = append(msgs, e.Error())
+		}
+		payload.Errors = msgs
+	}
+	b, err := toon.Marshal(
+		payload,
+		toon.WithDocumentDelimiter(toon.DelimiterPipe),
+		toon.WithArrayDelimiter(toon.DelimiterPipe),
+	)
+	if err != nil {
+		return fmt.Errorf("render tree as toon: %w", err)
+	}
+	if _, err := w.Write(b); err != nil {
+		return fmt.Errorf("render tree as toon: %w", err)
+	}
+	return nil
+}
