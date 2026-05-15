@@ -57,7 +57,7 @@ func TestRootCmd_Integration_HumanFormat(t *testing.T) {
 	cmd.SetIn(file)
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"--format=human"})
+	cmd.SetArgs([]string{"--human"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("cmd.Execute: %v", err)
@@ -98,7 +98,7 @@ func TestRootCmd_Integration_JSONFormat(t *testing.T) {
 	cmd.SetIn(file)
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"--format=json"})
+	cmd.SetArgs([]string{"--json"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("cmd.Execute: %v", err)
@@ -162,7 +162,7 @@ func TestRootCmd_Integration_PathArg_HumanFormat(t *testing.T) {
 	cmd.SetIn(strings.NewReader(""))
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"--format=human", root})
+	cmd.SetArgs([]string{"--human", root})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("cmd.Execute: %v", err)
@@ -199,7 +199,7 @@ func TestRootCmd_Integration_PathArg_JSONFormat(t *testing.T) {
 	cmd.SetIn(strings.NewReader(""))
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"--format=json", root})
+	cmd.SetArgs([]string{"--json", root})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("cmd.Execute: %v", err)

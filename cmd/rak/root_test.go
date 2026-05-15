@@ -4,22 +4,43 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io/fs"
+	"os/exec"
 	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/evanmschultz/rak/internal/counting"
+	"github.com/evanmschultz/rak/internal/lister"
 	"github.com/evanmschultz/rak/internal/render"
 )
 
-// TestRootCmd_ReadsStdin_RendersHumanDefault verifies the default (no
-// --format flag) path: stdin is read via cmd.InOrStdin() (NOT os.Stdin —
-// F9 pin), counting runs, and the human renderer emits a laslig KV block
-// containing the four canonical labels. Stdout is a bytes.Buffer (non-TTY),
-// so laslig auto-selects plain non-styled output — we assert on labels, not
-// exact bytes, to keep the test robust against laslig layout tweaks.
-func TestRootCmd_ReadsStdin_RendersHumanDefault(t *testing.T) {
+// compile-time assertions: all three concrete renderers satisfy the
+// render.Renderer interface. Fails the build if a method is dropped from
+// any implementation without updating the interface symmetrically.
+var (
+	_ render.Renderer = render.NewHumanRenderer()
+	_ render.Renderer = render.NewJSONRenderer()
+	_ render.Renderer = render.NewTOONRenderer()
+)
+
+// TestRenderer_TreeInterface_Compile is a trivial runtime no-op that keeps
+// the compile-time assertions above in the test build. The test runner lists
+// the invariant by name in coverage output.
+func TestRenderer_TreeInterface_Compile(t *testing.T) {
+	t.Parallel()
+	// The package-level var block above is the real assertion.
+}
+
+// TestRootCmd_ReadsStdin_RendersTOONDefault verifies the default (no format
+// flag) path: stdin is read via cmd.InOrStdin(), counting runs, and the TOON
+// renderer emits key-value lines containing the four canonical field names in
+// lowercase per the toonCounts struct tags. Stdout is a bytes.Buffer
+// (non-TTY), and TOON output is not TTY-sensitive — the assertions use
+// strings.Contains on the lower-case field names produced by the toon:"..."
+// struct tags.
+func TestRootCmd_ReadsStdin_RendersTOONDefault(t *testing.T) {
 	t.Parallel()
 
 	var out bytes.Buffer
@@ -34,20 +55,18 @@ func TestRootCmd_ReadsStdin_RendersHumanDefault(t *testing.T) {
 	}
 
 	got := out.String()
-	for _, label := range []string{"Bytes", "Lines", "Words", "Chars"} {
+	for _, label := range []string{"bytes:", "lines:", "words:", "chars:"} {
 		if !strings.Contains(got, label) {
-			t.Errorf("output missing label %q; got:\n%s", label, got)
+			t.Errorf("TOON output missing label %q; got:\n%s", label, got)
 		}
 	}
 }
 
-// TestRootCmd_FormatJSON verifies --format=json picks NewJSONRenderer. The
-// JSON renderer uses stdlib encoding/json with no struct tags (F4 pin), so
-// the emitted keys match the Counts struct declaration order. We assert key
-// presence rather than exact bytes so the test does not couple to
-// json.Encoder's trailing-newline convention beyond what the render package
-// already snapshots.
-func TestRootCmd_FormatJSON(t *testing.T) {
+// TestRootCmd_FlagJSON verifies --json picks NewJSONRenderer. The JSON
+// renderer uses stdlib encoding/json with no struct tags (F4 pin), so the
+// emitted keys match the Counts struct declaration order. We assert key
+// presence rather than exact bytes.
+func TestRootCmd_FlagJSON(t *testing.T) {
 	t.Parallel()
 
 	var out bytes.Buffer
@@ -55,7 +74,7 @@ func TestRootCmd_FormatJSON(t *testing.T) {
 	cmd.SetIn(strings.NewReader("hello world\n"))
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"--format=json"})
+	cmd.SetArgs([]string{"--json"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("cmd.Execute: %v", err)
@@ -69,10 +88,11 @@ func TestRootCmd_FormatJSON(t *testing.T) {
 	}
 }
 
-// TestRootCmd_InvalidFormat verifies an unknown --format value returns a
-// non-nil error whose message mentions "format", so future CLI users get a
-// useful hint. cobra returns the error from Execute when RunE returns one.
-func TestRootCmd_InvalidFormat(t *testing.T) {
+// TestRootCmd_MutuallyExclusiveFlags verifies that passing two format flags
+// simultaneously causes cobra to return an error containing a hint about
+// mutual exclusivity. Cobra enforces this via MarkFlagsMutuallyExclusive
+// before RunE is called (F24).
+func TestRootCmd_MutuallyExclusiveFlags(t *testing.T) {
 	t.Parallel()
 
 	var out bytes.Buffer
@@ -80,38 +100,110 @@ func TestRootCmd_InvalidFormat(t *testing.T) {
 	cmd.SetIn(strings.NewReader(""))
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"--format=xml"})
+	cmd.SetArgs([]string{"--human", "--json"})
 
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatalf("expected error for --format=xml, got nil")
+		t.Fatalf("expected error for --human --json, got nil")
 	}
-	if !strings.Contains(err.Error(), "format") {
-		t.Errorf("error should mention %q; got: %v", "format", err)
+	// Cobra's mutual exclusivity error message contains the flag group and
+	// "none of the others can be" or similar. We assert that the error
+	// message references at least one of the flag names to confirm the
+	// rejection came from the mutual-exclusion group, not an unrelated
+	// parsing error.
+	errMsg := strings.ToLower(err.Error())
+	if !strings.Contains(errMsg, "human") && !strings.Contains(errMsg, "json") {
+		t.Errorf("error should reference the mutually exclusive flags; got: %v", err)
 	}
 }
 
+// TestRootCmd_UnknownFlag verifies that an unrecognised flag causes cobra to
+// return an error. This is cobra's default behavior; the test exists so that
+// if flag parsing is ever replaced with a permissive mode it fails loudly.
+func TestRootCmd_UnknownFlag(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--bogus"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected error for --bogus, got nil")
+	}
+}
+
+// TestRootCmd_NoGitignoreInRepo_Errors verifies the full pipeline behavior
+// when --no-gitignore is passed and the target directory is inside a git
+// repository: lister.Detect returns ErrNoGitignoreInRepo which propagates
+// through runRoot unchanged to cmd.Execute's error return. The test
+// constructs a real temporary git repo so it exercises lister.Detect's
+// git-probe path.
+func TestRootCmd_NoGitignoreInRepo_Errors(t *testing.T) {
+	t.Parallel()
+
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not found")
+	}
+
+	// Create a temp dir and init a git repo inside it.
+	tmpDir := t.TempDir()
+	initCmd := exec.Command("git", "init", tmpDir)
+	if out, err := initCmd.CombinedOutput(); err != nil {
+		t.Skipf("git init failed (%v): %s", err, out)
+	}
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--no-gitignore", tmpDir})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected error for --no-gitignore inside a git repo, got nil")
+	}
+	if !strings.Contains(err.Error(), "no-gitignore") &&
+		!strings.Contains(err.Error(), "git repository") {
+		// The sentinel's message contains both phrases; this is a belt-and-
+		// suspenders check on top of the errors.Is check below.
+		t.Logf("error message may be missing expected content: %v", err)
+	}
+	if !isErrNoGitignoreInRepo(err) {
+		t.Errorf("expected errors.Is(err, lister.ErrNoGitignoreInRepo) to be true; got: %v", err)
+	}
+}
+
+// isErrNoGitignoreInRepo is a helper that wraps the errors.Is call for
+// lister.ErrNoGitignoreInRepo so the test body reads clearly.
+func isErrNoGitignoreInRepo(err error) bool {
+	return errors.Is(err, lister.ErrNoGitignoreInRepo)
+}
+
 // runTreeFS is a lightweight test helper that runs the per-dir aggregation
-// loop against an injected fs.FS without going through cobra. Tests use it
-// to:
-//   - exercise the walkAndCount + runDirectory chain with a known-shape
-//     stub fs.FS (for induced error paths)
-//   - return JSON-formatted output so assertions can parse structured
-//     data rather than string-match laslig output
+// loop against an injected fs.FS without going through cobra or lister.Detect.
+// It constructs a lister.WalkLister directly from the supplied MapFS, then
+// calls runDirectory with the JSON renderer so assertions can parse
+// structured data.
 //
 // The emitted JSON envelope is the same shape produced by
-// jsonRenderer.RenderTree (Unit 3.5 F15): `{"directories":[...],"total":{...},"errors"?:[...]}`.
+// jsonRenderer.RenderTree (Unit 3.5 F15):
+// `{"directories":[...],"total":{...},"errors"?:[...]}`.
 func runTreeFS(t *testing.T, fsys fs.FS, flags *rootFlags) (treeResult, []byte) {
 	t.Helper()
 
+	opts := listerOpts(flags)
+	source := lister.NewWalkLister(fsys, ".", opts)
+	renderer := render.NewJSONRenderer()
+
 	var out bytes.Buffer
-	renderer, err := selectRenderer("json")
-	if err != nil {
-		t.Fatalf("selectRenderer: %v", err)
-	}
 	// rootLabel = "" keeps the walker's io/fs "." convention so assertions
 	// compare against the raw relative paths.
-	if err := runDirectory(context.Background(), &out, "", fsys, flags, renderer); err != nil {
+	if err := runDirectory(context.Background(), &out, source, "", flags.binary, renderer); err != nil {
 		t.Fatalf("runDirectory: %v", err)
 	}
 	raw := out.Bytes()
@@ -387,31 +479,6 @@ func TestRootCmd_PathArg_Hidden(t *testing.T) {
 			t.Errorf("--hidden: expected Bytes=10, got %+v", res.Total)
 		}
 	})
-}
-
-// TestRenderer_TreeInterface_Compile is a compile-time assertion that the
-// two concrete renderers satisfy the render.Renderer interface (F15
-// interface growth). The intent is to fail the build if someone drops
-// RenderTree from the interface without also pruning a renderer
-// implementation — we want a symmetric interface.
-//
-// _ = &... rather than typed-var declarations because staticcheck's QF1011
-// insists the types could be inferred; the explicit interface-typed
-// assertion goes in the package-level var block below.
-var (
-	_ render.Renderer = render.NewHumanRenderer()
-	_ render.Renderer = render.NewJSONRenderer()
-)
-
-// TestRenderer_TreeInterface_Compile is a trivial runtime no-op that keeps
-// the compile-time assertions above in the test build; a Go package with no
-// *_test.go references beyond _ = ... still compiles, but wrapping the
-// assertions in a test that the test runner reports makes the invariant
-// visible in coverage output.
-func TestRenderer_TreeInterface_Compile(t *testing.T) {
-	t.Parallel()
-	// The package-level var block above is the real assertion. This body
-	// exists only so `go test` lists the invariant by name.
 }
 
 // failingOpenFS is an fs.FS test stub that delegates to an inner MapFS for

@@ -375,3 +375,56 @@ The assertion list in the for-loop is now `[]string{"directories", ".|", "sub", 
 ## Hylla Feedback (Round 2)
 
 N/A — unit 4.5 Round 2 touched only `internal/render/toon.go` and `internal/render/render_test.go`, both of which are new/modified since the last Hylla ingest. No Hylla queries were needed. Evidence gathered via `Read` of source files, `go doc github.com/toon-format/toon-go` for library API surface, and empirical spike tests. No Hylla misses to report.
+
+## Unit 4.4 — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-14
+- **Files touched:**
+  - `main/cmd/rak/root.go` — rewrite: replaced `rootFlags.format string` with `human/json/toon bool`; replaced `selectRenderer` with `resolveRenderer(flags *rootFlags) render.Renderer`; added `listerOpts(flags *rootFlags) fileset.WalkOptions` helper; rewired `runRoot` to call `lister.Detect` + `runDirectory` with new signature; rewired `runDirectory(ctx, w, source lister.FileLister, rootLabel, binary, renderer)` — drops `fsys fs.FS` and `flags *rootFlags`, adds `source lister.FileLister` and `binary bool`; rewired `walkAndCount(ctx, source lister.FileLister, binary bool)` — drops `fsys fs.FS` and `flags *rootFlags`, iterates `source.List(ctx)`. Removed `"os"` import (no longer needed). (~290 LOC)
+  - `main/cmd/rak/root_test.go` — updated: replaced `TestRootCmd_ReadsStdin_RendersHumanDefault` with `TestRootCmd_ReadsStdin_RendersTOONDefault` (asserts `bytes:`, `lines:`, `words:`, `chars:` lowercase TOON keys); replaced `TestRootCmd_FormatJSON` with `TestRootCmd_FlagJSON` using `--json`; replaced `TestRootCmd_InvalidFormat` with `TestRootCmd_MutuallyExclusiveFlags` + `TestRootCmd_UnknownFlag`; added `TestRootCmd_NoGitignoreInRepo_Errors` (git init tempdir → `errors.Is(err, lister.ErrNoGitignoreInRepo)`); updated `runTreeFS` helper to use `lister.NewWalkLister(fsys, ".", opts)` and new `runDirectory` signature; added TOON compile-time assertion to var block; removed `selectRenderer` call from helper. (~345 LOC after gofumpt)
+  - `main/cmd/rak/integration_test.go` — updated: changed `--format=human` → `--human` in stdin + path-arg human tests (2 occurrences); changed `--format=json` → `--json` in stdin + path-arg JSON tests (2 occurrences).
+
+### Mage commands run and results
+
+| Command | Result | Notes |
+|---|---|---|
+| `mage build` | `"os" imported and not used` exit 1 | Fixed by removing the `"os"` import (no longer needed after `os.DirFS` moved into lister.Detect) |
+| `mage build` (after fix) | clean | All packages compile |
+| `mage format` | `root_test.go` reformatted | gofumpt minor whitespace normalization |
+| `mage format` (second run) | clean | Stable |
+| `mage test` | `FAIL cmd/rak` — `TestRootCmd_MutuallyExclusiveFlags`: assertion used "mutually exclusive" but cobra's actual message says "none of the others can be" | Fixed: assert on flag names in the error message instead of the exact wording |
+| `mage test` (after fix) | all packages `ok` | `cmd/rak ok 1.418s` + all other packages cached green |
+| `mage ci` | **GREEN** — `0 issues`, all packages cached/pass | Full gate passed |
+
+### Integration test fixture verification (F23 + PLAN.md § "Integration Test Impact on testdata/tree")
+
+After unit 4.4, the integration tests in `integration_test.go` that pass a directory path go through `lister.Detect` → `GitLister` (since `cmd/rak/testdata/tree` is inside the rak git repo).
+
+Verified via `git ls-files cmd/rak/testdata/`:
+- Tracked: `.gitignore`, `.hidden.txt`, `a.txt`, `bin.dat`, `sub/nested.txt`
+- NOT tracked: `vendor/ignored.txt` (git respects the `.gitignore` in testdata/tree)
+
+Applied filters (default `IncludeHidden: false`):
+- `.gitignore` and `.hidden.txt` — hidden (start with `.`) → excluded by F21/F18
+- `bin.dat` — NUL byte → binary-skipped by F23 in `walkAndCount`
+- Effective set: `a.txt` (12 bytes, 1 line, 2 words, 12 chars) + `sub/nested.txt` (8 bytes, 1 line, 2 words, 8 chars)
+- Total: 20 bytes, 2 lines, 4 words, 20 chars
+
+**Expected counts are UNCHANGED from Drop 3.** `treeExpectedTotalBytes = 20` and friends in `integration_test.go` remain correct. No constant updates needed.
+
+### Design decisions
+
+- **`w io.Writer` kept in `runDirectory` despite spawn-appendix omission:** The spawn appendix listed `runDirectory(ctx, source, rootLabel, binary, renderer)` without `w io.Writer`. This would produce non-compiling code (renderer.RenderTree needs a writer). Resolved by keeping `w io.Writer` as the second parameter — the omission in the spec was a simplification artifact. The `runTreeFS` helper still passes `&out` as the writer.
+- **`resolveRenderer` default fallthrough is the TOON renderer:** Both "no flag set" AND `flags.toon == true` map to `NewTOONRenderer()` via the `default` branch. This is correct per decision 33 (TOON as default) and F24 (cobra MutuallyExclusive means at most one flag can be true at a time).
+- **Cobra mutual exclusivity assertion wording:** `TestRootCmd_MutuallyExclusiveFlags` asserts on the flag names (`human`, `json`) appearing in the error message rather than a specific phrase. This is robust to cobra's actual wording `"if any flags in the group [human json toon] are set none of the others can be; [human json] were all set"`.
+- **`TestRootCmd_NoGitignoreInRepo_Errors` uses `git init tmpDir` and skips on failure:** The git sandbox environment may block git subprocess spawns (as seen in Units 4.2/4.3). The test skips rather than fails if `git init` fails, consistent with the pattern established in `internal/lister`.
+
+## Hylla Feedback
+
+- **Query 1:** `hylla_node_full` for `github.com/evanmschultz/rak/cmd/rak.runRoot` — Hylla returned empty (stale snapshot, last ingest was Drop 3). Fallback: `Read` of `cmd/rak/root.go`.
+- **Missed because:** Hylla snapshot 3 predates Drop 4 units. `cmd/rak` was not modified in Drop 3, but internal/lister and updates to root.go are post-snapshot.
+- **Worked via:** `Read` of `cmd/rak/root.go`, `cmd/rak/root_test.go`, `cmd/rak/integration_test.go`, `internal/lister/lister.go`, `internal/lister/walk.go`, `internal/render/render.go`, `internal/render/toon.go`.
+- **Suggestion:** Hylla misses after a multi-unit drop are expected; the `@main` ref should resolve to post-push ingest. The miss is not a Hylla bug — it's the "Hylla ingest is drop-end only" policy working as designed.
+- **Query 2:** `hylla_search_keyword` for `lister Detect FileLister NewWalkLister` — returned only `PlanCheck` (mage) and `ErrBinaryFile` (fileset). Expected miss — all lister symbols are post-snapshot.
+- **Missed because:** Same stale snapshot reason as Query 1.

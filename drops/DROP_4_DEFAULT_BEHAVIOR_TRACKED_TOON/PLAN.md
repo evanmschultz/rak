@@ -109,7 +109,7 @@ Import DAG extension: `lister → fileset, ignore, os/exec` (new leaf-ish mid-ti
 
 ### Unit 4.4 — cmd/rak rewire: lister.Detect + flag reshape
 
-- **State:** todo
+- **State:** done
 - **Paths:** `main/cmd/rak/root.go`, `main/cmd/rak/root_test.go`, `main/cmd/rak/integration_test.go`
 - **Packages:** `github.com/evanmschultz/rak/cmd/rak`
 - **Acceptance:**
