@@ -35,7 +35,13 @@ type rootFlags struct {
 	langs       []string
 	sort        string // sort key: lines, files, bytes, path (default: lines)
 	sortAsc     bool   // flip sort direction from the key-specific default
+	maxFiles    int    // abort the walk when accepted file count reaches this value (0 = no limit)
 }
+
+// ErrMaxFilesExceeded is returned (wrapped) by walkAndCount when the accepted
+// file count reaches the --max-files limit. Callers use errors.Is to branch;
+// never string-match (F45).
+var ErrMaxFilesExceeded = errors.New("rak: file count exceeded --max-files limit")
 
 // validSortKeys is the set of accepted --sort values in v0.1.0. "tokens" is
 // intentionally absent (Decision 30 / F41 — deferred to v0.2).
@@ -147,6 +153,12 @@ func newRootCmd() *cobra.Command {
 		false,
 		"flip sort direction from its key-specific default",
 	)
+	cmd.Flags().IntVar(
+		&flags.maxFiles,
+		"max-files",
+		0,
+		"abort the walk when the file count exceeds N (default 0 = no limit)",
+	)
 
 	return cmd
 }
@@ -198,7 +210,7 @@ func runRoot(c *cobra.Command, args []string, flags *rootFlags) error {
 			// wrapping needed here (F19 contract).
 			return err
 		}
-		return runDirectory(ctx, c.OutOrStdout(), source, args[0], flags.binary, flags.langs, flags.sort, flags.sortAsc, renderer)
+		return runDirectory(ctx, c.OutOrStdout(), source, args[0], flags.binary, flags.langs, flags.sort, flags.sortAsc, renderer, flags.maxFiles)
 	}
 
 	counts, err := counting.Count(c.InOrStdin())
@@ -220,8 +232,10 @@ func runRoot(c *cobra.Command, args []string, flags *rootFlags) error {
 // skipped (F23). langs is the raw --lang filter values from rootFlags; an
 // empty slice means no filtering (count all languages). sortKey is the raw
 // --sort flag value (e.g. "lines", "files", "bytes", "path"); sortAsc is the
-// raw --sort-asc flag value. The call order is (F39 / Decision 3.3):
-// labelDirectories → SortDirs → RenderTree.
+// raw --sort-asc flag value. maxFiles is the --max-files limit (0 = no
+// limit); walkAndCount aborts with a wrapped ErrMaxFilesExceeded when the
+// accepted file count reaches this value. The call order is (F39 / Decision
+// 3.3): labelDirectories → SortDirs → RenderTree.
 func runDirectory(
 	ctx context.Context,
 	w io.Writer,
@@ -232,8 +246,9 @@ func runDirectory(
 	sortKey string,
 	sortAsc bool,
 	renderer render.Renderer,
+	maxFiles int,
 ) error {
-	dirs, total, aggErrs, err := walkAndCount(ctx, source, binary, langs)
+	dirs, total, aggErrs, err := walkAndCount(ctx, source, binary, langs, maxFiles)
 	if err != nil {
 		return err
 	}
@@ -260,17 +275,24 @@ func runDirectory(
 // grand total, and any per-entry errors the caller should surface via the
 // renderer's error summary.
 //
-// Only ctx.Err() aborts the walk. All other error conditions — per-entry
-// errors, IsBinary open failures, per-file count failures — are aggregated
-// into the returned errs slice and the walk continues so one broken entry
-// does not kill the whole count. This mirrors F6 (walker continues past
-// per-entry errors) at the aggregation boundary and matches C10 (IsBinary
-// open failures are aggregated, not fatal). The binary-check policy is
-// preserved verbatim (F23).
+// Only ctx.Err() and the --max-files limit abort the walk; all other error
+// conditions — per-entry errors, IsBinary open failures, per-file count
+// failures — are aggregated into the returned errs slice and the walk
+// continues so one broken entry does not kill the whole count. This mirrors
+// F6 (walker continues past per-entry errors) at the aggregation boundary
+// and matches C10 (IsBinary open failures are aggregated, not fatal). The
+// binary-check policy is preserved verbatim (F23).
 //
 // langs is the --lang filter value set. When non-empty, only files whose
 // detected language is in the set are counted; all others (including
 // LangUnknown files) are silently skipped (F29, Decision 24).
+//
+// maxFiles is the --max-files safety rail (0 = no limit). When positive,
+// walkAndCount increments an accepted-files counter at the same gating point
+// as byDirFiles (post binary-skip, post lang-filter, post successful count).
+// When acceptedFiles reaches maxFiles, the function returns immediately with
+// a wrapped ErrMaxFilesExceeded (F45). Results accumulated so far are
+// discarded to avoid partial output that could mislead callers.
 //
 // Per-language line split (Unit 5.3): for each counted file, lang.Split is
 // called on a second open of the file to classify lines as blank/comment/code.
@@ -280,12 +302,13 @@ func runDirectory(
 // per-dir/per-lang LangCounts are accumulated into byDirLang and surfaced via
 // Directory.ByLang. LangUnknown suppression (F33) is the renderer's
 // responsibility; walkAndCount includes LangUnknown in byDirLang.
-func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, langs []string) ([]summary.Directory, counting.Counts, []error, error) {
+func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, langs []string, maxFiles int) ([]summary.Directory, counting.Counts, []error, error) {
 	byDir := map[string]counting.Counts{}
 	byDirLang := map[string]map[lang.Language]lang.LangCounts{}
 	byDirFiles := map[string]int64{}
 	var total counting.Counts
 	var aggErrs []error
+	var acceptedFiles int
 
 	// Build the lang-filter lookup set once before the per-file loop.
 	// Case-insensitive normalization: user values are lowercased to match
@@ -368,6 +391,14 @@ func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, la
 		byDir[dir] = addCounts(byDir[dir], fileCounts)
 		total = addCounts(total, fileCounts)
 		byDirFiles[dir]++
+		acceptedFiles++
+
+		// --max-files safety rail (F45): abort when the accepted file count
+		// reaches the limit. Partial results are discarded to avoid misleading
+		// callers with an incomplete view of the tree.
+		if maxFiles > 0 && acceptedFiles >= maxFiles {
+			return nil, counting.Counts{}, nil, fmt.Errorf("rak: file count exceeded --max-files %d: %w", maxFiles, ErrMaxFilesExceeded)
+		}
 
 		// Accumulate per-lang LangCounts for this directory (F30).
 		if byDirLang[dir] == nil {

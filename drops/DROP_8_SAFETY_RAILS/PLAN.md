@@ -20,7 +20,7 @@ Tier B — orch wrote this section inline (no planner subagent). One unit.
 
 ### Unit 8.1 — --max-files safety rail
 
-- **State:** todo
+- **State:** done
 - **Paths:**
   - `main/cmd/rak/root.go`
   - `main/cmd/rak/root_test.go`

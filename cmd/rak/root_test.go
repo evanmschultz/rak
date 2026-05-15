@@ -208,7 +208,7 @@ func runTreeFS(t *testing.T, fsys fs.FS, flags *rootFlags) (treeResult, []byte) 
 	if sortKey == "" {
 		sortKey = "lines"
 	}
-	if err := runDirectory(context.Background(), &out, source, "", flags.binary, flags.langs, sortKey, flags.sortAsc, renderer); err != nil {
+	if err := runDirectory(context.Background(), &out, source, "", flags.binary, flags.langs, sortKey, flags.sortAsc, renderer, flags.maxFiles); err != nil {
 		t.Fatalf("runDirectory: %v", err)
 	}
 	raw := out.Bytes()
@@ -673,7 +673,7 @@ func TestRootCmd_PerLangRollup(t *testing.T) {
 	renderer := render.NewJSONRenderer()
 
 	var out bytes.Buffer
-	if err := runDirectory(context.Background(), &out, source, "", false, nil, "lines", false, renderer); err != nil {
+	if err := runDirectory(context.Background(), &out, source, "", false, nil, "lines", false, renderer, 0); err != nil {
 		t.Fatalf("runDirectory: %v", err)
 	}
 
@@ -902,7 +902,7 @@ func TestRootCmd_SortFiles_NonDegenerate(t *testing.T) {
 	src := lister.NewWalkLister(fsys, ".", opts)
 
 	var out bytes.Buffer
-	if err := runDirectory(context.Background(), &out, src, "myroot", false, nil, "files", false, render.NewJSONRenderer()); err != nil {
+	if err := runDirectory(context.Background(), &out, src, "myroot", false, nil, "files", false, render.NewJSONRenderer(), 0); err != nil {
 		t.Fatalf("runDirectory: %v", err)
 	}
 
@@ -939,6 +939,115 @@ func TestRootCmd_SortFiles_NonDegenerate(t *testing.T) {
 	}
 }
 
+// TestRootCmd_MaxFiles_NotSet_CountsAll verifies that without --max-files, all
+// accepted files are counted (existing behavior preserved, no limit applied).
+func TestRootCmd_MaxFiles_NotSet_CountsAll(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{
+		"a.go": {Data: []byte("package main\n")},
+		"b.go": {Data: []byte("package main\n")},
+		"c.go": {Data: []byte("package main\n")},
+		"d.go": {Data: []byte("package main\n")},
+		"e.go": {Data: []byte("package main\n")},
+	}
+	// maxFiles not set → defaults to 0 (no limit); all 5 files counted.
+	res, _ := runTreeFS(t, fsys, &rootFlags{})
+	if res.Total.Lines != 5 {
+		t.Errorf("no --max-files: expected Lines=5 (all 5 files), got %+v", res.Total)
+	}
+}
+
+// TestRootCmd_MaxFiles_ZeroExplicit_CountsAll verifies that --max-files 0
+// (explicit zero) is treated as "no limit" and all files are counted.
+func TestRootCmd_MaxFiles_ZeroExplicit_CountsAll(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{
+		"a.go": {Data: []byte("package main\n")},
+		"b.go": {Data: []byte("package main\n")},
+		"c.go": {Data: []byte("package main\n")},
+		"d.go": {Data: []byte("package main\n")},
+		"e.go": {Data: []byte("package main\n")},
+	}
+	// maxFiles = 0 → no limit; all 5 files counted.
+	res, _ := runTreeFS(t, fsys, &rootFlags{maxFiles: 0})
+	if res.Total.Lines != 5 {
+		t.Errorf("--max-files 0: expected Lines=5 (all 5 files), got %+v", res.Total)
+	}
+}
+
+// TestRootCmd_MaxFiles_UnderLimit verifies that when the accepted file count is
+// below the --max-files limit, the walk completes normally.
+func TestRootCmd_MaxFiles_UnderLimit(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{
+		"a.go": {Data: []byte("package main\n")},
+		"b.go": {Data: []byte("package main\n")},
+		"c.go": {Data: []byte("package main\n")},
+		"d.go": {Data: []byte("package main\n")},
+		"e.go": {Data: []byte("package main\n")},
+	}
+	// maxFiles = 10; only 5 files in fixture → limit never hit.
+	res, _ := runTreeFS(t, fsys, &rootFlags{maxFiles: 10})
+	if res.Total.Lines != 5 {
+		t.Errorf("--max-files 10: expected Lines=5 (under limit), got %+v", res.Total)
+	}
+}
+
+// TestRootCmd_MaxFiles_AtLimit_Aborts verifies that when the accepted file
+// count reaches --max-files, the walk aborts and the returned error wraps
+// ErrMaxFilesExceeded (F45: errors.Is consumer interface).
+func TestRootCmd_MaxFiles_AtLimit_Aborts(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{
+		"a.go": {Data: []byte("package main\n")},
+		"b.go": {Data: []byte("package main\n")},
+		"c.go": {Data: []byte("package main\n")},
+		"d.go": {Data: []byte("package main\n")},
+		"e.go": {Data: []byte("package main\n")},
+	}
+
+	opts := listerOpts(&rootFlags{})
+	source := lister.NewWalkLister(fsys, ".", opts)
+
+	var out bytes.Buffer
+	// maxFiles = 3; 5 files present → walk aborts after accepting the 3rd.
+	err := runDirectory(context.Background(), &out, source, "", false, nil, "lines", false, render.NewJSONRenderer(), 3)
+	if err == nil {
+		t.Fatalf("--max-files 3: expected error wrapping ErrMaxFilesExceeded, got nil")
+	}
+	if !errors.Is(err, ErrMaxFilesExceeded) {
+		t.Errorf("--max-files 3: expected errors.Is(err, ErrMaxFilesExceeded) true; got: %v", err)
+	}
+}
+
+// TestRootCmd_MaxFiles_NegativeValue verifies that --max-files -1 is treated as
+// "no limit" (same as 0), so all files are counted without error.
+//
+// Decision (Unit 8.1 worklog): negative values are treated as 0 (no limit)
+// via the guard condition `maxFiles > 0`. This avoids a cobra validation step
+// and keeps the UX symmetrical with `--depth 0` (unlimited). A negative value
+// is arguably a user error but produces the safe behavior (count everything).
+func TestRootCmd_MaxFiles_NegativeValue(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{
+		"a.go": {Data: []byte("package main\n")},
+		"b.go": {Data: []byte("package main\n")},
+		"c.go": {Data: []byte("package main\n")},
+		"d.go": {Data: []byte("package main\n")},
+		"e.go": {Data: []byte("package main\n")},
+	}
+	// maxFiles = -1 → guard `maxFiles > 0` is false → treated as no limit.
+	res, _ := runTreeFS(t, fsys, &rootFlags{maxFiles: -1})
+	if res.Total.Lines != 5 {
+		t.Errorf("--max-files -1: expected Lines=5 (treated as no-limit), got %+v", res.Total)
+	}
+}
+
 // TestRootCmd_FilesField_SurvivesLabelDirectories verifies that the Files
 // field on summary.Directory is correctly populated by walkAndCount and
 // survives the labelDirectories reconstruction (F44). A fixture with multiple
@@ -964,7 +1073,7 @@ func TestRootCmd_FilesField_SurvivesLabelDirectories(t *testing.T) {
 
 	var out bytes.Buffer
 	// Use a non-empty rootLabel to exercise labelDirectories reconstruction.
-	if err := runDirectory(context.Background(), &out, source, "myroot", false, nil, "lines", false, render.NewJSONRenderer()); err != nil {
+	if err := runDirectory(context.Background(), &out, source, "myroot", false, nil, "lines", false, render.NewJSONRenderer(), 0); err != nil {
 		t.Fatalf("runDirectory: %v", err)
 	}
 
