@@ -139,7 +139,7 @@ Import DAG extension: `lister → fileset, ignore, os/exec` (new leaf-ish mid-ti
 
 ### Unit 4.5 — internal/render.NewTOONRenderer: TOON output + snapshot tests
 
-- **State:** done
+- **State:** in_progress
 - **Paths:** `main/internal/render/toon.go`, `main/internal/render/render_test.go`
 - **Packages:** `github.com/evanmschultz/rak/internal/render`
 - **Acceptance:**
