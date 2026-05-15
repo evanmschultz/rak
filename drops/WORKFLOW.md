@@ -48,6 +48,22 @@ Plan → Plan QA → Discuss + Cleanup → (loop until plan good) → Build (per
 
 ---
 
+## Cascade Tiering (A / B / C)
+
+Each drop carries a `Tier:` field in its `PLAN.md` header. The tier sets which phases run as full subagent cascades vs. orch-direct work. Orch sets the tier at Phase 1 stamp time. Default = **A** if uncertain.
+
+| Tier | When | Phase 1 (plan) | Phase 2 (plan-QA) | Phase 4 (build) | Phase 5 (build-QA) |
+|---|---|---|---|---|---|
+| **A** | Semantic-heavy, new public surface, heuristics, multi-package wiring, new external dep with API surface | `go-planning-agent` | parallel proof + falsification | `go-builder-agent` per unit | parallel proof + falsification per unit |
+| **B** | Mechanical-table, typed-API, single-package additions, lookup-table code with finite cases | orch writes Planner section inline | skipped — orch reviews own plan against `main/PLAN.md` + dev | `go-builder-agent` per unit | falsification-only per unit (proof skipped; test suite is the proof) |
+| **C** | Docs-only, single-file config tweaks, dep-bump, README rewrite, dev-manual ops (repo-flip, tag) | orch writes minimal Planner section inline | skipped | orch edits directly (markdown / mage target) or one builder spawn for a one-shot Go edit | skipped — dev reviews the diff |
+
+**Setting the tier.** Default to A when uncertain. Raise the tier mid-drop (e.g. surprise complexity in a tier-B unit) by editing the header and treating the next phase as if the new tier had been set at stamp time. **Never lower the tier mid-drop** — once a heavier cascade reveals findings, those findings are real.
+
+**Drop 3's tier (hindsight): A.** The cascade caught F14 (yield-false → must return `fs.SkipAll`), C4 (symlink regression guard), and C10 (binary-detection error policy). Worth the cost.
+
+---
+
 ## Agent Spawn Contract
 
 The agents in `~/.claude/agents/` (`go-builder-agent`, `go-planning-agent`, `go-qa-proof-agent`, `go-qa-falsification-agent`) are **global** — shared with other projects that may still use Tillsyn. Their agent definitions reference `till_*` tools, capability leases, capture_state, attention items, and handoffs. **Rak does not use any of that.** Every spawn from a rak orchestrator overrides those instructions.
@@ -93,14 +109,16 @@ If `~/.claude/agents/go-*.md` change in a way that conflicts with the override (
 
 **Goal:** turn the PLAN.md row into atomic units of work with paths, packages, acceptance criteria, and `blocked_by` ordering.
 
-1. Orch copies `main/drops/_TEMPLATE/` → `main/drops/DROP_N_<NAME>/`. Sets `PLAN.md` header `state: planning`. Commits (`docs(drop-N): scaffold drop dir from template`).
-2. Orch spawns `go-planning-agent` with the spawn preamble from § "Agent Spawn Contract" + the planner appendix from § "Per-Role Spawn Appendices". The planner reads `main/PLAN.md`, the drop's `PLAN.md`, `main/CLAUDE.md`, this file.
-3. Planner fills `## Planner` section in the drop's `PLAN.md`: scope confirmation, atomic units (`N.1`, `N.2`, …), each with `paths`, `packages`, `acceptance`, `blocked_by`, `state: todo`. Returns control.
-4. Orch commits the plan (`docs(drop-N): planner decompose into N units`). Move to Phase 2.
+1. Orch copies `main/drops/_TEMPLATE/` → `main/drops/DROP_N_<NAME>/`. Sets `PLAN.md` header `state: planning` and `Tier:` per § "Cascade Tiering (A / B / C)". Commits (`docs(drop-N): scaffold drop dir from template`).
+2. **Tier A**: orch spawns `go-planning-agent` with the spawn preamble from § "Agent Spawn Contract" + the planner appendix from § "Per-Role Spawn Appendices". The planner reads `main/PLAN.md`, the drop's `PLAN.md`, `main/CLAUDE.md`, this file. Planner fills `## Planner` section. **Tier B / C**: orch writes the `## Planner` section inline (no subagent spawn) — atomic units (`N.1`, `N.2`, …), each with `paths`, `packages`, `acceptance`, `blocked_by`, `state: todo`.
+3. (Tier A only) Planner returns control after filling `## Planner`. Commits as `docs(drop-N): planner decompose into N units`. (Tier B/C: orch commits its own inline plan as `docs(drop-N): plan inline into N units`.)
+4. Move to Phase 2 (Tier A) or skip directly to Phase 4 (Tier B / C).
 
 ## Phase 2 — Plan QA
 
 **Goal:** independent proof + falsification review of the planner's decomposition.
+
+**Tier gating:** Phase 2 runs for **Tier A** only. Tier B and Tier C skip directly from Phase 1 to Phase 4 — orch is the plan reviewer for Tier B / C drops.
 
 1. Orch spawns `go-qa-proof-agent` and `go-qa-falsification-agent` **in parallel** with the preamble from § "Agent Spawn Contract" + plan-QA appendix from § "Per-Role Spawn Appendices". Each reads the drop's `PLAN.md`, `main/CLAUDE.md`, `main/PLAN.md`, this file. Each writes its own file:
    - `go-qa-proof-agent` → `PLAN_QA_PROOF.md` with verdict (`pass` / `fail`) + findings
@@ -131,6 +149,11 @@ If `~/.claude/agents/go-*.md` change in a way that conflicts with the override (
 ## Phase 5 — Build QA (per unit)
 
 **Goal:** independent proof + falsification review of the unit's implementation.
+
+**Tier gating:**
+- **Tier A**: parallel proof + falsification per unit (the full flow below).
+- **Tier B**: falsification-only per unit. Skip the `go-qa-proof-agent` spawn; the test suite is the proof. Only `BUILDER_QA_FALSIFICATION.md` is produced.
+- **Tier C**: no QA subagent. Dev reviews the diff directly; orch flips the unit state from `in_progress` to `done` only after dev signoff in conversation.
 
 1. Orch spawns `go-qa-proof-agent` + `go-qa-falsification-agent` **in parallel** against unit `N.M` with the preamble from § "Agent Spawn Contract" + build-QA appendix from § "Per-Role Spawn Appendices". Each reads the drop's `PLAN.md`, `BUILDER_WORKLOG.md`, the actual changed code (Hylla / `git diff` / Read), `main/CLAUDE.md`, this file.
 2. Each appends `## Unit N.M — Round K` section to its own durable md (`BUILDER_QA_PROOF.md`, `BUILDER_QA_FALSIFICATION.md`) with verdict + findings.

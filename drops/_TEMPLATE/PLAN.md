@@ -1,6 +1,7 @@
 # DROP_N — <NAME>
 
 **State:** planning
+**Tier:** A | B | C  (orch sets at stamp time; see `main/drops/WORKFLOW.md` § "Cascade Tiering")
 **Blocked by:** <DROP_M> | —
 **Paths (expected):** <broad file footprint at start; refined by planner>
 **Packages (expected):** <broad Go package footprint>
