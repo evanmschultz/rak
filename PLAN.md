@@ -73,7 +73,7 @@ The plan below is the working shape. Each row is a level_1 container drop. **Eac
 | `DROP_3_DIRECTORY_WALK_GITIGNORE_DEPTH` | A (hindsight) | done | DROP_2 | `main/drops/DROP_3_DIRECTORY_WALK_GITIGNORE_DEPTH/` |
 | `DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON` | A | done | DROP_3 | `main/drops/DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON/` |
 | `DROP_5_LANGUAGE_DETECTION_CODE_SPLITS` | A | done | DROP_4 | `main/drops/DROP_5_LANGUAGE_DETECTION_CODE_SPLITS/` |
-| `DROP_6_STDIN_PIPE_BEHAVIOR` | C | todo (no-op close expected) | DROP_5 | `main/drops/DROP_6_STDIN_PIPE_BEHAVIOR/` |
+| `DROP_6_STDIN_PIPE_BEHAVIOR` | C | done (no-op close — ratified Drop 2/4 behavior) | DROP_5 | `main/drops/DROP_6_STDIN_PIPE_BEHAVIOR/` |
 | `DROP_7_SUMMARY_SORTING` | A | todo | DROP_6 | `main/drops/DROP_7_SUMMARY_SORTING/` |
 | `DROP_8_SAFETY_RAILS` | B | todo | DROP_7 | `main/drops/DROP_8_SAFETY_RAILS/` |
 | `DROP_9_RELEASE_DOCS` | B (mixed; 9.4 + 9.5 are C) | todo | DROP_8 | `main/drops/DROP_9_RELEASE_DOCS/` |
@@ -145,7 +145,7 @@ DROP_5 — Language detection + code-aware splits  (DONE — closed 2026-05-15)
   5.3 Per-type aggregation in render output (all three renderers).
   5.4 --lang go,rs walk filter (decision 24).
 
-DROP_6 — Stdin pipe behavior  (was DROP_5; tier C — expected no-op close)
+DROP_6 — Stdin pipe behavior  (DONE — closed 2026-05-15 as no-op; ratifies Drop 2/4 behavior)
   • Drop 2 already handles stdin counting via the no-args path; this drop only verifies
     pipe-detection edges and ratifies that decisions 9/30 cuts (no --as, no TTY-hang) are real.
   6.1 Confirm pipe-vs-TTY detection works; document in README scope notes.
@@ -180,11 +180,11 @@ DROP_9 — Release + docs  (slimmed per decision 30; mixed tier)
 
 ## Immediate Next Step
 
-Drops 0/1/2/3/4/5 are done. Drop 5 closed 2026-05-15 at commit `4fde076`, CI run 25912730485, Hylla task `task-5349ad741444a77a`. The orchestrator's next moves, in order:
+Drops 0/1/2/3/4/5/6 are done. Drop 6 was a tier-C no-op close (2026-05-15) — no code touched; ratified Drop 2 stdin path + Drop 4 default-TOON + decision-30 cuts (no TTY-hang detection, no `--as <lang>`). The orchestrator's next moves, in order:
 
-1. **Stamp Drop 6** (STDIN_PIPE_BEHAVIOR — tier C, expected no-op close): copy `main/drops/_TEMPLATE/` → `main/drops/DROP_6_STDIN_PIPE_BEHAVIOR/`. Set `state: planning`, `Tier: C`. Per the drop tree, Drop 6 is a near-no-op close because Drop 2 already shipped stdin wc-parity counting, and decision 30 cut both `--as <lang>` (decision 9 amendment) and TTY-hang behavior. Drop 6's purpose is to formally ratify those cuts and verify pipe-detection works end-to-end.
-2. **Orch-inline plan** (Tier C — no planner subagent per WORKFLOW.md § "Cascade Tiering"): orch writes the Planner section directly. Likely a single unit "6.1 — Verify stdin pipe behavior + document cuts" with minimal code change.
-3. Tier C path: orch-direct edits if any are needed, dev reviews diff, close. No QA subagents per Tier C mechanics.
+1. **Stamp Drop 7** (SUMMARY_SORTING — tier A): copy `main/drops/_TEMPLATE/` → `main/drops/DROP_7_SUMMARY_SORTING/`. Set `state: planning`, `Tier: A`. Per the drop tree, Drop 7 adds `internal/summary` (totals + per-dir rollup + per-type rollup formalized) + `--sort {lines,files,bytes,name}` flag with `--sort-asc` direction flip. The provisional `render.Directory` from Drop 3 is migrated to `summary.Summary` here. `tokens` is NOT a sort key (decision 30 cut tokens to v0.2).
+2. **Spawn `go-planning-agent`** with the override preamble. Planner decomposes Drop 7 into atomic units; check for parallel-eligibility per [[feedback-parallelize-aggressively]].
+3. Continue through Phase 2 parallel plan-QA, Phase 3 discuss + cleanup, then Phases 4–7 unit by unit.
 
 ## Follow-Ups / Outstanding Orchestration Tasks
 
