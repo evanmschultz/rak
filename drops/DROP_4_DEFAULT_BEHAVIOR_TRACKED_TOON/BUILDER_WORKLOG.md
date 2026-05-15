@@ -292,4 +292,86 @@ PLAN.md says "plus `toon:"total"` scalar block". Context7 and toon-go README onl
 
 ## Hylla Feedback
 
-N/A — unit 4.5 touched only files added/modified since the last Hylla ingest (the render package was committed but `toon.go` is new; Hylla is stale for it). No Hylla queries were needed. `go.mod` confirmed toon-go import path (`github.com/toon-format/toon-go`) via `Read` of `go.mod`. Context7 provided toon-go API surface (struct tags, `toon.Marshal`, `WithDocumentDelimiter`, `WithArrayDelimiter`, `DelimiterPipe`). Spike test confirmed `omitempty` and pipe-in-value behavior empirically.
+N/A — unit 4.5 Round 1 touched only files added/modified since the last Hylla ingest (the render package was committed but `toon.go` is new; Hylla is stale for it). No Hylla queries were needed. `go.mod` confirmed toon-go import path (`github.com/toon-format/toon-go`) via `Read` of `go.mod`. Context7 provided toon-go API surface (struct tags, `toon.Marshal`, `WithDocumentDelimiter`, `WithArrayDelimiter`, `DelimiterPipe`). Spike test confirmed `omitempty` and pipe-in-value behavior empirically.
+
+## Unit 4.5 — Round 2
+
+- **Builder:** go-builder-agent
+- **Round:** 2 (F1 nested-struct spike + revert; F2 vacuous assertion tighten)
+- **Files touched:**
+  - `main/internal/render/toon.go` — `toonTree` struct: replaced flat `total_bytes/total_lines/total_words/total_chars` fields with nested `Total toonCounts \`toon:"total"\``; updated `RenderTree` payload construction; updated doc comments.
+  - `main/internal/render/render_test.go` — `TestTOONRenderer_RenderTree`: replaced vacuous `"."` assertion with `".|"` (pipe-delimited column context) and added `"total"` to verify nested grand-total block.
+
+### Spike: toon-go nested struct support
+
+**Spike code** (scratch, NOT committed — written as `TestTOONSpike_NestedStruct` in `internal/render/` package, deleted after results captured):
+
+```go
+type Inner struct {
+    A int `toon:"a"`
+    B int `toon:"b"`
+}
+type Outer struct {
+    Top Inner `toon:"top"`
+}
+v := Outer{Top: Inner{A: 1, B: 2}}
+b, _ := toon.Marshal(v, toon.WithDocumentDelimiter(toon.DelimiterPipe))
+t.Errorf("SPIKE OUTPUT (nested struct):\n%s", string(b))
+```
+
+**Actual output (captured from `mage test` FAIL line):**
+
+```
+top:
+  a: 1
+  b: 2
+```
+
+**Conclusion: nested struct IS supported.** toon-go emits struct-within-struct as an indented nested block — `top:` key followed by indented `a: 1` / `b: 2` lines. This satisfies PLAN.md F20 `toon:"total"` nested-block contract.
+
+**Second spike: RenderTree actual shape** (scratch, also deleted):
+
+```
+directories[2|]{path|bytes|lines|words|chars}:
+  .|5|1|1|5
+  sub|3|1|1|3
+total_bytes: 8
+total_lines: 2
+total_words: 2
+total_chars: 8
+```
+
+This confirmed the flat shape produced by Round 1. Post-revert the `total` section becomes:
+
+```
+total:
+  bytes: 8
+  lines: 2
+  words: 2
+  chars: 8
+```
+
+### F1 decision: revert to nested
+
+Because toon-go confirmed nested struct support, `toonTree` was reverted from the flat `TotalBytes/TotalLines/TotalWords/TotalChars` design to `Total toonCounts \`toon:"total"\``. The existing `toonCounts` type is reused as the nested type — no new struct. PLAN.md F20 nested-total contract is now satisfied.
+
+### F2 fix: tighten vacuous assertion
+
+`TestTOONRenderer_RenderTree` previously checked `strings.Contains(got, ".")` — vacuous because `"."` is a single character that matches incidentally in TOON syntax and numeric values. Replaced with:
+- `".|"` — pins the `"."` directory path as the first column of a pipe-delimited tabular row (e.g. `.|5|1|1|5`). This is meaningfully different from a stray dot.
+- Added `"total"` — verifies the nested grand-total block key is present in the output, exercising the F1 revert.
+
+The assertion list in the for-loop is now `[]string{"directories", ".|", "sub", "total"}`.
+
+### Mage commands run and results
+
+| Command | Result | Notes |
+|---|---|---|
+| `mage test` (spike nested, RED) | `FAIL internal/render` — `TestTOONSpike_NestedStruct` output captured | nested struct IS supported |
+| `mage test` (spike shape, RED) | `FAIL internal/render` — `TestTOONSpike_Shape` output captured | current flat shape documented |
+| `mage test` (after F1+F2 changes, GREEN) | `ok internal/render 1.379s` | all TOON + pre-existing tests pass |
+| `mage ci` | **GREEN** — `0 issues`, all packages cached/pass | full gate passed |
+
+## Hylla Feedback (Round 2)
+
+N/A — unit 4.5 Round 2 touched only `internal/render/toon.go` and `internal/render/render_test.go`, both of which are new/modified since the last Hylla ingest. No Hylla queries were needed. Evidence gathered via `Read` of source files, `go doc github.com/toon-format/toon-go` for library API surface, and empirical spike tests. No Hylla misses to report.

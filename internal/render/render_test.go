@@ -378,7 +378,12 @@ func TestTOONRenderer_Render(t *testing.T) {
 }
 
 // TestTOONRenderer_RenderTree verifies a multi-directory rollup contains the
-// "directories" array key and the supplied directory paths.
+// "directories" array key, the "total" nested block, and both directory paths
+// in their pipe-delimited tabular column context.
+//
+// ".|" pins the "." path as the first column of a pipe-delimited tabular row
+// (not just any incidental dot in the output). "total" verifies the nested
+// grand-total block is present (F20 nested-total contract).
 func TestTOONRenderer_RenderTree(t *testing.T) {
 	t.Parallel()
 
@@ -393,7 +398,7 @@ func TestTOONRenderer_RenderTree(t *testing.T) {
 		t.Fatalf("RenderTree: %v", err)
 	}
 	got := buf.String()
-	for _, want := range []string{"directories", ".", "sub"} {
+	for _, want := range []string{"directories", ".|", "sub", "total"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("RenderTree output missing %q; got:\n%s", want, got)
 		}

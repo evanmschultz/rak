@@ -46,16 +46,15 @@ type toonDirectory struct {
 }
 
 // toonTree is the top-level envelope for RenderTree. The directories field is
-// a tabular TOON array; the total_* scalar fields carry the grand total;
-// errors is omitted entirely (via omitempty) when the caller passes a nil or
-// empty errs slice — spike-confirmed: toon-go omitempty drops zero/empty
-// fields from output (C7).
+// a tabular TOON array; the total field is a nested toonCounts block carrying
+// the grand total (spike-confirmed: toon-go emits struct-in-struct as an
+// indented nested block — F20 nested-total contract satisfied); errors is
+// omitted entirely (via omitempty) when the caller passes a nil or empty errs
+// slice — spike-confirmed: toon-go omitempty drops zero/empty fields from
+// output (C7).
 type toonTree struct {
 	Directories []toonDirectory `toon:"directories"`
-	TotalBytes  int64           `toon:"total_bytes"`
-	TotalLines  int64           `toon:"total_lines"`
-	TotalWords  int64           `toon:"total_words"`
-	TotalChars  int64           `toon:"total_chars"`
+	Total       toonCounts      `toon:"total"`
 	Errors      []string        `toon:"errors,omitempty"`
 }
 
@@ -84,11 +83,11 @@ func (toonRenderer) Render(w io.Writer, counts counting.Counts) error {
 
 // RenderTree marshals a per-directory rollup plus a grand total and optional
 // errors as a TOON document to w. The directories slice is emitted as a
-// tabular TOON array (pipe-delimited columns — F20); grand total fields are
-// emitted as flat scalar keys prefixed with "total_"; errors are omitted when
-// the caller passes nil or an empty slice. The emitted directory order exactly
-// matches the caller-supplied dirs slice; sorting is the caller's
-// responsibility.
+// tabular TOON array (pipe-delimited columns — F20); the grand total is
+// emitted as a nested "total" block (toonCounts — F20 nested-total contract);
+// errors are omitted when the caller passes nil or an empty slice. The emitted
+// directory order exactly matches the caller-supplied dirs slice; sorting is
+// the caller's responsibility.
 func (toonRenderer) RenderTree(w io.Writer, dirs []Directory, total counting.Counts, errs []error) error {
 	rows := make([]toonDirectory, 0, len(dirs))
 	for _, d := range dirs {
@@ -102,10 +101,12 @@ func (toonRenderer) RenderTree(w io.Writer, dirs []Directory, total counting.Cou
 	}
 	payload := toonTree{
 		Directories: rows,
-		TotalBytes:  total.Bytes,
-		TotalLines:  total.Lines,
-		TotalWords:  total.Words,
-		TotalChars:  total.Chars,
+		Total: toonCounts{
+			Bytes: total.Bytes,
+			Lines: total.Lines,
+			Words: total.Words,
+			Chars: total.Chars,
+		},
 	}
 	if len(errs) > 0 {
 		msgs := make([]string, 0, len(errs))
