@@ -1,6 +1,6 @@
 # DROP_5 — LANGUAGE_DETECTION_CODE_SPLITS
 
-**State:** building
+**State:** done
 **Tier:** A
 **Blocked by:** DROP_4
 **Paths (expected):** `main/internal/lang/` (new package — `Language` type, `Detect`, blank/comment/code splitter + tests), `main/internal/render/render.go` (per-type rollup data shape; F25-aware — interface may grow), `main/internal/render/toon.go` / `main/internal/render/human.go` / `main/internal/render/json.go` (extend to render per-type aggregation), `main/internal/render/render_test.go` (extend snapshot/contains tests), `main/cmd/rak/root.go` (wire language detection into per-file counting + per-type aggregation + add `--lang` walk-filter flag), `main/cmd/rak/root_test.go` (flag-parsing + per-type tests), `main/cmd/rak/integration_test.go` (extend fixture or expectations for per-type rollup)
@@ -8,7 +8,7 @@
 **PLAN.md ref:** main/PLAN.md → `DROP_5_LANGUAGE_DETECTION_CODE_SPLITS` row
 **Workflow:** main/drops/WORKFLOW.md
 **Started:** 2026-05-15
-**Closed:** —
+**Closed:** 2026-05-15 (CI run 25912730485 green; Hylla ingest task task-5349ad741444a77a at commit 4fde076)
 
 ## Scope
 

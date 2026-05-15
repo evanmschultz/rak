@@ -72,7 +72,7 @@ The plan below is the working shape. Each row is a level_1 container drop. **Eac
 | `DROP_2_COUNTING_DOMAIN_RENDER_BOUNDARY` | A (hindsight) | done | DROP_1 | `main/drops/DROP_2_COUNTING_DOMAIN_RENDER_BOUNDARY/` |
 | `DROP_3_DIRECTORY_WALK_GITIGNORE_DEPTH` | A (hindsight) | done | DROP_2 | `main/drops/DROP_3_DIRECTORY_WALK_GITIGNORE_DEPTH/` |
 | `DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON` | A | done | DROP_3 | `main/drops/DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON/` |
-| `DROP_5_LANGUAGE_DETECTION_CODE_SPLITS` | A | todo | DROP_4 | `main/drops/DROP_5_LANGUAGE_DETECTION_CODE_SPLITS/` |
+| `DROP_5_LANGUAGE_DETECTION_CODE_SPLITS` | A | done | DROP_4 | `main/drops/DROP_5_LANGUAGE_DETECTION_CODE_SPLITS/` |
 | `DROP_6_STDIN_PIPE_BEHAVIOR` | C | todo (no-op close expected) | DROP_5 | `main/drops/DROP_6_STDIN_PIPE_BEHAVIOR/` |
 | `DROP_7_SUMMARY_SORTING` | A | todo | DROP_6 | `main/drops/DROP_7_SUMMARY_SORTING/` |
 | `DROP_8_SAFETY_RAILS` | B | todo | DROP_7 | `main/drops/DROP_8_SAFETY_RAILS/` |
@@ -139,7 +139,7 @@ DROP_4 — Default behavior: tracked-only source + TOON renderer  (DONE — clos
       RenderTree(dirs, total, errs) (path mode) via toon-format/toon-go. Snapshot tests in
       render_test.go.
 
-DROP_5 — Language detection + code-aware splits  (was DROP_4; tier A)
+DROP_5 — Language detection + code-aware splits  (DONE — closed 2026-05-15)
   5.1 internal/lang: extension map + shebang sniff via File.Peek(512) + simple content heuristic.
   5.2 Blank/comment/code split per detected language.
   5.3 Per-type aggregation in render output (all three renderers).
@@ -180,11 +180,11 @@ DROP_9 — Release + docs  (slimmed per decision 30; mixed tier)
 
 ## Immediate Next Step
 
-Drops 0/1/2/3/4 are done. Drop 4 closed 2026-05-15 at commit `36cad7f`, CI run 25904809116, Hylla task `task-aef92863fd98cca7`. The orchestrator's next moves, in order:
+Drops 0/1/2/3/4/5 are done. Drop 5 closed 2026-05-15 at commit `4fde076`, CI run 25912730485, Hylla task `task-5349ad741444a77a`. The orchestrator's next moves, in order:
 
-1. **Stamp Drop 5**: copy `main/drops/_TEMPLATE/` → `main/drops/DROP_5_LANGUAGE_DETECTION_CODE_SPLITS/`. Set its `PLAN.md` header `state: planning`, `Tier: A`. Commit (`docs(drop-5): scaffold drop dir from template`).
-2. **Spawn `go-planning-agent`** per WORKFLOW.md § "Phase 1 — Plan". Planner decomposes Drop 5 into the four expected units (5.1 internal/lang detection / 5.2 code-aware splits / 5.3 per-type aggregation / 5.4 --lang walk filter), each with `paths` / `packages` / `acceptance` / `blocked_by`. Note: 5.2 and 5.4 are eligible to run in parallel after 5.1 closes (per [[feedback-parallelize-aggressively]]).
-3. Continue through Phase 2 (parallel plan-QA — Drop 5 is tier A), Phase 3 (discuss + cleanup), looping until plan accepted, then Phases 4–7 unit by unit.
+1. **Stamp Drop 6** (STDIN_PIPE_BEHAVIOR — tier C, expected no-op close): copy `main/drops/_TEMPLATE/` → `main/drops/DROP_6_STDIN_PIPE_BEHAVIOR/`. Set `state: planning`, `Tier: C`. Per the drop tree, Drop 6 is a near-no-op close because Drop 2 already shipped stdin wc-parity counting, and decision 30 cut both `--as <lang>` (decision 9 amendment) and TTY-hang behavior. Drop 6's purpose is to formally ratify those cuts and verify pipe-detection works end-to-end.
+2. **Orch-inline plan** (Tier C — no planner subagent per WORKFLOW.md § "Cascade Tiering"): orch writes the Planner section directly. Likely a single unit "6.1 — Verify stdin pipe behavior + document cuts" with minimal code change.
+3. Tier C path: orch-direct edits if any are needed, dev reviews diff, close. No QA subagents per Tier C mechanics.
 
 ## Follow-Ups / Outstanding Orchestration Tasks
 
