@@ -86,7 +86,7 @@ Three units, fully serialized (7.1 → 7.2 → 7.3). No parallelism is possible:
 
 ### Unit 7.1 — internal/summary: Directory struct, Summary struct, SortKey, SortDirs
 
-- **State:** todo
+- **State:** done
 - **Paths:**
   - `internal/summary/summary.go` (new — not yet in tree)
   - `internal/summary/sort.go` (new — not yet in tree)
