@@ -1,4 +1,4 @@
-package lister_test
+package lister
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/evanmschultz/rak/internal/fileset"
-	"github.com/evanmschultz/rak/internal/lister"
 )
 
 // skipIfNoGit calls t.Skip when the git binary is absent from PATH.
@@ -48,7 +47,7 @@ func TestGitLister_List_InRepo(t *testing.T) {
 	ctx := t.Context()
 
 	root := mainDir(t)
-	gl, err := lister.NewGitListerForTest(ctx, root, fileset.WalkOptions{IncludeHidden: true})
+	gl, err := newGitLister(ctx, root, fileset.WalkOptions{IncludeHidden: true})
 	if err != nil {
 		t.Fatalf("newGitLister: %v", err)
 	}
@@ -76,7 +75,7 @@ func TestGitLister_List_SubdirRoot(t *testing.T) {
 	ctx := t.Context()
 
 	root := filesetDir(t)
-	gl, err := lister.NewGitListerForTest(ctx, root, fileset.WalkOptions{IncludeHidden: true})
+	gl, err := newGitLister(ctx, root, fileset.WalkOptions{IncludeHidden: true})
 	if err != nil {
 		t.Fatalf("newGitLister: %v", err)
 	}
@@ -125,6 +124,9 @@ func TestGitLister_List_SubdirRoot(t *testing.T) {
 // TestGitLister_FilterHidden verifies Decision B: hidden files tracked by git
 // (e.g. .gitignore at the repo root) are excluded by default when
 // IncludeHidden is false, and included when IncludeHidden is true.
+//
+// It also directly exercises anySegmentHidden to cover the non-first-segment
+// case (F2 — hidden segment at index 1 in a multi-component path).
 func TestGitLister_FilterHidden(t *testing.T) {
 	skipIfNoGit(t)
 	ctx := t.Context()
@@ -132,7 +134,7 @@ func TestGitLister_FilterHidden(t *testing.T) {
 	root := mainDir(t)
 
 	// Run with hidden excluded (default).
-	glHidden, err := lister.NewGitListerForTest(ctx, root, fileset.WalkOptions{IncludeHidden: false})
+	glHidden, err := newGitLister(ctx, root, fileset.WalkOptions{IncludeHidden: false})
 	if err != nil {
 		t.Fatalf("newGitLister (hidden=false): %v", err)
 	}
@@ -150,7 +152,7 @@ func TestGitLister_FilterHidden(t *testing.T) {
 	}
 
 	// Run with hidden included.
-	glInclude, err := lister.NewGitListerForTest(ctx, root, fileset.WalkOptions{IncludeHidden: true})
+	glInclude, err := newGitLister(ctx, root, fileset.WalkOptions{IncludeHidden: true})
 	if err != nil {
 		t.Fatalf("newGitLister (hidden=true): %v", err)
 	}
@@ -171,6 +173,27 @@ func TestGitLister_FilterHidden(t *testing.T) {
 	if !foundGitignore {
 		t.Error("IncludeHidden=true: .gitignore should appear in results but did not")
 	}
+
+	// F2 — non-first-segment hidden check: anySegmentHidden must detect a
+	// hidden segment even when it is not at index 0. This exercises the full
+	// loop body of anySegmentHidden beyond the first element.
+	t.Run("anySegmentHidden_NonFirstSegment", func(t *testing.T) {
+		cases := []struct {
+			path   string
+			hidden bool
+		}{
+			{"internal/.cache/x.bin", true}, // hidden at index 1
+			{"a/b/.hidden/c.txt", true},     // hidden at index 2
+			{"normal/path/file.go", false},  // no hidden segment
+			{".hidden", true},               // hidden at index 0 (existing coverage, kept for completeness)
+		}
+		for _, tc := range cases {
+			got := anySegmentHidden(tc.path)
+			if got != tc.hidden {
+				t.Errorf("anySegmentHidden(%q) = %v, want %v", tc.path, got, tc.hidden)
+			}
+		}
+	})
 }
 
 // TestGitLister_ContextCancel verifies that List yields (nil, ctx.Err()) when
@@ -180,7 +203,7 @@ func TestGitLister_ContextCancel(t *testing.T) {
 
 	root := mainDir(t)
 	// Use background context for construction; cancel before List.
-	gl, err := lister.NewGitListerForTest(context.Background(), root, fileset.WalkOptions{})
+	gl, err := newGitLister(context.Background(), root, fileset.WalkOptions{})
 	if err != nil {
 		t.Fatalf("newGitLister: %v", err)
 	}
@@ -214,7 +237,7 @@ func TestGitLister_RelPathInvariant(t *testing.T) {
 	ctx := t.Context()
 
 	root := mainDir(t)
-	gl, err := lister.NewGitListerForTest(ctx, root, fileset.WalkOptions{IncludeHidden: true})
+	gl, err := newGitLister(ctx, root, fileset.WalkOptions{IncludeHidden: true})
 	if err != nil {
 		t.Fatalf("newGitLister: %v", err)
 	}

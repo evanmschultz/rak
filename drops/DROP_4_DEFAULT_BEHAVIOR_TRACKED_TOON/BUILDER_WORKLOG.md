@@ -104,3 +104,45 @@ The spawn appendix confirms Decision E is locked: `git ls-files --full-name -z` 
 
 - All Hylla queries returned the needed symbols: `fileset.IsHidden`, `ignore.New`, `ignore.Matcher.Match`, `fileset.NewFile`, `fileset.WalkOptions`. Zero misses.
 - **Gap note:** `TestGitLister_MidWalkGitFailure` is NOT implemented in 4.2. Cleanly stubbing `exec.Command` at the package level is complex. The integration path relies on OS-level EOF behavior (partial output → partial list).
+
+## Unit 4.2 — Round 2
+
+- **Builder:** go-builder-agent
+- **Round:** 2 (wipe-and-revise after Round 1 QA findings)
+- **Files touched:**
+  - `main/internal/lister/git.go` — removed `NewGitListerForTest` function block (7 LOC deleted); updated `GitLister` doc comment to drop the stale reference to that export.
+  - `main/internal/lister/git_test.go` — rehomed from `package lister_test` to `package lister`; removed `github.com/evanmschultz/rak/internal/lister` import; replaced all 6 `lister.NewGitListerForTest(...)` call sites with `newGitLister(...)`; added `anySegmentHidden_NonFirstSegment` table-driven sub-test inside `TestGitLister_FilterHidden` (F2 fix).
+  - `main/drops/DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON/PLAN.md` — Unit 4.2 state flipped from `in_progress` to `done`.
+
+### F3 fix — unauthorized export removed
+
+`NewGitListerForTest` was an exported function that violated project precedent against test-only public API additions (no Drop 3 equivalent; `internal/fileset/walker_test.go` stays in `package fileset`). Remediation: `git_test.go` rehomed to `package lister` (internal test package), giving tests direct access to `newGitLister` and `anySegmentHidden`. The `NewGitListerForTest` export was deleted entirely from `git.go`. `lister_test.go` (Unit 4.1's file) remains in `package lister_test` — it only uses exported symbols (`lister.Detect`, `lister.GitLister`, `lister.ErrNoGitignoreInRepo`) and is unaffected by this change.
+
+### F1 note — loop-order deviation from PLAN.md acceptance
+
+Loop-order deviation from PLAN.md acceptance (context check hoisted from step 5 to step 1 in the `List` per-path loop) is deliberate — provides faster cancellation response without changing the emitted set. PLAN.md lists context as step 5 for narrative ordering; the implementation prioritizes it at step 1 for runtime correctness (fail-fast on cancellation before doing any string work).
+
+### F2 fix — non-first-segment hidden coverage
+
+Added `t.Run("anySegmentHidden_NonFirstSegment", ...)` sub-test inside `TestGitLister_FilterHidden`. The sub-test is a 4-case table that directly calls the unexported `anySegmentHidden` helper (accessible now that `git_test.go` is in `package lister`). Cases covered:
+- `"internal/.cache/x.bin"` → hidden at segment index 1.
+- `"a/b/.hidden/c.txt"` → hidden at segment index 2.
+- `"normal/path/file.go"` → no hidden segment (negative case).
+- `".hidden"` → hidden at index 0 (existing coverage, kept for completeness).
+
+### Mage commands run and results
+
+| Command | Result | Notes |
+|---|---|---|
+| `mage format` | Reformatted `git_test.go` (struct literal alignment) | gofumpt normalized comment spacing inside struct literal |
+| `mage format` (second run) | clean (no output) | No drift after first format pass |
+| `mage build ./internal/lister/...` | `undefined: newWalkLister` only (exit 1) | Expected C11 carve-out; exactly one symbol missing |
+| `mage test ./internal/fileset/... ./internal/counting/... ./internal/ignore/... ./internal/render/... ./internal/summary/... ./cmd/...` | All non-lister packages green | `internal/lister` shows build-failed (same C11 carve-out); all other packages pass |
+
+### Verification: lister_test.go unaffected
+
+`lister_test.go` remains in `package lister_test` and uses only exported symbols: `lister.Detect`, `lister.GitLister` (type assertion), `lister.ErrNoGitignoreInRepo`. None of these reference `NewGitListerForTest`. The `*lister.GitLister` type assertion at line 41 still works because `GitLister` remains exported.
+
+## Hylla Feedback
+
+None — Hylla answered everything needed. File reads (not Hylla queries) were sufficient since all work was in files changed since last ingest (Hylla would be stale for `git.go` and `git_test.go`).

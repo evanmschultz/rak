@@ -23,8 +23,8 @@ import (
 // before newGitLister is ever called when DisableGitignore is true (F19 /
 // Decision A).
 //
-// GitLister is exported so tests in the lister package can perform type
-// assertions via lister.Detect (see lister_test.go TODO unit 4.2 markers).
+// GitLister is exported so callers (e.g. lister_test.go) can perform type
+// assertions on the value returned by lister.Detect.
 type GitLister struct {
 	absRoot  string
 	toplevel string
@@ -67,14 +67,6 @@ func newGitLister(ctx context.Context, root string, opts fileset.WalkOptions) (*
 		fsys:     os.DirFS(absRoot),
 		opts:     opts,
 	}, nil
-}
-
-// NewGitListerForTest is an exported constructor that delegates to
-// newGitLister. It exists so tests in package lister_test (which cannot access
-// the unexported newGitLister) can construct a GitLister directly without
-// going through lister.Detect. Not intended for production use.
-func NewGitListerForTest(ctx context.Context, root string, opts fileset.WalkOptions) (*GitLister, error) {
-	return newGitLister(ctx, root, opts)
 }
 
 // anySegmentHidden reports whether any forward-slash-delimited segment of
