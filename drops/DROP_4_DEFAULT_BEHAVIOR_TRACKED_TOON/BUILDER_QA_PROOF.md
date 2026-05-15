@@ -80,3 +80,64 @@ Append a `## Unit N.M — Round K` section per build-QA proof pass. See `main/dr
 ## Hylla Feedback
 
 N/A — this QA pass touched only Go source files that were freshly added or modified at HEAD. Hylla's `@main` ingest is older than HEAD (built at end of Drop 3), so the 4.1 deltas live in `git diff` territory. All source-of-truth lookups went through `Read` of the live tree; no Hylla queries were needed or attempted. (When Hylla reingest fires at end of Drop 4, the 4.1 symbols will be queryable and the same audit could be run via Hylla without `Read` fallbacks.)
+
+## Unit 4.2 — Round 1
+
+**Verdict:** pass
+
+### Acceptance audit
+
+- **"`git.go` algorithm matches PLAN.md F16/F17/F18/F19/F21"** — **pass**. Step-by-step trace:
+  - `newGitLister` (`git.go` lines 43-70): line 44 `absRoot, err := filepath.Abs(root)` (F16-defensive); line 49 `cmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")` with `cmd.Dir = absRoot` (line 50, F16); line 55 `toplevel := strings.TrimRight(string(out), "\n\r")` (trims newline/CR); line 60 `prefix := filepath.ToSlash(strings.TrimPrefix(absRoot, toplevel))`; line 61 `prefix = strings.TrimPrefix(prefix, "/")` (leading-slash strip per F17). All four F17 steps present.
+  - `anySegmentHidden` (`git.go` lines 84-91): splits `relPath` on `"/"` and calls `fileset.IsHidden(seg)` per segment. Verified `fileset.IsHidden` exists (`internal/fileset/file.go` line 124, signature `(name string) bool`). Matches F18(a) / C4.
+  - `List` (`git.go` lines 106-184): line 109 `exec.CommandContext(ctx, "git", "ls-files", "--full-name", "-z")` with `cmd.Dir = g.absRoot` (line 110, F16); line 123 `matcher, err := ignore.New(nil, g.opts.Includes, g.opts.Excludes)` — built ONCE before the per-path loop (F18-precondition). Verified `ignore.New(roots []GitignoreRoot, includes, excludes []string) (Matcher, error)` signature at `internal/ignore/ignore.go` line 74. Per-entry loop (lines 136-182): context check (line 138-141) → prefix strip (lines 148-157, F17) → `filepath.ToSlash` (line 160) → hidden check `anySegmentHidden` (line 163, F21) → depth check `strings.Count(relPath, "/") >= g.opts.Depth` guarded on `g.opts.Depth > 0` (line 169, F18(b)/C15) → matcher check `matcher.Match(relPath, false)` with `false` for files-only (line 174, F18(c)) → emit `fileset.NewFile(g.fsys, relPath, relPath)` honouring F14 yield-false guard (line 179).
+  - Loop order deviates from PLAN.md (context check is FIRST, not fifth). Functionally identical and strictly better for cancel responsiveness — no work done on a cancelled iteration. Acceptable.
+  - F19 is enforced upstream in `Detect` (already audited at Unit 4.1); `newGitLister` is never reached when `DisableGitignore && in-repo`. F19(c) wrap remains `fmt.Errorf("lister: detect: %w", ErrNoGitignoreInRepo)` (line 67 of `lister.go`). The struct doc comment at `git.go` lines 18-27 correctly notes this branch is unreachable.
+
+- **"Walker depth comparison parity (C15)"** — **pass**. Walker's depth-prune (`internal/fileset/walker.go` lines 223, 226) uses `depth >= w.opts.Depth`. GitLister's depth-prune (`git.go` line 169) uses `strings.Count(relPath, "/") >= g.opts.Depth`. Both use `>=`. The `g.opts.Depth > 0` guard mirrors Walker's `w.opts.Depth != 0` check (lines 216 of walker.go) — zero means unlimited in both.
+
+- **"F26 invariant test asserts (a)/(b)/(c)"** — **pass**. `git_test.go` `TestGitLister_RelPathInvariant` lines 212-243: (a) `!strings.HasPrefix(rp, "./")` at line 230-232; (b) `!strings.HasPrefix(rp, "/")` at line 233-235; (c) `rp == filepath.ToSlash(rp)` at line 236-238. All three assertions present, and the test fails at line 241 if zero files are emitted (`if count == 0`) so the invariant is verified against actual output, not vacuously true.
+
+- **"5 tests present + correct + skip on missing git"** — **pass**. All five enumerated tests exist in `git_test.go`: `TestGitLister_List_InRepo` (line 46), `TestGitLister_List_SubdirRoot` (line 74), `TestGitLister_FilterHidden` (line 128), `TestGitLister_ContextCancel` (line 178), `TestGitLister_RelPathInvariant` (line 212). Each calls `skipIfNoGit(t)` (lines 15-20: `exec.LookPath("git")` failure → `t.Skip("git binary not found")`). `_List_SubdirRoot` is the explicit F17/Decision-E validator: walks `internal/fileset/` and asserts no `"internal/"` prefix on any RelPath (line 98-100) AND that `"file.go"` + `"walker.go"` appear (lines 110-122). `_FilterHidden` runs the test twice (once with each polarity) and asserts `.gitignore` exclusion/inclusion (lines 147-149, 164-173). `_ContextCancel` cancels before iteration and asserts `context.Canceled` (line 204-206) with a documented `t.Skip` carve-out for buffered-output races (line 201-203) — acceptable per Builder design decision.
+
+- **"F1 carry-over fix wrapped at Detect"** — **pass**. `git diff HEAD~1 -- internal/lister/lister.go` (visible above) shows exactly one delta in lister.go: `-		return nil, err` → `+		return nil, fmt.Errorf("lister: detect: %w", err)` at line 51 (the `filepath.Abs` error path). The other two `lister: detect: %w` wraps from Unit 4.1 (sentinel branch at line 67, OS-level failure at line 82) remain. All three error paths now consistently use the same prefix.
+
+- **"C11 narrowing — only `undefined: newWalkLister` remains"** — **pass**. Re-ran `mage build ./internal/lister/...`: exit 1 with exactly two errors, both `undefined: newWalkLister` (`lister.go:57:10` and `lister.go:77:10`). The `undefined: newGitLister` error from 4.1 is gone. Failure mode is exactly the deliberate trade-off — symbol defined in Unit 4.3 (`walk.go`) referenced from `Detect`'s two `newWalkLister` call sites. Builder's worklog line 81-85 captured the same output verbatim.
+
+- **"Other packages still green"** — **pass**. Re-ran `mage test ./internal/fileset/... ./internal/counting/... ./internal/ignore/... ./internal/render/... ./cmd/...`. Output: `ok cmd/rak (cached)`, `ok internal/counting (cached)`, `ok internal/fileset (cached)`, `ok internal/ignore (cached)`, `ok internal/render (cached)`. Only `internal/lister [build failed]` is reported as failing (expected C11 carve-out — that package is verified separately at 4.3 close). Note: `internal/summary` and `internal/tokens` packages do not yet exist in the tree (forward-looking in PLAN.md project map); their absence is not a regression.
+
+- **"Doc comments on every exported symbol (rule 11)"** — **pass**. Verified by direct read:
+  - `GitLister` struct — `git.go` lines 18-27, doc starts with `GitLister`, explains git ls-files mechanism + Decision-A unreachability for `DisableGitignore`.
+  - `NewGitListerForTest` — `git.go` lines 72-75, doc starts with `NewGitListerForTest`, explains the `package lister_test` delegation pattern and includes the "Not intended for production use" disclaimer.
+  - `List` — `git.go` lines 93-105, doc starts with `List`, documents the iterator contract (per-entry errors, context cancellation, F14 guard) and Decision E (paths toplevel-relative regardless of CWD).
+  - `newGitLister` (unexported) and `anySegmentHidden` (unexported) carry doc comments too even though rule 11 does not require them — bonus hygiene, not a finding.
+
+### F1 — `NewGitListerForTest` export pattern (design-quality, low severity)
+
+- **Axis:** spec-conformance / Go-idiomatic naming.
+- **Claim:** the project's test-package convention is mixed: `internal/counting`, `internal/fileset`, `internal/render` use internal `package <pkg>`; `internal/ignore` uses external `package <pkg>_test`. The lister package follows the `ignore` precedent (`package lister_test` from Unit 4.1 forward), so the external-test choice is consistent with one of the two coexisting in-tree patterns. Given the external-test choice, the builder needed an exported way for tests to construct a `GitLister` without going through `Detect` — they added `NewGitListerForTest` in `git.go` at lines 76-78.
+- **Why this is informational, not a defect:** the export-in-production-file pattern is functional but slightly less idiomatic than the Go-stdlib `export_test.go` pattern (a `_test.go`-named file in the same package declaring `var NewGitListerForTest = newGitLister`, which links only during testing and does not appear in production builds). The current choice puts a "ForTest" symbol in the public package surface — discoverable via `go doc`, indexable by Hylla as a public symbol. Whether to prefer `export_test.go` is a small style call; Unit 4.3's planned `NewWalkLister` will land an exported constructor for non-test reasons (`cmd/rak` integration tests construct one with `fstest.MapFS` per PLAN.md Unit 4.3 acceptance), so the lister package already accepts that pattern.
+- **Recommendation:** no remediation required for Unit 4.2 close. If the orchestrator later wants tighter encapsulation, a follow-up nit could replace `NewGitListerForTest` (in `git.go`) with an `export_test.go` shim (`var NewGitListerForTest = newGitLister` in the same package as the production code, but `_test.go`-suffixed so it only links during `go test`). Not blocking.
+
+### F2 — `t.Helper()` cosmetic carry-forward (informational)
+
+- **Claim:** `git_test.go` `skipIfNoGit` (line 16) and `mainDir` (line 25) / `filesetDir` (line 36) call `t.Helper()` correctly — they're actual subroutines invoked by tests, so the line affects failure-reporting walks meaningfully. Unit 4.1's analogous `t.Helper()` at top-of-test in `lister_test.go` was a cosmetic no-op (F1 finding at Unit 4.1 Round 1); 4.2's uses are not.
+- **Why informational:** confirms that 4.2's helper usage is correct and addresses (without depending on) the 4.1 F1 informational point. No action.
+
+### F3 — `TestGitLister_MidWalkGitFailure` gap (acknowledged in PLAN.md)
+
+- **Claim:** PLAN.md Unit 4.2 acceptance line 81 explicitly accepts the gap: *"cleanly stubbing `exec.Command` at the package level is complex. Accepted gap: this path is not unit-tested in 4.2."* Builder's worklog § "Hylla Feedback / Gap Notes" line 106 records the gap with the agreed sentence. The integration path relies on OS-level partial-output behavior on git failure mid-iteration. The error-path code in `List` lines 112-120 (cmd.Output error → distinguishes context.Cancel from a git failure → wraps with `lister: git ls-files: %w`) is present but exercised only end-to-end. Acceptable accepted gap per the plan.
+
+### Evidence summary
+
+- `git show HEAD --stat`: 6 files changed in commit `e12f40e` — `BUILDER_WORKLOG.md` (+48), `PLAN.md` (state flip), `internal/lister/git.go` (+184 new), `internal/lister/git_test.go` (+243 new), `internal/lister/lister.go` (+2-1, F1 wrap), `internal/lister/lister_test.go` (+3-5, activate TODO type assertion). Matches builder's worklog § "Files touched".
+- `git diff HEAD~1 -- internal/lister/lister.go`: exactly the F1 carry-over wrap at the `filepath.Abs` error path.
+- `git diff HEAD~1 -- internal/lister/lister_test.go`: activates the previously-commented `*lister.GitLister` type assertion in `TestDetect_InsideRepo` — drops the `_ = got` stub.
+- `git diff HEAD~1 -- internal/fileset/`: empty — no fileset changes at 4.2 (matches builder claim that only `lister/` package was touched).
+- `mage build ./internal/lister/...`: exit 1 with exactly two `undefined: newWalkLister` errors; no `undefined: newGitLister`.
+- `mage test ./internal/fileset/... ./internal/counting/... ./internal/ignore/... ./internal/render/... ./cmd/...`: all packages report `ok ... (cached)`; only `internal/lister [build failed]` (expected).
+- Cross-package verifications: `fileset.IsHidden` (file.go:124), `fileset.NewFile` (file.go:63, signature `(fsys fs.FS, path, relPath string) *File`), `ignore.New` (ignore.go:74), Walker depth `>=` (walker.go:223/226) — all consistent with `git.go`'s call sites.
+
+## Hylla Feedback
+
+None — Hylla answered everything needed at the Drop 3 baseline (the symbols `GitLister` consumes — `fileset.IsHidden`, `fileset.NewFile` not yet in Hylla because added in Unit 4.1 post-baseline, `ignore.New`, `fileset.WalkOptions` — were verified via `Read` of the live tree for the Unit 4.1 deltas and from baseline knowledge for the rest). No fallback was forced by a missing Hylla result.
