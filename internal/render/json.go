@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/evanmschultz/rak/internal/counting"
+	"github.com/evanmschultz/rak/internal/lang"
 )
 
 // jsonRenderer renders counting.Counts values as stdlib encoding/json output
@@ -40,9 +41,40 @@ func (jsonRenderer) Render(w io.Writer, counts counting.Counts) error {
 // exported-identifier capitalization. "counts" embeds the unmodified
 // counting.Counts shape so the per-dir block matches the single-stream
 // Render output byte-for-byte at the counts boundary.
+//
+// ByLang mirrors Directory.ByLang byte-for-byte (F34): the same field name
+// and same Go type are required for the Go struct-type conversion
+// directoryJSON(d) to compile. The json:"by_lang,omitempty" tag serializes
+// to lowercase and omits the field entirely when the map is nil or empty
+// (after LangUnknown filtering — see filterUnknown).
 type directoryJSON struct {
-	Path   string          `json:"path"`
-	Counts counting.Counts `json:"counts"`
+	Path   string                            `json:"path"`
+	Counts counting.Counts                   `json:"counts"`
+	ByLang map[lang.Language]lang.LangCounts `json:"by_lang,omitempty"`
+}
+
+// filterUnknown returns a copy of d with lang.LangUnknown removed from ByLang.
+// If the result is empty, ByLang is set to nil so omitempty suppresses the
+// field in JSON output (F33 — LangUnknown suppression uniform across all
+// renderers). The returned Directory is a shallow copy; Counts is not mutated.
+func filterUnknown(d Directory) Directory {
+	if len(d.ByLang) == 0 {
+		return d
+	}
+	filtered := make(map[lang.Language]lang.LangCounts, len(d.ByLang))
+	for k, v := range d.ByLang {
+		if k != lang.LangUnknown {
+			filtered[k] = v
+		}
+	}
+	if len(filtered) == 0 {
+		filtered = nil
+	}
+	return Directory{
+		Path:   d.Path,
+		Counts: d.Counts,
+		ByLang: filtered,
+	}
 }
 
 // treeJSON is the top-level envelope for RenderTree. Errors is omitted
@@ -64,7 +96,7 @@ func (jsonRenderer) RenderTree(w io.Writer, dirs []Directory, total counting.Cou
 		Total:       total,
 	}
 	for _, d := range dirs {
-		payload.Directories = append(payload.Directories, directoryJSON(d))
+		payload.Directories = append(payload.Directories, directoryJSON(filterUnknown(d)))
 	}
 	if len(errs) > 0 {
 		payload.Errors = make([]string, 0, len(errs))

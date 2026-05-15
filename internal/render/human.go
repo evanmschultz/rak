@@ -3,11 +3,13 @@ package render
 import (
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 
 	"github.com/evanmschultz/laslig"
 
 	"github.com/evanmschultz/rak/internal/counting"
+	"github.com/evanmschultz/rak/internal/lang"
 )
 
 // humanRenderer renders counting.Counts values as laslig key-value blocks
@@ -69,11 +71,25 @@ func (h humanRenderer) Render(w io.Writer, counts counting.Counts) error {
 // "total" KV block and, when errs is non-empty, a laslig Notice summarizing
 // the aggregated walker-level errors. The emitted block order exactly
 // matches the caller-supplied dirs slice — sorting is the caller's job.
+//
+// When a directory's ByLang map is non-empty (after F33 LangUnknown
+// suppression), each language gets one additional KV row appended under the
+// directory block, sorted by language string for deterministic output.
 func (h humanRenderer) RenderTree(w io.Writer, dirs []Directory, total counting.Counts, errs []error) error {
 	printer := h.newPrinter(w)
 	for _, d := range dirs {
 		if err := printer.KV(countsKV("dir: "+d.Path, d.Counts)); err != nil {
 			return fmt.Errorf("render directory %q as human kv block: %w", d.Path, err)
+		}
+		// Per F33: filter LangUnknown before emitting per-lang rows.
+		if len(d.ByLang) > 0 {
+			langs := sortedKnownLangs(d.ByLang)
+			for _, l := range langs {
+				lc := d.ByLang[l]
+				if err := printer.KV(langKV(string(l), lc)); err != nil {
+					return fmt.Errorf("render lang %q under dir %q: %w", l, d.Path, err)
+				}
+			}
 		}
 	}
 	if err := printer.KV(countsKV("total", total)); err != nil {
@@ -119,4 +135,32 @@ func countsKV(title string, counts counting.Counts) laslig.KV {
 			{Label: "Chars", Value: strconv.FormatInt(counts.Chars, 10)},
 		},
 	}
+}
+
+// langKV builds a per-language KV block showing blank/comment/code line
+// counts plus raw byte/line/word/char totals. Title is "lang: <name>".
+func langKV(name string, lc lang.LangCounts) laslig.KV {
+	return laslig.KV{
+		Title: "lang: " + name,
+		Pairs: []laslig.Field{
+			{Label: "Blank", Value: strconv.Itoa(lc.Lines.Blank)},
+			{Label: "Comment", Value: strconv.Itoa(lc.Lines.Comment)},
+			{Label: "Code", Value: strconv.Itoa(lc.Lines.Code)},
+			{Label: "Bytes", Value: strconv.FormatInt(lc.Counts.Bytes, 10)},
+			{Label: "Lines", Value: strconv.FormatInt(lc.Counts.Lines, 10)},
+		},
+	}
+}
+
+// sortedKnownLangs returns the keys of byLang in ascending string order,
+// excluding lang.LangUnknown (F33 suppression).
+func sortedKnownLangs(byLang map[lang.Language]lang.LangCounts) []lang.Language {
+	out := make([]lang.Language, 0, len(byLang))
+	for l := range byLang {
+		if l != lang.LangUnknown {
+			out = append(out, l)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return string(out[i]) < string(out[j]) })
+	return out
 }

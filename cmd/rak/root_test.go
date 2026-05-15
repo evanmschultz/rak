@@ -619,3 +619,88 @@ func (f *failingOpenFS) Open(name string) (fs.File, error) {
 	}
 	return f.inner.Open(name)
 }
+
+// langCountsJSON mirrors the lang.LangCounts shape for JSON decoding in
+// per-lang rollup tests. Kept local to the test that needs it so any
+// renderer-internal change doesn't ripple to every test.
+type langCountsJSON struct {
+	Lines  lineCountsJSON  `json:"Lines"`
+	Counts counting.Counts `json:"Counts"`
+}
+
+type lineCountsJSON struct {
+	Blank   int `json:"Blank"`
+	Comment int `json:"Comment"`
+	Code    int `json:"Code"`
+}
+
+// treeResultWithLang extends treeResult with per-language data for the
+// per-lang rollup test. Only the "by_lang" field of each directory is added.
+type dirResultWithLang struct {
+	Path   string                    `json:"path"`
+	Counts counting.Counts           `json:"counts"`
+	ByLang map[string]langCountsJSON `json:"by_lang,omitempty"`
+}
+
+type treeResultWithLang struct {
+	Directories []dirResultWithLang `json:"directories"`
+	Total       counting.Counts     `json:"total"`
+	Errors      []string            `json:"errors,omitempty"`
+}
+
+// TestRootCmd_PerLangRollup verifies that walkAndCount accumulates per-language
+// LangCounts into Directory.ByLang and that the JSON renderer surfaces them
+// under by_lang. Uses a.go + b.py in a flat fstest.MapFS so both are detected
+// to known languages (LangGo and LangPython). The by_lang map must contain
+// both "go" and "python" keys.
+func TestRootCmd_PerLangRollup(t *testing.T) {
+	t.Parallel()
+
+	// a.go: one code line, no blank, no comment.
+	// b.py: one code line, no blank, no comment.
+	fsys := fstest.MapFS{
+		"a.go": {Data: []byte("package main\n")},
+		"b.py": {Data: []byte("x = 1\n")},
+	}
+
+	opts := listerOpts(&rootFlags{})
+	source := lister.NewWalkLister(fsys, ".", opts)
+	renderer := render.NewJSONRenderer()
+
+	var out bytes.Buffer
+	if err := runDirectory(context.Background(), &out, source, "", false, nil, renderer); err != nil {
+		t.Fatalf("runDirectory: %v", err)
+	}
+
+	var decoded treeResultWithLang
+	if err := json.Unmarshal(out.Bytes(), &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(%s): %v", out.String(), err)
+	}
+
+	if len(decoded.Directories) != 1 {
+		t.Fatalf("expected 1 directory, got %d", len(decoded.Directories))
+	}
+	dir := decoded.Directories[0]
+	if dir.ByLang == nil {
+		t.Fatalf("expected by_lang to be non-nil in JSON output; got:\n%s", out.String())
+	}
+	if _, ok := dir.ByLang["go"]; !ok {
+		t.Errorf("by_lang missing \"go\" key; got keys: %v", byLangKeys(dir.ByLang))
+	}
+	if _, ok := dir.ByLang["python"]; !ok {
+		t.Errorf("by_lang missing \"python\" key; got keys: %v", byLangKeys(dir.ByLang))
+	}
+	// LangUnknown ("") must not appear (F33).
+	if _, ok := dir.ByLang[""]; ok {
+		t.Errorf("by_lang must not contain LangUnknown key; got keys: %v", byLangKeys(dir.ByLang))
+	}
+}
+
+// byLangKeys returns the string keys of m for error messages.
+func byLangKeys(m map[string]langCountsJSON) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}

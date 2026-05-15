@@ -10,6 +10,7 @@ import (
 	"github.com/evanmschultz/laslig"
 
 	"github.com/evanmschultz/rak/internal/counting"
+	"github.com/evanmschultz/rak/internal/lang"
 )
 
 // testHumanMode is the explicit laslig.Mode used for snapshot determinism.
@@ -441,5 +442,225 @@ func TestTOONRenderer_RenderTree_NoErrors(t *testing.T) {
 	got := buf.String()
 	if strings.Contains(got, "errors") {
 		t.Errorf("RenderTree no-errors case must not emit \"errors\" key; got:\n%s", got)
+	}
+}
+
+// TestTOONRenderer_RenderTree_PerLang verifies that a non-empty ByLang map
+// causes per-language detail to appear in TOON output (F33 compliant — only
+// known languages, LangUnknown suppressed).
+func TestTOONRenderer_RenderTree_PerLang(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := NewTOONRenderer()
+	dirs := []Directory{
+		{
+			Path:   ".",
+			Counts: counting.Counts{Bytes: 26, Lines: 2, Words: 2, Chars: 26},
+			ByLang: map[lang.Language]lang.LangCounts{
+				lang.LangGo: {
+					Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
+					Counts: counting.Counts{Bytes: 13, Lines: 1, Words: 1, Chars: 13},
+				},
+				lang.LangRust: {
+					Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
+					Counts: counting.Counts{Bytes: 13, Lines: 1, Words: 1, Chars: 13},
+				},
+			},
+		},
+	}
+	total := counting.Counts{Bytes: 26, Lines: 2, Words: 2, Chars: 26}
+	if err := r.RenderTree(&buf, dirs, total, nil); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	got := buf.String()
+	// Per-language detail must appear somewhere in the output.
+	if !strings.Contains(got, "go") {
+		t.Errorf("TOON per-lang output missing \"go\"; got:\n%s", got)
+	}
+	if !strings.Contains(got, "rust") {
+		t.Errorf("TOON per-lang output missing \"rust\"; got:\n%s", got)
+	}
+}
+
+// TestTOONRenderer_RenderTree_AllUnknown verifies that when ByLang contains
+// only LangUnknown, the output does NOT contain an "unknown" or "" language
+// key (F33 suppression).
+func TestTOONRenderer_RenderTree_AllUnknown(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := NewTOONRenderer()
+	dirs := []Directory{
+		{
+			Path:   ".",
+			Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
+			ByLang: map[lang.Language]lang.LangCounts{
+				lang.LangUnknown: {
+					Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
+					Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
+				},
+			},
+		},
+	}
+	total := counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12}
+	if err := r.RenderTree(&buf, dirs, total, nil); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	got := buf.String()
+	// "unknown" and "" as language keys must not appear after F33 suppression.
+	if strings.Contains(got, "by_lang") && strings.Contains(got, "unknown") {
+		t.Errorf("TOON all-unknown ByLang should suppress unknown key; got:\n%s", got)
+	}
+	// The by_lang block should be absent entirely when all entries are unknown.
+	if strings.Contains(got, "by_lang") {
+		// Acceptable only if no language keys appear. Verify no language key present.
+		if strings.Contains(got, ": ") {
+			// by_lang is present with content — check it's not unknown
+			if strings.Contains(got, `""`+":") || strings.Contains(got, "unknown:") {
+				t.Errorf("TOON all-unknown: language key for unknown must be suppressed; got:\n%s", got)
+			}
+		}
+	}
+}
+
+// TestJSONRenderer_RenderTree_PerLang verifies that a non-empty ByLang map
+// causes a by_lang field to appear in JSON output with per-language detail
+// (F33 compliant — LangUnknown suppressed via omitempty).
+func TestJSONRenderer_RenderTree_PerLang(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := NewJSONRenderer()
+	dirs := []Directory{
+		{
+			Path:   ".",
+			Counts: counting.Counts{Bytes: 26, Lines: 2, Words: 2, Chars: 26},
+			ByLang: map[lang.Language]lang.LangCounts{
+				lang.LangGo: {
+					Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
+					Counts: counting.Counts{Bytes: 13, Lines: 1, Words: 1, Chars: 13},
+				},
+				lang.LangRust: {
+					Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
+					Counts: counting.Counts{Bytes: 13, Lines: 1, Words: 1, Chars: 13},
+				},
+			},
+		},
+	}
+	total := counting.Counts{Bytes: 26, Lines: 2, Words: 2, Chars: 26}
+	if err := r.RenderTree(&buf, dirs, total, nil); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "by_lang") {
+		t.Errorf("JSON per-lang output missing \"by_lang\"; got:\n%s", got)
+	}
+	if !strings.Contains(got, `"go"`) {
+		t.Errorf("JSON per-lang output missing go key; got:\n%s", got)
+	}
+	if !strings.Contains(got, `"rust"`) {
+		t.Errorf("JSON per-lang output missing rust key; got:\n%s", got)
+	}
+}
+
+// TestJSONRenderer_RenderTree_AllUnknown verifies that when ByLang contains
+// only LangUnknown, the by_lang field is absent from JSON output (F33).
+func TestJSONRenderer_RenderTree_AllUnknown(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := NewJSONRenderer()
+	dirs := []Directory{
+		{
+			Path:   ".",
+			Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
+			ByLang: map[lang.Language]lang.LangCounts{
+				lang.LangUnknown: {
+					Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
+					Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
+				},
+			},
+		},
+	}
+	total := counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12}
+	if err := r.RenderTree(&buf, dirs, total, nil); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	got := buf.String()
+	// by_lang must be absent (omitempty on empty map after LangUnknown filter).
+	if strings.Contains(got, "by_lang") {
+		t.Errorf("JSON all-unknown ByLang should suppress by_lang field entirely; got:\n%s", got)
+	}
+	// Explicit unknown key must not appear.
+	if strings.Contains(got, `""`) {
+		t.Errorf("JSON all-unknown ByLang must not emit empty-string language key; got:\n%s", got)
+	}
+}
+
+// TestHumanRenderer_RenderTree_PerLang verifies that a non-empty ByLang map
+// causes per-language KV rows to appear in human output (F33 compliant).
+func TestHumanRenderer_RenderTree_PerLang(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := newHumanRendererWithMode(testHumanMode)
+	dirs := []Directory{
+		{
+			Path:   ".",
+			Counts: counting.Counts{Bytes: 26, Lines: 2, Words: 2, Chars: 26},
+			ByLang: map[lang.Language]lang.LangCounts{
+				lang.LangGo: {
+					Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
+					Counts: counting.Counts{Bytes: 13, Lines: 1, Words: 1, Chars: 13},
+				},
+				lang.LangPython: {
+					Lines:  lang.LineCounts{Blank: 1, Comment: 0, Code: 0},
+					Counts: counting.Counts{Bytes: 13, Lines: 1, Words: 1, Chars: 13},
+				},
+			},
+		},
+	}
+	total := counting.Counts{Bytes: 26, Lines: 2, Words: 2, Chars: 26}
+	if err := r.RenderTree(&buf, dirs, total, nil); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	got := buf.String()
+	// Both language names must appear somewhere in the per-lang section.
+	if !strings.Contains(got, "go") {
+		t.Errorf("human per-lang output missing \"go\"; got:\n%s", got)
+	}
+	if !strings.Contains(got, "python") {
+		t.Errorf("human per-lang output missing \"python\"; got:\n%s", got)
+	}
+}
+
+// TestHumanRenderer_RenderTree_AllUnknown verifies that when ByLang contains
+// only LangUnknown, no language row appears in the human output (F33).
+func TestHumanRenderer_RenderTree_AllUnknown(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := newHumanRendererWithMode(testHumanMode)
+	dirs := []Directory{
+		{
+			Path:   ".",
+			Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
+			ByLang: map[lang.Language]lang.LangCounts{
+				lang.LangUnknown: {
+					Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
+					Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
+				},
+			},
+		},
+	}
+	total := counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12}
+	if err := r.RenderTree(&buf, dirs, total, nil); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	got := buf.String()
+	// "unknown" must not appear as a language identifier in output after F33.
+	if strings.Contains(strings.ToLower(got), "unknown") {
+		t.Errorf("human all-unknown ByLang must not emit unknown language row; got:\n%s", got)
 	}
 }

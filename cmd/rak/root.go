@@ -233,8 +233,18 @@ func runDirectory(
 // langs is the --lang filter value set. When non-empty, only files whose
 // detected language is in the set are counted; all others (including
 // LangUnknown files) are silently skipped (F29, Decision 24).
+//
+// Per-language line split (Unit 5.3): for each counted file, lang.Split is
+// called on a second open of the file to classify lines as blank/comment/code.
+// This is a two-open-per-file design (Double-IO trade-off, PLAN.md Notes P4)
+// accepted for v0.1.0. Split errors are aggregated into aggErrs but do not
+// prevent the file's byte/line/word/char counts from being included. The
+// per-dir/per-lang LangCounts are accumulated into byDirLang and surfaced via
+// Directory.ByLang. LangUnknown suppression (F33) is the renderer's
+// responsibility; walkAndCount includes LangUnknown in byDirLang.
 func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, langs []string) ([]render.Directory, counting.Counts, []error, error) {
 	byDir := map[string]counting.Counts{}
+	byDirLang := map[string]map[lang.Language]lang.LangCounts{}
 	var total counting.Counts
 	var aggErrs []error
 
@@ -278,9 +288,8 @@ func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, la
 		}
 
 		// Detect language once per file. The value is stored in a
-		// per-iteration local so downstream consumers (5.3's Split call and
-		// the filter gate below) can read it without a second Detect
-		// invocation.
+		// per-iteration local so downstream consumers (Split call and the
+		// filter gate below) can read it without a second Detect invocation.
 		detectedLang := lang.Detect(f)
 
 		// Lang-filter gate (F29, Decision 24): when --lang is set, skip
@@ -294,6 +303,22 @@ func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, la
 			}
 		}
 
+		// Per-language split (Unit 5.3): open the file a second time to
+		// classify its lines as blank/comment/code. Split errors are
+		// aggregated but do not prevent byte/line/word/char counting (P4).
+		var lineCounts lang.LineCounts
+		if rc, openErr := f.Open(); openErr != nil {
+			aggErrs = append(aggErrs, fmt.Errorf("split open %q: %w", f.RelPath, openErr))
+		} else {
+			var splitErr error
+			lineCounts, splitErr = lang.Split(rc, detectedLang)
+			_ = rc.Close()
+			if splitErr != nil {
+				aggErrs = append(aggErrs, fmt.Errorf("split %q: %w", f.RelPath, splitErr))
+				// lineCounts is zero-value; counting continues below.
+			}
+		}
+
 		fileCounts, err := countFile(f)
 		if err != nil {
 			aggErrs = append(aggErrs, err)
@@ -303,11 +328,19 @@ func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, la
 		dir := dirKey(f.RelPath)
 		byDir[dir] = addCounts(byDir[dir], fileCounts)
 		total = addCounts(total, fileCounts)
+
+		// Accumulate per-lang LangCounts for this directory (F30).
+		if byDirLang[dir] == nil {
+			byDirLang[dir] = map[lang.Language]lang.LangCounts{}
+		}
+		lc := byDirLang[dir][detectedLang]
+		lc.Add(lang.LangCounts{Lines: lineCounts, Counts: fileCounts})
+		byDirLang[dir][detectedLang] = lc
 	}
 
 	dirs := make([]render.Directory, 0, len(byDir))
 	for p, c := range byDir {
-		dirs = append(dirs, render.Directory{Path: p, Counts: c})
+		dirs = append(dirs, render.Directory{Path: p, Counts: c, ByLang: byDirLang[p]})
 	}
 	sort.Slice(dirs, func(i, j int) bool { return dirs[i].Path < dirs[j].Path })
 
@@ -368,12 +401,13 @@ func labelDirectories(dirs []render.Directory, rootLabel string) []render.Direct
 	out := make([]render.Directory, len(dirs))
 	for i, d := range dirs {
 		if d.Path == "." {
-			out[i] = render.Directory{Path: rootLabel, Counts: d.Counts}
+			out[i] = render.Directory{Path: rootLabel, Counts: d.Counts, ByLang: d.ByLang}
 			continue
 		}
 		out[i] = render.Directory{
 			Path:   rootLabel + "/" + d.Path,
 			Counts: d.Counts,
+			ByLang: d.ByLang,
 		}
 	}
 	return out

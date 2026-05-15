@@ -11,6 +11,7 @@ import (
 	"io"
 
 	"github.com/evanmschultz/rak/internal/counting"
+	"github.com/evanmschultz/rak/internal/lang"
 )
 
 // Renderer writes counting.Counts values to the supplied io.Writer in one
@@ -57,4 +58,9 @@ type Directory struct {
 	// Counts is the aggregated counting.Counts for every file under this
 	// directory that survived the configured walk filters.
 	Counts counting.Counts
+
+	// ByLang carries per-language counts for this directory. Nil when
+	// language detection did not run. Per F33, the LangUnknown key MUST be
+	// filtered out by all renderer implementations before emission.
+	ByLang map[lang.Language]lang.LangCounts
 }

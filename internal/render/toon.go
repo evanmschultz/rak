@@ -3,6 +3,7 @@ package render
 import (
 	"fmt"
 	"io"
+	"sort"
 
 	"github.com/toon-format/toon-go"
 
@@ -45,16 +46,32 @@ type toonDirectory struct {
 	Chars int64  `toon:"chars"`
 }
 
+// toonLangRow is a single per-language detail row emitted under a directory
+// in the per-lang section of TOON RenderTree output. It carries the language
+// name plus the three-way line split and raw counts for that language bucket.
+// LangUnknown rows are suppressed before construction (F33).
+type toonLangRow struct {
+	Dir     string `toon:"dir"`
+	Lang    string `toon:"lang"`
+	Blank   int    `toon:"blank"`
+	Comment int    `toon:"comment"`
+	Code    int    `toon:"code"`
+	Bytes   int64  `toon:"bytes"`
+	Lines   int64  `toon:"lines"`
+}
+
 // toonTree is the top-level envelope for RenderTree. The directories field is
 // a tabular TOON array; the total field is a nested toonCounts block carrying
 // the grand total (spike-confirmed: toon-go emits struct-in-struct as an
-// indented nested block — F20 nested-total contract satisfied); errors is
-// omitted entirely (via omitempty) when the caller passes a nil or empty errs
-// slice — spike-confirmed: toon-go omitempty drops zero/empty fields from
-// output (C7).
+// indented nested block — F20 nested-total contract satisfied); by_lang is a
+// tabular TOON array of per-directory/per-language rows, omitted when empty
+// (F33 — LangUnknown entries never appear); errors is omitted entirely (via
+// omitempty) when the caller passes a nil or empty errs slice — spike-confirmed:
+// toon-go omitempty drops zero/empty fields from output (C7).
 type toonTree struct {
 	Directories []toonDirectory `toon:"directories"`
 	Total       toonCounts      `toon:"total"`
+	ByLang      []toonLangRow   `toon:"by_lang,omitempty"`
 	Errors      []string        `toon:"errors,omitempty"`
 }
 
@@ -85,9 +102,11 @@ func (toonRenderer) Render(w io.Writer, counts counting.Counts) error {
 // errors as a TOON document to w. The directories slice is emitted as a
 // tabular TOON array (pipe-delimited columns — F20); the grand total is
 // emitted as a nested "total" block (toonCounts — F20 nested-total contract);
-// errors are omitted when the caller passes nil or an empty slice. The emitted
-// directory order exactly matches the caller-supplied dirs slice; sorting is
-// the caller's responsibility.
+// by_lang is emitted as a tabular array of per-directory/per-language rows
+// when any directory carries non-unknown language data (F33); errors are
+// omitted when the caller passes nil or an empty slice. The emitted directory
+// order exactly matches the caller-supplied dirs slice; sorting is the
+// caller's responsibility.
 func (toonRenderer) RenderTree(w io.Writer, dirs []Directory, total counting.Counts, errs []error) error {
 	rows := make([]toonDirectory, 0, len(dirs))
 	for _, d := range dirs {
@@ -99,6 +118,35 @@ func (toonRenderer) RenderTree(w io.Writer, dirs []Directory, total counting.Cou
 			Chars: d.Counts.Chars,
 		})
 	}
+
+	// Build per-lang rows across all directories, sorted by dir then lang
+	// (F33: LangUnknown suppressed). The by_lang field is omitted entirely
+	// via omitempty when the resulting slice is empty.
+	var langRows []toonLangRow
+	for _, d := range dirs {
+		knownLangs := sortedKnownLangs(d.ByLang)
+		for _, l := range knownLangs {
+			lc := d.ByLang[l]
+			langRows = append(langRows, toonLangRow{
+				Dir:     d.Path,
+				Lang:    string(l),
+				Blank:   lc.Lines.Blank,
+				Comment: lc.Lines.Comment,
+				Code:    lc.Lines.Code,
+				Bytes:   lc.Counts.Bytes,
+				Lines:   lc.Counts.Lines,
+			})
+		}
+	}
+
+	// Sort lang rows by dir then lang for deterministic output.
+	sort.Slice(langRows, func(i, j int) bool {
+		if langRows[i].Dir != langRows[j].Dir {
+			return langRows[i].Dir < langRows[j].Dir
+		}
+		return langRows[i].Lang < langRows[j].Lang
+	})
+
 	payload := toonTree{
 		Directories: rows,
 		Total: toonCounts{
@@ -107,6 +155,7 @@ func (toonRenderer) RenderTree(w io.Writer, dirs []Directory, total counting.Cou
 			Words: total.Words,
 			Chars: total.Chars,
 		},
+		ByLang: langRows,
 	}
 	if len(errs) > 0 {
 		msgs := make([]string, 0, len(errs))
