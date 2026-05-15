@@ -12,6 +12,7 @@ import (
 
 	"github.com/evanmschultz/rak/internal/counting"
 	"github.com/evanmschultz/rak/internal/fileset"
+	"github.com/evanmschultz/rak/internal/lang"
 	"github.com/evanmschultz/rak/internal/lister"
 	"github.com/evanmschultz/rak/internal/render"
 )
@@ -250,6 +251,13 @@ func walkAndCount(ctx context.Context, source lister.FileLister, binary bool) ([
 				continue
 			}
 		}
+
+		// Detect language once per file. The value is stored in a
+		// per-iteration local so downstream consumers (5.3's Split call and
+		// 5.4's filter gate) can read it without a second Detect invocation.
+		// Not yet consumed — 5.3 and 5.4 wire in their respective uses.
+		detectedLang := lang.Detect(f)
+		_ = detectedLang // consumed by 5.3 (Split) and 5.4 (--lang filter)
 
 		fileCounts, err := countFile(f)
 		if err != nil {
