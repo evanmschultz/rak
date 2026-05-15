@@ -74,7 +74,7 @@ The plan below is the working shape. Each row is a level_1 container drop. **Eac
 | `DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON` | A | done | DROP_3 | `main/drops/DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON/` |
 | `DROP_5_LANGUAGE_DETECTION_CODE_SPLITS` | A | done | DROP_4 | `main/drops/DROP_5_LANGUAGE_DETECTION_CODE_SPLITS/` |
 | `DROP_6_STDIN_PIPE_BEHAVIOR` | C | done (no-op close — ratified Drop 2/4 behavior) | DROP_5 | `main/drops/DROP_6_STDIN_PIPE_BEHAVIOR/` |
-| `DROP_7_SUMMARY_SORTING` | A | todo | DROP_6 | `main/drops/DROP_7_SUMMARY_SORTING/` |
+| `DROP_7_SUMMARY_SORTING` | A | done | DROP_6 | `main/drops/DROP_7_SUMMARY_SORTING/` |
 | `DROP_8_SAFETY_RAILS` | B | todo | DROP_7 | `main/drops/DROP_8_SAFETY_RAILS/` |
 | `DROP_9_RELEASE_DOCS` | B (mixed; 9.4 + 9.5 are C) | todo | DROP_8 | `main/drops/DROP_9_RELEASE_DOCS/` |
 
@@ -153,7 +153,7 @@ DROP_6 — Stdin pipe behavior  (DONE — closed 2026-05-15 as no-op; ratifies D
   6.3 (already shipped in Drop 2) TOON/JSON/human output in pipe-to-pipe chain.
   • [CUT: 5.1 TTY-hang on no-path-no-stdin and 5.3 --as <lang> — decision 30]
 
-DROP_7 — Summary + sorting  (was DROP_6; tier A)
+DROP_7 — Summary + sorting  (DONE — closed 2026-05-15)
   7.1 internal/summary: Summary struct (totals, per-dir rollup, per-type rollup); migrate
       render.Directory (Drop 3.5 provisional per C8) into summary.Summary.
   7.2 --sort {lines,files,bytes,name} with --sort-asc direction flip; default lines desc
@@ -180,11 +180,11 @@ DROP_9 — Release + docs  (slimmed per decision 30; mixed tier)
 
 ## Immediate Next Step
 
-Drops 0/1/2/3/4/5/6 are done. Drop 6 was a tier-C no-op close (2026-05-15) — no code touched; ratified Drop 2 stdin path + Drop 4 default-TOON + decision-30 cuts (no TTY-hang detection, no `--as <lang>`). The orchestrator's next moves, in order:
+Drops 0/1/2/3/4/5/6/7 are done. Drop 7 closed 2026-05-15 at commit `92d5a07`, CI run 25939674606, Hylla task `task-2ca675dc1803694b`. The orchestrator's next moves, in order:
 
-1. **Stamp Drop 7** (SUMMARY_SORTING — tier A): copy `main/drops/_TEMPLATE/` → `main/drops/DROP_7_SUMMARY_SORTING/`. Set `state: planning`, `Tier: A`. Per the drop tree, Drop 7 adds `internal/summary` (totals + per-dir rollup + per-type rollup formalized) + `--sort {lines,files,bytes,name}` flag with `--sort-asc` direction flip. The provisional `render.Directory` from Drop 3 is migrated to `summary.Summary` here. `tokens` is NOT a sort key (decision 30 cut tokens to v0.2).
-2. **Spawn `go-planning-agent`** with the override preamble. Planner decomposes Drop 7 into atomic units; check for parallel-eligibility per [[feedback-parallelize-aggressively]].
-3. Continue through Phase 2 parallel plan-QA, Phase 3 discuss + cleanup, then Phases 4–7 unit by unit.
+1. **Stamp Drop 8** (SAFETY_RAILS — tier B, slim): copy `main/drops/_TEMPLATE/` → `main/drops/DROP_8_SAFETY_RAILS/`. Set `state: planning`, `Tier: B`. Per the drop tree, Drop 8 is slimmed to just `--max-files` safety rail per decision 30 (parallel walk, spinner, --tracked-only opt-in, --follow all cut). Likely one unit.
+2. **Tier B planning** (per WORKFLOW.md § "Cascade Tiering"): orch writes the Planner section inline (no planner subagent). Tier B build-QA is falsification-only per unit.
+3. Continue through Phase 4 build + Phase 5 falsification-QA + Phases 6–7.
 
 ## Follow-Ups / Outstanding Orchestration Tasks
 

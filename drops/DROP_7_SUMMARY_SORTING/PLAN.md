@@ -1,6 +1,6 @@
 # DROP_7 — SUMMARY_SORTING
 
-**State:** building
+**State:** done
 **Tier:** A
 **Blocked by:** DROP_6
 **Paths (expected):** `main/internal/summary/` (new package — `Summary` struct + sort functions + tests), `main/internal/render/render.go` (migrate provisional `render.Directory` to `summary.Summary` or have render consume `summary.Summary` directly), `main/internal/render/{human,json,toon}.go` (update consumers), `main/internal/render/render_test.go` (extend), `main/cmd/rak/root.go` (add `--sort` and `--sort-asc` flags; apply sort to the directories slice before rendering), `main/cmd/rak/root_test.go` (sort behavior tests)
@@ -8,7 +8,7 @@
 **PLAN.md ref:** main/PLAN.md → `DROP_7_SUMMARY_SORTING` row
 **Workflow:** main/drops/WORKFLOW.md
 **Started:** 2026-05-15
-**Closed:** —
+**Closed:** 2026-05-15 (CI run 25939674606 green; Hylla ingest task task-2ca675dc1803694b at commit 92d5a07)
 
 ## Scope
 
