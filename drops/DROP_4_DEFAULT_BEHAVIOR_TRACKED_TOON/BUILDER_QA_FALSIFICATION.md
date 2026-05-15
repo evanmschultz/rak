@@ -327,3 +327,49 @@ Unit 4.5's `toon.go` (129 LOC) + `render_test.go` append (89 LOC) ship a working
 ## Hylla Feedback
 
 None — Hylla answered everything needed. Unit 4.5 evidence came from `git show HEAD --stat` + `git diff HEAD~1 -- internal/render/`, `Read` of `toon.go` / `render.go` / `render_test.go` / `BUILDER_WORKLOG.md` / `PLAN.md`, two Context7 queries against `/toon-format/toon-go` (nested-struct support + delimiter API surface), and one `mage ci` re-run. No Hylla queries were issued — `toon.go` is a new file added in HEAD `39cb765`, so it is stale in Hylla until drop-end reingest; `render.go` and `render_test.go` were touched at HEAD~1's boundary (Drop 2/3) and the relevant deltas at HEAD are pure additions; `git diff` is the authoritative source for "what changed in this unit" and Context7 is the authoritative source for external library semantics that the repo itself cannot prove.
+
+## Unit 4.5 — Round 2
+
+- **Reviewer:** go-qa-falsification-agent
+- **Round:** 2 (attack scope: revise only — F1 nested-struct revert + F2 assertion tighten)
+- **Diffed vs:** `git diff HEAD~1 -- internal/render/` (commit `22883b6` "refactor(render): nest total back into toon block, tighten test")
+- **Verdict:** **PASS** — zero CONFIRMED counterexamples. One minor textual remark on the F2 tightening shape (R1 of this Round).
+
+### Files inspected
+
+- `internal/render/toon.go` (full Read; 130 LOC) — confirmed `toonTree` now has `Directories | Total toonCounts | Errors` only.
+- `internal/render/render_test.go` (full Read, 446 LOC) — confirmed `TestTOONRenderer_RenderTree` asserts `[]string{"directories", ".|", "sub", "total"}` (line 401); the four prior TOON tests + all 13 humanRenderer/jsonRenderer tests are byte-identical to Round 1 / HEAD~1 (zero touched).
+- `internal/render/render.go` (full Read, 61 LOC) — F25 pin: `git diff HEAD~1 -- internal/render/render.go` returns empty (verified).
+- `cmd/rak/root.go` (full Read) — consumes only `render.Renderer` interface + `render.Directory` struct; no TOON-specific field consumers exist, so no risk of consumer breakage from the flat→nested revert.
+- `BUILDER_WORKLOG.md` Round 2 entry (lines 297–377) — spike code, captured outputs, decision rationale.
+
+### Attack table
+
+| # | Attack | Verdict | Evidence |
+|---|---|---|---|
+| **R1 — F1 spike legitimacy** (does toon-go actually emit nested struct as labelled block?) | **REFUTED.** The test `TestTOONRenderer_RenderTree` now asserts `strings.Contains(got, "total")` as a substring. `mage ci` ran GREEN with this test passing — empirical proof that the actual TOON output produced by `RenderTree` against the test fixture contains the literal substring `"total"`. If toon-go did NOT emit nested struct as a `total:`-labelled block, the substring would not appear and the test would fail. Worklog spike output `top:\n  a: 1\n  b: 2` is consistent with the observed test pass. Builder's spike claim is empirically validated by the test gate itself. |
+| **R2 — Revert completeness** (any leftover `total_bytes`/`TotalBytes` etc. references anywhere?) | **REFUTED.** `toon.go` line 55–59: `toonTree` struct has exactly three fields (`Directories`, `Total toonCounts`, `Errors`). No flat `Total*` fields anywhere in the struct or `RenderTree` payload (lines 102–110: `Total: toonCounts{Bytes:..., Lines:..., Words:..., Chars:...}`). `render_test.go` reads no flat fields. `cmd/rak/root.go` consumes only the `Renderer` interface and `Directory` struct — no TOON internal types are reachable from cmd/. Hylla content keyword search for `TotalBytes|TotalLines|TotalWords|TotalChars|total_bytes` against `rak@main` returned zero results. Revert is clean. |
+| **R3 — F2 `".|"` adequacy** (does it pin the `.` row, or could it match incidentally?) | **REFUTED.** Walking actual TOON output (from worklog spike + structural reasoning): header line `directories[2|]{path|bytes|lines|words|chars}:` contains `[2|` and `{path|` and `|chars}` but no `.|` substring. Data row `.|5|1|1|5` is the unique source of `".|"`. Nested `total:` block (`bytes: 8`, `lines: 2`, etc.) emits integer values, no decimals, so no `.|` collision risk there. Fixture `Path` values are `"."` and `"sub"` — no `.` adjacent to `|` in source data. `".|"` uniquely fingerprints the `.` directory row's first column. Tightening is genuine. |
+| **R4 — No regression in `_Render`, `_WithErrors`, `_NoErrors`** | **REFUTED.** `mage ci` GREEN: `ok internal/render` cached. `git diff HEAD~1 -- internal/render/render_test.go` shows only the `TestTOONRenderer_RenderTree` body edit (lines 378–406 region) — the doc comment expansion + the assertion-list line change. `TestTOONRenderer_Render`, `_WithErrors`, `_NoErrors` test bodies untouched. |
+| **R5 — `mage ci` actually green** | **REFUTED.** Re-ran `mage ci` from `main/` at HEAD `22883b6`: output `0 issues`, all six packages green (`cmd/rak`, `internal/counting`, `internal/fileset`, `internal/ignore`, `internal/lister`, `internal/render` — all cached or pass). |
+| **R6 — F25 (`render.go` untouched)** | **REFUTED.** `git diff HEAD~1 -- internal/render/render.go` returned empty output. Byte-identical to HEAD~1. F25 invariant honored. |
+
+### Counterexamples
+
+None — no attack produced a concrete failure reproducible against HEAD `22883b6`. The Round 1 F1 process finding is resolved by the spike-confirmed nested-struct support + revert. The Round 1 F2 soft finding is resolved by the assertion tightening.
+
+### Findings surface (Round 2)
+
+- **R2-F1 (LOW, textual) — Anchor asymmetry on `".|"`.** Round 1's F2 suggested `"|.|"` or `"\n.|"` (anchored on BOTH sides — left by `\n`/`|`, right by `|`). Round 2 implemented `".|"` (anchored only on the right by `|`). The chosen anchor is strictly stronger than the original `"."` and is sufficient on the current fixture (no fixture path contains `.` immediately before `|` other than the `.` row's first column). However, if a future test added a fixture path like `"foo.bar"` rendered in a tabular row, `bar` would be followed by `|` and the assertion would still pass spuriously on `bar.|` — wait, that would be `bar.|`, which contains `.|` literally too. So strictly speaking, the assertion still permits a "path ending in `.`" to satisfy it. Not a counterexample on the current fixture (which contains only `"."` and `"sub"`), but the Round 1 F2 recommendation of left-anchoring (`"\n.|"` — newline-then-dot-then-pipe) would have been one character stronger. Not Round-2-blocking; assertion is non-vacuous and pins the intended behavior on the actual test fixture. Future tightening only if the fixture grows paths that end in `.`.
+
+### Unknowns
+
+None added in Round 2. The Round 1 unknowns (U1 nested-struct spike, U3 pipe-in-value-in-tabular-row, U4 token-efficiency) are either resolved (U1: spike-confirmed in Round 2) or remain as future-drop concerns unaffected by Round 2's narrow revise scope.
+
+### Summary
+
+Round 2 revise is **clean for Phase 5 close**. The two Round 1 process/soft findings (F1 nested-struct deviation, F2 vacuous assertion) are resolved by the revise: (a) nested-struct support empirically confirmed by spike + the now-passing `"total"` substring assertion + a `mage ci` green run; (b) `"."` tightened to `".|"`, which uniquely pins the `.` row on the current fixture. All six Round-2 attacks REFUTED. One minor textual remark (R2-F1) noting that the Round 1 F2 recommendation called for left-side anchoring too (`"\n.|"`); the implemented right-only anchor (`".|"`) is sufficient on this fixture but slightly weaker than the original suggestion — not blocking. F25 pin honored (`render.go` byte-identical). No regressions in sibling renderer tests. `mage ci` GREEN.
+
+## Hylla Feedback (Round 2)
+
+None — Hylla answered everything needed. Round 2 evidence came from `git diff HEAD~1 -- internal/render/`, `git show HEAD --stat`, `Read` of the four render-package source files + `BUILDER_WORKLOG.md` Round 2 section + `cmd/rak/root.go` (consumer check), one `mage ci` re-run, and one `hylla_search_keyword` content search for stale flat-field references (returned empty as expected — `toon.go` is stale in Hylla until drop-end reingest, but the empty result is consistent with the file-read evidence). No Hylla miss to report; the keyword search served as a confirmatory cross-check, not as a primary evidence source.

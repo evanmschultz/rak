@@ -332,3 +332,36 @@ PASS-with-findings. All seven acceptance bullets verified pass. Two low-severity
 ### Hylla Feedback
 
 None — Hylla answered everything needed. The render package was committed before Hylla's last ingest (last-ingest is older than today's render diff), so the new `toon.go` is post-ingest territory — Hylla would have been stale for it. Diff (`git diff HEAD~1`) was the correct evidence source for the new file. Context7 covered the external toon-go API surface (struct tags, `WithDocumentDelimiter`, `WithArrayDelimiter`, `DelimiterPipe`, nested map example). `Read` covered counting.Counts field types and render.go contents directly. Zero Hylla query attempted, zero miss.
+
+## Unit 4.5 — Round 2
+
+- **Reviewer:** go-qa-proof-agent
+- **Verdict:** PASS
+- **HEAD:** `22883b6 refactor(render): nest total back into toon block, tighten test`
+- **Diff scope:** `internal/render/toon.go` (+18 / -17), `internal/render/render_test.go` (+7 / -2), worklog + drop PLAN.md state flip. `internal/render/render.go` diff is empty (F25 preserved).
+
+### Acceptance checks (Round 2 appendix, 7 of 7)
+
+1. **Spike documented in worklog.** `BUILDER_WORKLOG.md` lines 305-356 contain `### Spike: toon-go nested struct support` with the full `TestTOONSpike_NestedStruct` source (`Outer{Top: Inner{A:1, B:2}}` marshaled with `DelimiterPipe`) and the captured `top:\n  a: 1\n  b: 2` output. A second spike (`TestTOONSpike_Shape`) at lines 332-352 documents the pre-revert flat shape vs the post-revert nested shape. Both spikes were RED-then-deleted, not committed.
+2. **`toonTree` reverted to nested.** `git diff HEAD~1 -- internal/render/toon.go` removes the four flat `TotalBytes/TotalLines/TotalWords/TotalChars int64` fields (with `toon:"total_bytes"` etc. tags) and replaces them with a single `Total toonCounts \`toon:"total"\`` field. `toon.go:55-59` now reads `Directories []toonDirectory`, `Total toonCounts`, `Errors []string \`toon:"errors,omitempty"\``.
+3. **Existing `toonCounts` reused.** `toon.go:30-35` defines `toonCounts` (`Bytes/Lines/Words/Chars int64`) — unchanged from Round 1. The new `Total` field at line 57 binds to that same type. No new struct introduced; the diff shows no `+type` definitions, only the four-line replacement inside `toonTree`.
+4. **`RenderTree` payload updated.** `toon.go:102-110` constructs `toonTree{Directories: rows, Total: toonCounts{Bytes: total.Bytes, Lines: total.Lines, Words: total.Words, Chars: total.Chars}}`, replacing the previous flat scalar assignments. Field-name mapping (`counting.Counts.Bytes` → `toonCounts.Bytes`, etc.) is faithful.
+5. **F2 vacuous assertion tightened.** `render_test.go:401` assertion list is now `[]string{"directories", ".|", "sub", "total"}` — replacing the Round 1 list `{"directories", ".", "sub"}`. The doc comment at lines 380-386 explains the anchor rationale: `".|"` pins `.` as the first column of a pipe-delimited tabular row (defeats the Round 1 "any incidental dot" critique), and `"total"` verifies the nested grand-total block exists (exercises the F1 revert end-to-end).
+6. **`mage ci` green (re-run by reviewer).** Output: `0 issues.` followed by `ok` for all 6 packages (`cmd/rak`, `internal/counting`, `internal/fileset`, `internal/ignore`, `internal/lister`, `internal/render`), all cached. No lint, no test failure.
+7. **No regressions.** `render_test.go` diff is +7/-2 — the only change is the assertion-list tightening + doc-comment expansion inside `TestTOONRenderer_RenderTree`. `TestTOONRenderer_Render`, `TestTOONRenderer_RenderTree_WithErrors`, and `TestTOONRenderer_RenderTree_NoErrors` are unmodified. The cached-green `internal/render` confirms all four TOON tests pass post-revert. F25 preserved (`render.go` diff empty).
+
+### Findings
+
+None.
+
+### Missing evidence
+
+None. Round 1's M1 (nested-struct spike absent) is resolved by Round 2's `TestTOONSpike_NestedStruct` documented in the worklog.
+
+### Summary
+
+PASS — all 7 acceptance bullets verified, mage ci green, no regressions, F25 preserved. Round 1's F1 (premature flatten) and F2 (vacuous assertion) are both closed by code-level evidence in this commit.
+
+### Hylla Feedback
+
+N/A — Round 2 review touched only files modified in HEAD (`internal/render/toon.go`, `internal/render/render_test.go`) which are post-ingest territory; Hylla would be stale for them. Evidence gathered via `git diff HEAD~1`, `Read` of source files, and `mage ci` re-run. Zero Hylla query attempted, zero miss.
