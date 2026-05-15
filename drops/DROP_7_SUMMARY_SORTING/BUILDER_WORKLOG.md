@@ -2,6 +2,23 @@
 
 Append a `## Unit N.M — Round K` section per build attempt. See `main/drops/WORKFLOW.md` § "Phase 4 — Build (per unit)" for what each section should contain.
 
+## Unit 7.3 — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-15
+- **Files touched:**
+  - `cmd/rak/root.go` — added `sort string` + `sortAsc bool` to `rootFlags`; added `validSortKeys` package-level map; added `PersistentPreRunE` validator with canonical F41 error text; registered `--sort` / `--sort-asc` flags in `newRootCmd`; updated `runDirectory` signature with `sortKey string, sortAsc bool` params; added `summary.SortDirs(labeled, summary.SortKey(sortKey), sortAsc)` call after `labelDirectories`, before `RenderTree` (Decision 3.3, F39); removed interim `sort.Slice` from `walkAndCount`; removed `"sort"` stdlib import (no longer used).
+  - `cmd/rak/root_test.go` — updated `runTreeFS` helper to pass sort params (defaulting `"lines"` when unset); updated two direct `runDirectory` calls (`TestRootCmd_PerLangRollup`, `TestRootCmd_FilesField_SurvivesLabelDirectories`) to pass new params; added 9 new sort tests: `TestRootCmd_Sort_Default_LinesDesc`, `TestRootCmd_Sort_Lines_AscFlipped`, `TestRootCmd_Sort_Files_Default`, `TestRootCmd_Sort_Files_AscFlipped`, `TestRootCmd_Sort_Bytes_Default`, `TestRootCmd_Sort_Bytes_AscFlipped`, `TestRootCmd_Sort_Path_Default`, `TestRootCmd_Sort_Path_AscFlipped`, `TestRootCmd_SortTokens_Errors`, `TestRootCmd_SortFiles_NonDegenerate` (F44 end-to-end).
+- **Mage targets run:** `mage build` (pass), `mage format` (reformatted test file), `mage ci` (pass — gofumpt clean, 0 lint issues, test -race green, all 8 packages)
+- **New test count:** 10 new tests (9 sort ordering + 1 F44 end-to-end)
+- **Notes:**
+  - `PersistentPreRunE` used over `RunE` prefix-check: cleaner cobra pattern; fires before `RunE` for all subcommands (root-only in v0.1.0 so no risk of over-firing).
+  - `validSortKeys` map approach over switch: O(1) lookup, extensible at Drop 7.x if keys grow, avoids duplicating the valid-key list.
+  - `runDirectory` gains `sortKey string, sortAsc bool` params (not passed through `flags *rootFlags`) to keep the function's dependency surface minimal and test-friendly — tests can pass explicit sort params without constructing a full `rootFlags`.
+  - `runTreeFS` default-sort guard (`if sortKey == "" { sortKey = "lines" }`) preserves all prior tests that pass `&rootFlags{}` without setting sort — they receive `lines desc`, which is the intended default and matches prior lexical-sort behavior for single-directory fixtures.
+  - F44 test (`TestRootCmd_SortFiles_NonDegenerate`) uses `runDirectory` directly with `rootLabel="myroot"` to exercise `labelDirectories` path; confirms sub (3 files) sorts before root (2 files) under `files desc` default, and that JSON carries non-zero `files` values for both dirs.
+  - Interim `sort.Slice` in `walkAndCount` removed as planned (Decision 3.3 / Warning in PLAN.md). `walkAndCount` now returns an unsorted slice; `runDirectory` calls `SortDirs` on the labeled slice.
+
 ## Unit 7.2 — Round 1
 
 - **Builder:** go-builder-agent

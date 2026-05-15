@@ -202,8 +202,13 @@ func runTreeFS(t *testing.T, fsys fs.FS, flags *rootFlags) (treeResult, []byte) 
 
 	var out bytes.Buffer
 	// rootLabel = "" keeps the walker's io/fs "." convention so assertions
-	// compare against the raw relative paths.
-	if err := runDirectory(context.Background(), &out, source, "", flags.binary, flags.langs, renderer); err != nil {
+	// compare against the raw relative paths. Sort defaults to "lines" desc when
+	// not set by the test so existing assertions are unaffected.
+	sortKey := flags.sort
+	if sortKey == "" {
+		sortKey = "lines"
+	}
+	if err := runDirectory(context.Background(), &out, source, "", flags.binary, flags.langs, sortKey, flags.sortAsc, renderer); err != nil {
 		t.Fatalf("runDirectory: %v", err)
 	}
 	raw := out.Bytes()
@@ -668,7 +673,7 @@ func TestRootCmd_PerLangRollup(t *testing.T) {
 	renderer := render.NewJSONRenderer()
 
 	var out bytes.Buffer
-	if err := runDirectory(context.Background(), &out, source, "", false, nil, renderer); err != nil {
+	if err := runDirectory(context.Background(), &out, source, "", false, nil, "lines", false, renderer); err != nil {
 		t.Fatalf("runDirectory: %v", err)
 	}
 
@@ -705,6 +710,235 @@ func byLangKeys(m map[string]langCountsJSON) []string {
 	return keys
 }
 
+// sortTestFS is a fixed MapFS with two directories: root (2 files, 10 lines
+// total) and sub (3 files, 30 lines total). Used by the sort tests to verify
+// ordering across all four sort keys and both directions.
+//
+// Root files: a.go (5 lines / 5 bytes each → 50 bytes), b.go (5 lines /
+// 5 bytes). Sub files: c.go (10 lines), d.go (10 lines), e.go (10 lines).
+// Line counts per dir: root=10, sub=30. File counts: root=2, sub=3.
+// Byte counts: root=50, sub=150.
+var sortTestFS = fstest.MapFS{
+	// Root: 2 files, 10 lines each-file→5, 50 bytes.
+	"a.go": {Data: []byte("// a\n// a\n// a\n// a\n// a\n")}, // 5 lines, 25 bytes
+	"b.go": {Data: []byte("// b\n// b\n// b\n// b\n// b\n")}, // 5 lines, 25 bytes
+	// Sub: 3 files, 10 lines, 150 bytes.
+	"sub/c.go": {Data: []byte("// c\n// c\n// c\n// c\n// c\n// c\n// c\n// c\n// c\n// c\n")}, // 10 lines, 50 bytes
+	"sub/d.go": {Data: []byte("// d\n// d\n// d\n// d\n// d\n// d\n// d\n// d\n// d\n// d\n")}, // 10 lines, 50 bytes
+	"sub/e.go": {Data: []byte("// e\n// e\n// e\n// e\n// e\n// e\n// e\n// e\n// e\n// e\n")}, // 10 lines, 50 bytes
+}
+
+// TestRootCmd_Sort_Default_LinesDesc verifies that without any sort flags the
+// directories are ordered by lines descending (sub=30 lines before root=10
+// lines).
+func TestRootCmd_Sort_Default_LinesDesc(t *testing.T) {
+	t.Parallel()
+
+	res, _ := runTreeFS(t, sortTestFS, &rootFlags{})
+	if len(res.Directories) != 2 {
+		t.Fatalf("expected 2 directories, got %d: %v", len(res.Directories), res.paths())
+	}
+	// Default: lines desc → sub (30) before root (10).
+	if res.Directories[0].Path != "sub" {
+		t.Errorf("lines desc: expected sub first (more lines), got %q", res.Directories[0].Path)
+	}
+}
+
+// TestRootCmd_Sort_Lines_AscFlipped verifies that --sort lines --sort-asc
+// produces lines ascending (root=10 lines before sub=30 lines).
+func TestRootCmd_Sort_Lines_AscFlipped(t *testing.T) {
+	t.Parallel()
+
+	res, _ := runTreeFS(t, sortTestFS, &rootFlags{sort: "lines", sortAsc: true})
+	if len(res.Directories) != 2 {
+		t.Fatalf("expected 2 directories, got %d", len(res.Directories))
+	}
+	// Lines asc → root (10) before sub (30).
+	if res.Directories[0].Path != "." {
+		t.Errorf("lines asc: expected . first (fewer lines), got %q", res.Directories[0].Path)
+	}
+}
+
+// TestRootCmd_Sort_Files_Default verifies that --sort files (no --sort-asc)
+// produces files descending (sub=3 files before root=2 files).
+func TestRootCmd_Sort_Files_Default(t *testing.T) {
+	t.Parallel()
+
+	res, _ := runTreeFS(t, sortTestFS, &rootFlags{sort: "files"})
+	if len(res.Directories) != 2 {
+		t.Fatalf("expected 2 directories, got %d", len(res.Directories))
+	}
+	// Files desc → sub (3) before root (2).
+	if res.Directories[0].Path != "sub" {
+		t.Errorf("files desc: expected sub first (more files), got %q", res.Directories[0].Path)
+	}
+}
+
+// TestRootCmd_Sort_Files_AscFlipped verifies that --sort files --sort-asc
+// produces files ascending (root=2 files before sub=3 files).
+func TestRootCmd_Sort_Files_AscFlipped(t *testing.T) {
+	t.Parallel()
+
+	res, _ := runTreeFS(t, sortTestFS, &rootFlags{sort: "files", sortAsc: true})
+	if len(res.Directories) != 2 {
+		t.Fatalf("expected 2 directories, got %d", len(res.Directories))
+	}
+	// Files asc → root (2) before sub (3).
+	if res.Directories[0].Path != "." {
+		t.Errorf("files asc: expected . first (fewer files), got %q", res.Directories[0].Path)
+	}
+}
+
+// TestRootCmd_Sort_Bytes_Default verifies that --sort bytes (no --sort-asc)
+// produces bytes descending (sub=150 bytes before root=50 bytes).
+func TestRootCmd_Sort_Bytes_Default(t *testing.T) {
+	t.Parallel()
+
+	res, _ := runTreeFS(t, sortTestFS, &rootFlags{sort: "bytes"})
+	if len(res.Directories) != 2 {
+		t.Fatalf("expected 2 directories, got %d", len(res.Directories))
+	}
+	// Bytes desc → sub (150) before root (50).
+	if res.Directories[0].Path != "sub" {
+		t.Errorf("bytes desc: expected sub first (more bytes), got %q", res.Directories[0].Path)
+	}
+}
+
+// TestRootCmd_Sort_Bytes_AscFlipped verifies that --sort bytes --sort-asc
+// produces bytes ascending (root=50 before sub=150).
+func TestRootCmd_Sort_Bytes_AscFlipped(t *testing.T) {
+	t.Parallel()
+
+	res, _ := runTreeFS(t, sortTestFS, &rootFlags{sort: "bytes", sortAsc: true})
+	if len(res.Directories) != 2 {
+		t.Fatalf("expected 2 directories, got %d", len(res.Directories))
+	}
+	// Bytes asc → root (50) before sub (150).
+	if res.Directories[0].Path != "." {
+		t.Errorf("bytes asc: expected . first (fewer bytes), got %q", res.Directories[0].Path)
+	}
+}
+
+// TestRootCmd_Sort_Path_Default verifies that --sort path (no --sort-asc)
+// produces paths ascending (A→Z; "." before "sub" lexicographically).
+func TestRootCmd_Sort_Path_Default(t *testing.T) {
+	t.Parallel()
+
+	res, _ := runTreeFS(t, sortTestFS, &rootFlags{sort: "path"})
+	if len(res.Directories) != 2 {
+		t.Fatalf("expected 2 directories, got %d", len(res.Directories))
+	}
+	// Path asc (key-specific default) → "." before "sub".
+	if res.Directories[0].Path != "." {
+		t.Errorf("path asc: expected . first, got %q", res.Directories[0].Path)
+	}
+}
+
+// TestRootCmd_Sort_Path_AscFlipped verifies that --sort path --sort-asc
+// produces paths descending (flipped from key default; "sub" before ".").
+func TestRootCmd_Sort_Path_AscFlipped(t *testing.T) {
+	t.Parallel()
+
+	res, _ := runTreeFS(t, sortTestFS, &rootFlags{sort: "path", sortAsc: true})
+	if len(res.Directories) != 2 {
+		t.Fatalf("expected 2 directories, got %d", len(res.Directories))
+	}
+	// Path flipped → desc → "sub" before ".".
+	if res.Directories[0].Path != "sub" {
+		t.Errorf("path desc (flipped): expected sub first, got %q", res.Directories[0].Path)
+	}
+}
+
+// TestRootCmd_SortTokens_Errors verifies that --sort tokens returns the
+// canonical error with exact text per F41 / Decision 3.4.
+func TestRootCmd_SortTokens_Errors(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	// Pass a path arg so RunE is reached. Use an empty MapFS routed via
+	// runTreeFS path — but for this test we drive cobra directly and want
+	// PersistentPreRunE to fire. We don't need a real path because the
+	// validation fires before any walk.
+	cmd.SetArgs([]string{"--sort", "tokens", "."})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected error for --sort tokens, got nil")
+	}
+	want := `"tokens" is not a valid sort key; valid keys: lines, files, bytes, path`
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error should contain canonical message %q; got: %v", want, err)
+	}
+}
+
+// TestRootCmd_SortFiles_NonDegenerate is the F44 end-to-end test. It
+// constructs a fixture with two directories of differing file counts —
+// root (2 files) and sub (3 files) — runs with --sort files, and asserts
+// that:
+//  1. The per-dir ordering reflects Files counts: sub (3) before root (2)
+//     under the default descending direction.
+//  2. The JSON output carries non-zero "files" values for each directory.
+//
+// This test ONLY passes if Files survives labelDirectories reconstruction
+// and SortDirs uses the actual Files field.
+func TestRootCmd_SortFiles_NonDegenerate(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{
+		"a.go":     {Data: []byte("package main\n")},
+		"b.go":     {Data: []byte("package main\n")},
+		"sub/c.go": {Data: []byte("package sub\n")},
+		"sub/d.go": {Data: []byte("package sub\n")},
+		"sub/e.go": {Data: []byte("package sub\n")},
+	}
+
+	// Use runDirectory directly so we can use a non-empty rootLabel (to
+	// exercise labelDirectories) and control the sort key.
+	opts := listerOpts(&rootFlags{})
+	src := lister.NewWalkLister(fsys, ".", opts)
+
+	var out bytes.Buffer
+	if err := runDirectory(context.Background(), &out, src, "myroot", false, nil, "files", false, render.NewJSONRenderer()); err != nil {
+		t.Fatalf("runDirectory: %v", err)
+	}
+
+	// Decode the JSON envelope to inspect ordering and "files" values.
+	var raw struct {
+		Directories []map[string]interface{} `json:"directories"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &raw); err != nil {
+		t.Fatalf("json.Unmarshal: %v (body: %s)", err, out.String())
+	}
+
+	if len(raw.Directories) != 2 {
+		t.Fatalf("expected 2 directories, got %d", len(raw.Directories))
+	}
+
+	// First directory in output should be "myroot/sub" (3 files > 2, desc).
+	firstPath, _ := raw.Directories[0]["path"].(string)
+	if firstPath != "myroot/sub" {
+		t.Errorf("--sort files desc: expected myroot/sub first (3 files), got %q", firstPath)
+	}
+
+	// Build path→files map to assert non-zero values.
+	filesByPath := map[string]int64{}
+	for _, d := range raw.Directories {
+		p, _ := d["path"].(string)
+		f, _ := d["files"].(float64)
+		filesByPath[p] = int64(f)
+	}
+	if got := filesByPath["myroot"]; got != 2 {
+		t.Errorf("myroot: expected files=2 in JSON, got %d (F44: Files must survive labelDirectories)", got)
+	}
+	if got := filesByPath["myroot/sub"]; got != 3 {
+		t.Errorf("myroot/sub: expected files=3 in JSON, got %d (F44: Files must survive labelDirectories)", got)
+	}
+}
+
 // TestRootCmd_FilesField_SurvivesLabelDirectories verifies that the Files
 // field on summary.Directory is correctly populated by walkAndCount and
 // survives the labelDirectories reconstruction (F44). A fixture with multiple
@@ -730,7 +964,7 @@ func TestRootCmd_FilesField_SurvivesLabelDirectories(t *testing.T) {
 
 	var out bytes.Buffer
 	// Use a non-empty rootLabel to exercise labelDirectories reconstruction.
-	if err := runDirectory(context.Background(), &out, source, "myroot", false, nil, render.NewJSONRenderer()); err != nil {
+	if err := runDirectory(context.Background(), &out, source, "myroot", false, nil, "lines", false, render.NewJSONRenderer()); err != nil {
 		t.Fatalf("runDirectory: %v", err)
 	}
 

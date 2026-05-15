@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"path"
-	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -34,6 +33,17 @@ type rootFlags struct {
 	includes    []string
 	excludes    []string
 	langs       []string
+	sort        string // sort key: lines, files, bytes, path (default: lines)
+	sortAsc     bool   // flip sort direction from the key-specific default
+}
+
+// validSortKeys is the set of accepted --sort values in v0.1.0. "tokens" is
+// intentionally absent (Decision 30 / F41 — deferred to v0.2).
+var validSortKeys = map[string]struct{}{
+	"lines": {},
+	"files": {},
+	"bytes": {},
+	"path":  {},
 }
 
 // newRootCmd builds the root Cobra command for rak. The factory returns a
@@ -52,6 +62,12 @@ func newRootCmd() *cobra.Command {
 			"for the stream. With a single path argument rak walks the " +
 			"directory and reports per-directory rollups plus a grand total.",
 		Args: cobra.MaximumNArgs(1),
+		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+			if _, ok := validSortKeys[flags.sort]; !ok {
+				return fmt.Errorf("%q is not a valid sort key; valid keys: lines, files, bytes, path", flags.sort)
+			}
+			return nil
+		},
 		RunE: func(c *cobra.Command, args []string) error {
 			return runRoot(c, args, flags)
 		},
@@ -119,6 +135,18 @@ func newRootCmd() *cobra.Command {
 		nil,
 		"filter counted files to comma-separated language names (e.g. go,rust); default: count all",
 	)
+	cmd.Flags().StringVar(
+		&flags.sort,
+		"sort",
+		"lines",
+		"sort directories by key: lines, files, bytes, path (default: lines; numeric keys default descending, path defaults ascending)",
+	)
+	cmd.Flags().BoolVar(
+		&flags.sortAsc,
+		"sort-asc",
+		false,
+		"flip sort direction from its key-specific default",
+	)
 
 	return cmd
 }
@@ -170,7 +198,7 @@ func runRoot(c *cobra.Command, args []string, flags *rootFlags) error {
 			// wrapping needed here (F19 contract).
 			return err
 		}
-		return runDirectory(ctx, c.OutOrStdout(), source, args[0], flags.binary, flags.langs, renderer)
+		return runDirectory(ctx, c.OutOrStdout(), source, args[0], flags.binary, flags.langs, flags.sort, flags.sortAsc, renderer)
 	}
 
 	counts, err := counting.Count(c.InOrStdin())
@@ -190,7 +218,10 @@ func runRoot(c *cobra.Command, args []string, flags *rootFlags) error {
 // production this is args[0], in tests it is whatever label makes the
 // assertion readable. binary controls whether binary files are counted or
 // skipped (F23). langs is the raw --lang filter values from rootFlags; an
-// empty slice means no filtering (count all languages).
+// empty slice means no filtering (count all languages). sortKey is the raw
+// --sort flag value (e.g. "lines", "files", "bytes", "path"); sortAsc is the
+// raw --sort-asc flag value. The call order is (F39 / Decision 3.3):
+// labelDirectories → SortDirs → RenderTree.
 func runDirectory(
 	ctx context.Context,
 	w io.Writer,
@@ -198,6 +229,8 @@ func runDirectory(
 	rootLabel string,
 	binary bool,
 	langs []string,
+	sortKey string,
+	sortAsc bool,
 	renderer render.Renderer,
 ) error {
 	dirs, total, aggErrs, err := walkAndCount(ctx, source, binary, langs)
@@ -211,6 +244,10 @@ func runDirectory(
 	// "dir: ."). Empty rootLabel keeps the io/fs convention intact for
 	// callers (tests) that prefer it.
 	labeled := labelDirectories(dirs, rootLabel)
+
+	// Apply user-controlled sort AFTER labelDirectories so SortDirs
+	// operates on the final user-facing paths (Decision 3.3, F39).
+	summary.SortDirs(labeled, summary.SortKey(sortKey), sortAsc)
 
 	if err := renderer.RenderTree(w, labeled, total, aggErrs); err != nil {
 		return fmt.Errorf("render tree: %w", err)
@@ -345,7 +382,6 @@ func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, la
 	for p, c := range byDir {
 		dirs = append(dirs, summary.Directory{Path: p, Counts: c, ByLang: byDirLang[p], Files: byDirFiles[p]})
 	}
-	sort.Slice(dirs, func(i, j int) bool { return dirs[i].Path < dirs[j].Path })
 
 	return dirs, total, aggErrs, nil
 }
