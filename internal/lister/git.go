@@ -73,7 +73,7 @@ func newGitLister(ctx context.Context, root string, opts fileset.WalkOptions) (*
 		return nil, fmt.Errorf("lister: new git lister: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
+	cmd := exec.CommandContext(ctx, "git", "-c", "safe.directory=*", "rev-parse", "--show-toplevel")
 	cmd.Dir = absRoot
 	cmd.Env = gitCleanEnv()
 	out, err := cmd.Output()
@@ -126,7 +126,7 @@ func anySegmentHidden(relPath string) bool {
 func (g *GitLister) List(ctx context.Context) iter.Seq2[*fileset.File, error] {
 	return func(yield func(*fileset.File, error) bool) {
 		// Run git ls-files to collect all tracked paths.
-		cmd := exec.CommandContext(ctx, "git", "ls-files", "--full-name", "-z")
+		cmd := exec.CommandContext(ctx, "git", "-c", "safe.directory=*", "ls-files", "--full-name", "-z")
 		cmd.Dir = g.absRoot
 		cmd.Env = gitCleanEnv()
 		stdout, err := cmd.Output()

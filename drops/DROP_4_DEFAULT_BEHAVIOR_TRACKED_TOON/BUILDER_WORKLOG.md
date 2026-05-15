@@ -427,4 +427,28 @@ Applied filters (default `IncludeHidden: false`):
 - **Worked via:** `Read` of `cmd/rak/root.go`, `cmd/rak/root_test.go`, `cmd/rak/integration_test.go`, `internal/lister/lister.go`, `internal/lister/walk.go`, `internal/render/render.go`, `internal/render/toon.go`.
 - **Suggestion:** Hylla misses after a multi-unit drop are expected; the `@main` ref should resolve to post-push ingest. The miss is not a Hylla bug — it's the "Hylla ingest is drop-end only" policy working as designed.
 - **Query 2:** `hylla_search_keyword` for `lister Detect FileLister NewWalkLister` — returned only `PlanCheck` (mage) and `ErrBinaryFile` (fileset). Expected miss — all lister symbols are post-snapshot.
+
+## Drop 4 CI Fix — safe.directory=*
+
+- **Builder:** go-builder-agent
+- **Date:** 2026-05-14
+- **CI run:** 25904410896 — FAILED.
+
+**Failing tests:**
+- `TestDetect_InsideRepo` — `Detect` returned `*WalkLister` instead of `*GitLister`.
+- `TestDetect_NoGitignoreInRepo_ReturnsSentinel` — `Detect` returned `(*WalkLister, nil)` instead of `(nil, ErrNoGitignoreInRepo)`.
+
+**Root-cause hypothesis:** GitHub Actions runners use `actions/checkout@v4` which checks out the repo as a different UID than the user running the test process. Git's CVE-2022-24765 "dubious ownership" protection causes every `git` invocation in `internal/lister` to exit with status 128 and a stderr message about `safe.directory`. Because `Detect` interprets any non-zero git exit (via `errors.As(runErr, &exitErr)`) as "not in a git repo," it falls through to `newWalkLister`. The existing `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` stripping in `gitCleanEnv()` does not address the ownership check.
+
+**Fix — 3 call sites in `internal/lister/`:**
+
+Added `-c safe.directory=*` between `git` and each subcommand (`-c key=value` is the documented per-invocation config override, stable since git 2.x):
+
+1. `internal/lister/lister.go:60` — `Detect`'s `git rev-parse --is-inside-work-tree`.
+2. `internal/lister/git.go:76` — `newGitLister`'s `git rev-parse --show-toplevel`.
+3. `internal/lister/git.go:129` — `GitLister.List`'s `git ls-files --full-name -z`.
+
+No other logic changed. Tests are untouched.
+
+**Local mage ci result:** All packages pass green (including `internal/lister` — 1.580s).
 - **Missed because:** Same stale snapshot reason as Query 1.

@@ -57,7 +57,7 @@ func Detect(ctx context.Context, root string, opts fileset.WalkOptions) (FileLis
 		return newWalkLister(os.DirFS(absRoot), ".", opts), nil
 	}
 
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--is-inside-work-tree")
+	cmd := exec.CommandContext(ctx, "git", "-c", "safe.directory=*", "rev-parse", "--is-inside-work-tree")
 	cmd.Dir = absRoot
 	cmd.Env = gitCleanEnv()
 	runErr := cmd.Run()
