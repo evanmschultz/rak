@@ -377,6 +377,9 @@ func TestTOONRenderer_Render(t *testing.T) {
 			t.Errorf("Render output missing %q; got:\n%s", want, got)
 		}
 	}
+	if !strings.HasSuffix(got, "\n") {
+		t.Errorf("TOON Render output should end with newline, got %q", got)
+	}
 }
 
 // TestTOONRenderer_RenderTree verifies a multi-directory rollup contains the
@@ -404,6 +407,9 @@ func TestTOONRenderer_RenderTree(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("RenderTree output missing %q; got:\n%s", want, got)
 		}
+	}
+	if !strings.HasSuffix(got, "\n") {
+		t.Errorf("TOON RenderTree output should end with newline, got %q", got)
 	}
 }
 

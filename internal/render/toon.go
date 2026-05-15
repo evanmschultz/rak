@@ -96,6 +96,9 @@ func (toonRenderer) Render(w io.Writer, counts counting.Counts) error {
 	if _, err := w.Write(b); err != nil {
 		return fmt.Errorf("render counts as toon: %w", err)
 	}
+	if _, err := w.Write([]byte{'\n'}); err != nil {
+		return fmt.Errorf("render counts as toon: %w", err)
+	}
 	return nil
 }
 
@@ -174,6 +177,9 @@ func (toonRenderer) RenderTree(w io.Writer, dirs []summary.Directory, total coun
 		return fmt.Errorf("render tree as toon: %w", err)
 	}
 	if _, err := w.Write(b); err != nil {
+		return fmt.Errorf("render tree as toon: %w", err)
+	}
+	if _, err := w.Write([]byte{'\n'}); err != nil {
 		return fmt.Errorf("render tree as toon: %w", err)
 	}
 	return nil
