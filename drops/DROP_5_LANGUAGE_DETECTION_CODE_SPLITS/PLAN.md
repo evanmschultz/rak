@@ -1,6 +1,6 @@
 # DROP_5 — LANGUAGE_DETECTION_CODE_SPLITS
 
-**State:** planning
+**State:** building
 **Tier:** A
 **Blocked by:** DROP_4
 **Paths (expected):** `main/internal/lang/` (new package — `Language` type, `Detect`, blank/comment/code splitter + tests), `main/internal/render/render.go` (per-type rollup data shape; F25-aware — interface may grow), `main/internal/render/toon.go` / `main/internal/render/human.go` / `main/internal/render/json.go` (extend to render per-type aggregation), `main/internal/render/render_test.go` (extend snapshot/contains tests), `main/cmd/rak/root.go` (wire language detection into per-file counting + per-type aggregation + add `--lang` walk-filter flag), `main/cmd/rak/root_test.go` (flag-parsing + per-type tests), `main/cmd/rak/integration_test.go` (extend fixture or expectations for per-type rollup)
@@ -14,7 +14,7 @@
 
 Add language awareness to rak's counting. Detect each file's language via (a) extension lookup, (b) shebang sniff using the existing `fileset.File.Peek(512)` contract (F4 from Drop 3), and (c) a small content-heuristic fallback for files whose extension is ambiguous or absent. Per detected language, split each file's lines into three categories — **blank**, **comment**, **code** — using language-specific comment grammar (line-comment markers, block-comment delimiters). Aggregate per-type counts in addition to the existing per-directory rollup; surface both in all three renderers (TOON, human, JSON). Add the `--lang go,rs` walk-filter flag (per main/PLAN.md decision 24) so users can scope counting to one or more detected languages.
 
-Drop 4's spine is preserved: `internal/lister`, `internal/fileset`, `internal/ignore`, `internal/counting`, `internal/render`'s `Renderer` interface (subject to a possible additive growth — planner decides), and the `--human` / `--json` / `--toon` flag surface all remain. Drop 5's new code is additive. Expected decomposition: 4 atomic units (5.1 internal/lang detection / 5.2 code-aware splits / 5.3 per-type aggregation in render / 5.4 `--lang` walk filter). Per the `feedback_parallelize_aggressively` memory rule, 5.2 and 5.4 are eligible to run in parallel after 5.1 closes (both consume `Language` but neither blocks the other).
+Drop 4's spine is preserved: `internal/lister`, `internal/fileset`, `internal/ignore`, `internal/counting`, `internal/render`'s `Renderer` interface (subject to a possible additive growth — planner decides), and the `--human` / `--json` / `--toon` flag surface all remain. Drop 5's new code is additive. Expected decomposition: 4 atomic units (5.1 internal/lang detection + `lang.Detect` call-site wiring in walkAndCount / 5.2 code-aware splits / 5.3 per-type aggregation in render / 5.4 `--lang` walk filter). Per the `feedback_parallelize_aggressively` memory rule, 5.2 and 5.4 are eligible to run in parallel after 5.1 closes (both consume `Language` but neither blocks the other).
 
 `--as <lang>` (stream-type assertion for stdin) is cut per decision 30; only `--lang` (walk filter) is added in Drop 5.
 
@@ -30,7 +30,7 @@ Drop 4's spine is preserved: `internal/lister`, `internal/fileset`, `internal/ig
 - **Paths:**
   - `main/internal/lang/lang.go` (new file)
   - `main/internal/lang/lang_test.go` (new file)
-  - `main/cmd/rak/root.go` (extend `walkAndCount` — wire `lang.Detect(f)` call per file, attach result to walk context)
+  - `main/cmd/rak/root.go` (extend `walkAndCount` — wire `lang.Detect(f)` call per file, store the result in a per-iteration local for downstream consumers in 5.2/5.3/5.4)
   - `main/cmd/rak/root_test.go` (extend: verify detect call-site compiles + smoke test)
 - **Packages:**
   - `github.com/evanmschultz/rak/internal/lang` (new package)
@@ -42,7 +42,7 @@ Drop 4's spine is preserved: `internal/lister`, `internal/fileset`, `internal/ig
     - `const LangUnknown Language = ""` — zero-value constant; returned by `Detect` when no rule matches (F29).
     - Named language constants for each entry in the detection table. Minimum coverage: Go, Rust, Python, JavaScript, TypeScript, C, C++, Shell (sh/bash), Markdown, TOML, YAML, JSON, Makefile, HTML, CSS, plus `LangDocker` (`"docker"`) and `LangCMake` (`"cmake"`) added per Decision C2. Additional entries are welcome but not required.
     - `func Detect(f *fileset.File) Language` — 4-step detection pipeline in priority order (F27):
-      1. **Special-filename lookup**: consult inline `specialFilenames map[string]Language` (case-insensitive key lookup; normalize with `strings.ToLower`). Keys include at minimum: `"makefile"`, `"gnumakefile"`, `"dockerfile"`, `"cmakelists.txt"`. If match → return immediately.
+      1. **Special-filename lookup**: consult inline `specialFilenames map[string]Language`. Lookup key is `strings.ToLower(filepath.Base(f.RelPath))` so nested files like `sub/Makefile` match correctly. Keys (already lowercase) include at minimum: `"makefile"`, `"gnumakefile"`, `"dockerfile"`, `"cmakelists.txt"`. If match → return immediately. Exact basename match only (no prefix/suffix matching) so `Makefile.go` does NOT match `Makefile`. (F1 falsification carry-forward.)
       2. **Extension lookup**: `strings.ToLower(filepath.Ext(f.RelPath))` → consult inline `extensionTable map[string]Language`. Keys are lowercase WITH the leading dot (e.g. `".go"`), matching `filepath.Ext` output directly (F27, P5). No error return — extension lookup is pure. If match → return immediately.
       3. **Shebang sniff**: run only when steps 1 + 2 both returned `LangUnknown`. Calls `f.Peek(512)` (F4 contract). If first line starts with `#!`, extract the interpreter path and consult inline `shebangsTable map[string]Language`. If `Peek` returns an error, treat as no-match and log nothing — detection failure → `LangUnknown`. `Detect` never propagates `Peek` errors; callers must not depend on them (F27, P3).
       4. **Content heuristic**: run only when steps 1 + 2 + 3 all returned `LangUnknown`. Scans the first 512 bytes from `Peek(512)` for well-known markers (e.g. `<?xml`, `<!DOCTYPE`, `{`, `[` as JSON candidates; `---` as YAML front-matter). Heuristic is best-effort. If no marker matches, return `LangUnknown`. There is NO "generic language" intermediate state — the pipeline returns the first concrete match OR `LangUnknown` (C5).
@@ -50,7 +50,7 @@ Drop 4's spine is preserved: `internal/lister`, `internal/fileset`, `internal/ig
     - Doc comments on every exported identifier per naming rules.
   - `lang_test.go` — table-driven, using `testing/fstest.MapFS` to construct `*fileset.File` values via `fileset.NewFile(fsys, path, path)`:
     - `TestDetect_ByExtension` — table: `.go` → `LangGo`, `.rs` → `LangRust`, `.py` → `LangPython`, `.js` → `LangJS`, `.ts` → `LangTS`, `.sh` → `LangShell`, `.md` → `LangMarkdown`, `.toml` → `LangTOML`, `.yaml`/`.yml` → `LangYAML`, `.json` → `LangJSON`, `.c` → `LangC`, `.cpp`/`.cc` → `LangCPP`, `.html` → `LangHTML`, `.css` → `LangCSS`, unknown extension → `LangUnknown`. (All test names new, not yet in tree.)
-    - `TestDetect_SpecialFilename` — table: `Makefile` → `LangMakefile`, `makefile` (lowercase) → `LangMakefile`, `Dockerfile` → `LangDocker`, `CMakeLists.txt` → `LangCMake`, `GNUmakefile` → `LangMakefile`. (Decision C2; new, not yet in tree.)
+    - `TestDetect_SpecialFilename` — table: `Makefile` → `LangMakefile`, `makefile` (lowercase) → `LangMakefile`, `Dockerfile` → `LangDocker`, `CMakeLists.txt` → `LangCMake`, `GNUmakefile` → `LangMakefile`, **`sub/Makefile` → `LangMakefile`** (nested path; basename match), **`Makefile.go` → `LangGo`** (prefix-only basename must NOT match special-filename table; falls through to extension lookup). (Decision C2 + R2 F1 fix; new, not yet in tree.)
     - `TestDetect_Shebang_Shell` — file with no extension but content `#!/bin/bash\necho hi` → `LangShell` (or `LangBash` — builder's choice; document in BUILDER_WORKLOG.md). New, not yet in tree.
     - `TestDetect_Shebang_Python` — file named `script` with `#!/usr/bin/env python3\n` → `LangPython`. New, not yet in tree.
     - `TestDetect_UnknownExtension_NoShebang` — file with `.xyzzy` extension and no shebang → `LangUnknown`. New, not yet in tree.
@@ -180,7 +180,7 @@ Drop 4's spine is preserved: `internal/lister`, `internal/fileset`, `internal/ig
     - When `d.ByLang` is nil or empty (after filtering `LangUnknown`): output unchanged from today's behavior (existing snapshot tests continue to pass).
     - When `d.ByLang` is non-empty (after filtering `LangUnknown`): each renderer emits per-language detail in its native format:
       - **Human renderer (laslig)**: for each language `L` in a deterministic order (sorted by language string, `LangUnknown` excluded), emit one additional KV row under the directory block.
-      - **JSON renderer**: `dirJSON` struct grows an optional `"by_lang"` field: `map[string]struct{Lines struct{Code,Comment,Blank int}; Counts counting.Counts}`. Omit (`omitempty`) when nil. Key is `string(lang.Language)`. `LangUnknown` key excluded before marshalling.
+      - **JSON renderer**: `directoryJSON` struct (existing — used by `directoryJSON(d)` conversion at `internal/render/json.go`) MUST grow a `ByLang map[lang.Language]lang.LangCounts` field matching `Directory.ByLang` byte-for-byte. **Critical (F34, R2 falsification C1):** Go struct-type conversion `directoryJSON(d)` requires identical field structure between `Directory` and `directoryJSON` — failing to add the same field with the same Go type to `directoryJSON` will break compile at the existing conversion site. The JSON tag on the new field is `json:"by_lang,omitempty"`. Filter `LangUnknown` from the map BEFORE the conversion (build a filtered copy in `Directory`-shape, then convert) so the JSON marshaling never sees `LangUnknown`. Key serialization is `string(lang.Language)` via the underlying string type.
       - **TOON renderer**: emit per-language rows as additional `key: value` lines in the TOON block for the directory. `LangUnknown` key excluded. Format is builder's choice — document in BUILDER_WORKLOG.md.
   - `walkAndCount` in `cmd/rak/root.go` extended:
     - Per file (after the lang-filter gate added in 5.4, using the `detectedLang` wired in 5.1), call `lang.Split(rc, detectedLang)` on the opened reader to obtain `LineCounts`. Use `LangCounts.Add` (from 5.2) to accumulate per-dir/per-lang totals. (P4: `Detect` calls `f.Peek(512)`; `Split` opens the file via `f.Open()` — two separate opens per file. Acceptable for v0.1.0; FS page cache makes the second open cheap. See Notes § "Double-IO trade-off".)
@@ -214,6 +214,7 @@ Decision: **inline table only**. `github.com/go-enry/go-enry/v2` (~1.5MB binary 
 - **F31**: `Directory.ByLang map[lang.Language]lang.LangCounts` is nil when no language detection was run (backward-compatible zero value). All renderer `RenderTree` implementations must guard on nil/empty `ByLang` before iterating.
 - **F32**: `Renderer` interface method signatures are UNCHANGED in Drop 5. Only `Directory` struct grows (additive struct field). Pre-v1.0 additive growth of a struct with no external implementers is safe per F15/PLAN.md.
 - **F33**: `LangUnknown` suppression in renderers (Decision P2+C3). `ByLang` maps with the `LangUnknown` key MUST be filtered out before emission in all three renderers (TOON, JSON, human). Per-dir `Counts` (existing field) still includes those files so totals stay accurate; only the per-type cross-cut excludes them. New in Round 2.
+- **F34**: `directoryJSON` struct in `internal/render/json.go` MUST mirror `Directory.ByLang` byte-for-byte (same field name, same Go type `map[lang.Language]lang.LangCounts`, additive). The existing `directoryJSON(d)` Go struct-type conversion at the renderer call site requires identical field structure between source and target structs; failing to mirror `ByLang` will break compile. F33 LangUnknown suppression is applied in `Directory`-shape BEFORE the conversion (build a filtered copy of `Directory`, then convert) so JSON marshaling never sees `LangUnknown`. New in Round 2 (R2 falsification C1).
 
 ### Parallel eligibility
 
