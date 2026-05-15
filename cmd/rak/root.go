@@ -16,6 +16,7 @@ import (
 	"github.com/evanmschultz/rak/internal/lang"
 	"github.com/evanmschultz/rak/internal/lister"
 	"github.com/evanmschultz/rak/internal/render"
+	"github.com/evanmschultz/rak/internal/summary"
 )
 
 // rootFlags bundles every flag bound to the root command so runRoot and the
@@ -242,9 +243,10 @@ func runDirectory(
 // per-dir/per-lang LangCounts are accumulated into byDirLang and surfaced via
 // Directory.ByLang. LangUnknown suppression (F33) is the renderer's
 // responsibility; walkAndCount includes LangUnknown in byDirLang.
-func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, langs []string) ([]render.Directory, counting.Counts, []error, error) {
+func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, langs []string) ([]summary.Directory, counting.Counts, []error, error) {
 	byDir := map[string]counting.Counts{}
 	byDirLang := map[string]map[lang.Language]lang.LangCounts{}
+	byDirFiles := map[string]int64{}
 	var total counting.Counts
 	var aggErrs []error
 
@@ -328,6 +330,7 @@ func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, la
 		dir := dirKey(f.RelPath)
 		byDir[dir] = addCounts(byDir[dir], fileCounts)
 		total = addCounts(total, fileCounts)
+		byDirFiles[dir]++
 
 		// Accumulate per-lang LangCounts for this directory (F30).
 		if byDirLang[dir] == nil {
@@ -338,9 +341,9 @@ func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, la
 		byDirLang[dir][detectedLang] = lc
 	}
 
-	dirs := make([]render.Directory, 0, len(byDir))
+	dirs := make([]summary.Directory, 0, len(byDir))
 	for p, c := range byDir {
-		dirs = append(dirs, render.Directory{Path: p, Counts: c, ByLang: byDirLang[p]})
+		dirs = append(dirs, summary.Directory{Path: p, Counts: c, ByLang: byDirLang[p], Files: byDirFiles[p]})
 	}
 	sort.Slice(dirs, func(i, j int) bool { return dirs[i].Path < dirs[j].Path })
 
@@ -394,20 +397,25 @@ func addCounts(a, b counting.Counts) counting.Counts {
 // "sub", "sub/nested" etc. becomes "<rootLabel>/<relative>". Passing an
 // empty rootLabel returns the input unchanged, preserving the io/fs
 // convention for test callers that want it.
-func labelDirectories(dirs []render.Directory, rootLabel string) []render.Directory {
+//
+// Files is propagated verbatim through the reconstruction (F44): failing to
+// carry d.Files would cause --sort files to produce degenerate ordering
+// (all zeros) and would silently omit the JSON "files" field via omitempty.
+func labelDirectories(dirs []summary.Directory, rootLabel string) []summary.Directory {
 	if rootLabel == "" {
 		return dirs
 	}
-	out := make([]render.Directory, len(dirs))
+	out := make([]summary.Directory, len(dirs))
 	for i, d := range dirs {
 		if d.Path == "." {
-			out[i] = render.Directory{Path: rootLabel, Counts: d.Counts, ByLang: d.ByLang}
+			out[i] = summary.Directory{Path: rootLabel, Counts: d.Counts, ByLang: d.ByLang, Files: d.Files}
 			continue
 		}
-		out[i] = render.Directory{
+		out[i] = summary.Directory{
 			Path:   rootLabel + "/" + d.Path,
 			Counts: d.Counts,
 			ByLang: d.ByLang,
+			Files:  d.Files,
 		}
 	}
 	return out

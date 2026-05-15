@@ -7,6 +7,7 @@ import (
 
 	"github.com/evanmschultz/rak/internal/counting"
 	"github.com/evanmschultz/rak/internal/lang"
+	"github.com/evanmschultz/rak/internal/summary"
 )
 
 // jsonRenderer renders counting.Counts values as stdlib encoding/json output
@@ -42,22 +43,35 @@ func (jsonRenderer) Render(w io.Writer, counts counting.Counts) error {
 // counting.Counts shape so the per-dir block matches the single-stream
 // Render output byte-for-byte at the counts boundary.
 //
-// ByLang mirrors Directory.ByLang byte-for-byte (F34): the same field name
-// and same Go type are required for the Go struct-type conversion
+// ByLang mirrors summary.Directory.ByLang byte-for-byte (F34): the same
+// field name and same Go type are required for the Go struct-type conversion
 // directoryJSON(d) to compile. The json:"by_lang,omitempty" tag serializes
 // to lowercase and omits the field entirely when the map is nil or empty
 // (after LangUnknown filtering — see filterUnknown).
+//
+// Field declaration order — Path, Counts, ByLang, Files — must exactly
+// match summary.Directory (F43); the bare struct conversion
+// directoryJSON(filterUnknown(d)) requires both types to declare fields
+// in the same order. Do not reorder. Files carries the per-directory
+// accepted-file count; json:"files,omitempty" keeps zero-count directories
+// invisible in existing snapshot tests.
 type directoryJSON struct {
 	Path   string                            `json:"path"`
 	Counts counting.Counts                   `json:"counts"`
 	ByLang map[lang.Language]lang.LangCounts `json:"by_lang,omitempty"`
+	Files  int64                             `json:"files,omitempty"`
 }
 
 // filterUnknown returns a copy of d with lang.LangUnknown removed from ByLang.
 // If the result is empty, ByLang is set to nil so omitempty suppresses the
 // field in JSON output (F33 — LangUnknown suppression uniform across all
-// renderers). The returned Directory is a shallow copy; Counts is not mutated.
-func filterUnknown(d Directory) Directory {
+// renderers). The returned summary.Directory is a shallow copy; Counts and
+// Files are not mutated.
+//
+// Files is propagated verbatim through the reconstruction (F44): failing to
+// carry d.Files would cause the JSON "files" field to be silently omitted via
+// omitempty and would degrade --sort files ordering in Unit 7.3.
+func filterUnknown(d summary.Directory) summary.Directory {
 	if len(d.ByLang) == 0 {
 		return d
 	}
@@ -70,10 +84,11 @@ func filterUnknown(d Directory) Directory {
 	if len(filtered) == 0 {
 		filtered = nil
 	}
-	return Directory{
+	return summary.Directory{
 		Path:   d.Path,
 		Counts: d.Counts,
 		ByLang: filtered,
+		Files:  d.Files,
 	}
 }
 
@@ -90,7 +105,7 @@ type treeJSON struct {
 // object with keys "directories", "total", and (when errs is non-empty)
 // "errors". The emitted directories slice preserves the caller-supplied
 // order; callers are responsible for sorting.
-func (jsonRenderer) RenderTree(w io.Writer, dirs []Directory, total counting.Counts, errs []error) error {
+func (jsonRenderer) RenderTree(w io.Writer, dirs []summary.Directory, total counting.Counts, errs []error) error {
 	payload := treeJSON{
 		Directories: make([]directoryJSON, 0, len(dirs)),
 		Total:       total,

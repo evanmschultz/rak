@@ -104,7 +104,7 @@ Three units, fully serialized (7.1 → 7.2 → 7.3). No parallelism is possible:
 
 ### Unit 7.2 — Migrate render.Directory to summary.Directory
 
-- **State:** todo
+- **State:** done
 - **Paths:**
   - `internal/render/render.go`
   - `internal/render/toon.go`

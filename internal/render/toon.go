@@ -8,6 +8,7 @@ import (
 	"github.com/toon-format/toon-go"
 
 	"github.com/evanmschultz/rak/internal/counting"
+	"github.com/evanmschultz/rak/internal/summary"
 )
 
 // toonRenderer renders counting.Counts values as TOON (Token-Oriented Object
@@ -107,7 +108,7 @@ func (toonRenderer) Render(w io.Writer, counts counting.Counts) error {
 // omitted when the caller passes nil or an empty slice. The emitted directory
 // order exactly matches the caller-supplied dirs slice; sorting is the
 // caller's responsibility.
-func (toonRenderer) RenderTree(w io.Writer, dirs []Directory, total counting.Counts, errs []error) error {
+func (toonRenderer) RenderTree(w io.Writer, dirs []summary.Directory, total counting.Counts, errs []error) error {
 	rows := make([]toonDirectory, 0, len(dirs))
 	for _, d := range dirs {
 		rows = append(rows, toonDirectory{

@@ -704,3 +704,61 @@ func byLangKeys(m map[string]langCountsJSON) []string {
 	}
 	return keys
 }
+
+// TestRootCmd_FilesField_SurvivesLabelDirectories verifies that the Files
+// field on summary.Directory is correctly populated by walkAndCount and
+// survives the labelDirectories reconstruction (F44). A fixture with multiple
+// directories of differing file counts is used: 2 files in "." and 3 files in
+// "sub". The JSON output must carry a non-zero "files" value for each
+// directory. This test ONLY passes if Files is propagated through
+// labelDirectories and filterUnknown without being zeroed.
+func TestRootCmd_FilesField_SurvivesLabelDirectories(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{
+		// Two accepted files in root dir.
+		"a.go": {Data: []byte("package main\n")},
+		"b.go": {Data: []byte("package main\n")},
+		// Three accepted files in sub dir.
+		"sub/c.go": {Data: []byte("package sub\n")},
+		"sub/d.go": {Data: []byte("package sub\n")},
+		"sub/e.go": {Data: []byte("package sub\n")},
+	}
+
+	opts := listerOpts(&rootFlags{})
+	source := lister.NewWalkLister(fsys, ".", opts)
+
+	var out bytes.Buffer
+	// Use a non-empty rootLabel to exercise labelDirectories reconstruction.
+	if err := runDirectory(context.Background(), &out, source, "myroot", false, nil, render.NewJSONRenderer()); err != nil {
+		t.Fatalf("runDirectory: %v", err)
+	}
+
+	// Decode into a map to inspect the "files" field generically.
+	var raw struct {
+		Directories []map[string]interface{} `json:"directories"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &raw); err != nil {
+		t.Fatalf("json.Unmarshal: %v (body: %s)", err, out.String())
+	}
+
+	if len(raw.Directories) != 2 {
+		t.Fatalf("expected 2 directories, got %d", len(raw.Directories))
+	}
+
+	// Build path→files map from decoded output.
+	filesByPath := map[string]int64{}
+	for _, d := range raw.Directories {
+		p, _ := d["path"].(string)
+		f, _ := d["files"].(float64) // JSON numbers decode as float64.
+		filesByPath[p] = int64(f)
+	}
+
+	// "myroot" should have 2 files; "myroot/sub" should have 3.
+	if got := filesByPath["myroot"]; got != 2 {
+		t.Errorf("expected myroot files=2, got %d (F44: Files must survive labelDirectories)", got)
+	}
+	if got := filesByPath["myroot/sub"]; got != 3 {
+		t.Errorf("expected myroot/sub files=3, got %d (F44: Files must survive labelDirectories)", got)
+	}
+}

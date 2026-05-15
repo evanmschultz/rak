@@ -10,6 +10,7 @@ import (
 
 	"github.com/evanmschultz/rak/internal/counting"
 	"github.com/evanmschultz/rak/internal/lang"
+	"github.com/evanmschultz/rak/internal/summary"
 )
 
 // humanRenderer renders counting.Counts values as laslig key-value blocks
@@ -75,7 +76,7 @@ func (h humanRenderer) Render(w io.Writer, counts counting.Counts) error {
 // When a directory's ByLang map is non-empty (after F33 LangUnknown
 // suppression), each language gets one additional KV row appended under the
 // directory block, sorted by language string for deterministic output.
-func (h humanRenderer) RenderTree(w io.Writer, dirs []Directory, total counting.Counts, errs []error) error {
+func (h humanRenderer) RenderTree(w io.Writer, dirs []summary.Directory, total counting.Counts, errs []error) error {
 	printer := h.newPrinter(w)
 	for _, d := range dirs {
 		if err := printer.KV(countsKV("dir: "+d.Path, d.Counts)); err != nil {

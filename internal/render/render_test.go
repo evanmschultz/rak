@@ -11,6 +11,7 @@ import (
 
 	"github.com/evanmschultz/rak/internal/counting"
 	"github.com/evanmschultz/rak/internal/lang"
+	"github.com/evanmschultz/rak/internal/summary"
 )
 
 // testHumanMode is the explicit laslig.Mode used for snapshot determinism.
@@ -163,7 +164,7 @@ func TestHumanRenderer_RenderTree_Labels(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := newHumanRendererWithMode(testHumanMode)
-	dirs := []Directory{
+	dirs := []summary.Directory{
 		{Path: ".", Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12}},
 		{Path: "sub", Counts: counting.Counts{Bytes: 4, Lines: 1, Words: 1, Chars: 4}},
 	}
@@ -204,7 +205,7 @@ func TestHumanRenderer_RenderTree_NoErrors(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := newHumanRendererWithMode(testHumanMode)
-	dirs := []Directory{
+	dirs := []summary.Directory{
 		{Path: ".", Counts: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1}},
 	}
 	if err := r.RenderTree(&buf, dirs, dirs[0].Counts, nil); err != nil {
@@ -226,7 +227,7 @@ func TestHumanRenderer_RenderTree_WithErrors(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := newHumanRendererWithMode(testHumanMode)
-	dirs := []Directory{
+	dirs := []summary.Directory{
 		{Path: ".", Counts: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1}},
 	}
 	errs := []error{errors.New("walk \"foo\": permission denied"), errors.New("walk \"bar\": not a directory")}
@@ -271,7 +272,7 @@ func TestJSONRenderer_RenderTree_Snapshot(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := NewJSONRenderer()
-	dirs := []Directory{
+	dirs := []summary.Directory{
 		{Path: ".", Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12}},
 		{Path: "sub", Counts: counting.Counts{Bytes: 4, Lines: 1, Words: 1, Chars: 4}},
 	}
@@ -322,7 +323,7 @@ func TestJSONRenderer_RenderTree_WithErrors(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := NewJSONRenderer()
-	dirs := []Directory{
+	dirs := []summary.Directory{
 		{Path: ".", Counts: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1}},
 	}
 	errs := []error{errors.New("walk \"foo\": permission denied")}
@@ -390,7 +391,7 @@ func TestTOONRenderer_RenderTree(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := NewTOONRenderer()
-	dirs := []Directory{
+	dirs := []summary.Directory{
 		{Path: ".", Counts: counting.Counts{Bytes: 5, Lines: 1, Words: 1, Chars: 5}},
 		{Path: "sub", Counts: counting.Counts{Bytes: 3, Lines: 1, Words: 1, Chars: 3}},
 	}
@@ -413,7 +414,7 @@ func TestTOONRenderer_RenderTree_WithErrors(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := NewTOONRenderer()
-	dirs := []Directory{
+	dirs := []summary.Directory{
 		{Path: ".", Counts: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1}},
 	}
 	errs := []error{errors.New("walk \"foo\": permission denied")}
@@ -433,7 +434,7 @@ func TestTOONRenderer_RenderTree_NoErrors(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := NewTOONRenderer()
-	dirs := []Directory{
+	dirs := []summary.Directory{
 		{Path: ".", Counts: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1}},
 	}
 	if err := r.RenderTree(&buf, dirs, dirs[0].Counts, nil); err != nil {
@@ -453,7 +454,7 @@ func TestTOONRenderer_RenderTree_PerLang(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := NewTOONRenderer()
-	dirs := []Directory{
+	dirs := []summary.Directory{
 		{
 			Path:   ".",
 			Counts: counting.Counts{Bytes: 26, Lines: 2, Words: 2, Chars: 26},
@@ -491,7 +492,7 @@ func TestTOONRenderer_RenderTree_AllUnknown(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := NewTOONRenderer()
-	dirs := []Directory{
+	dirs := []summary.Directory{
 		{
 			Path:   ".",
 			Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
@@ -532,7 +533,7 @@ func TestJSONRenderer_RenderTree_PerLang(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := NewJSONRenderer()
-	dirs := []Directory{
+	dirs := []summary.Directory{
 		{
 			Path:   ".",
 			Counts: counting.Counts{Bytes: 26, Lines: 2, Words: 2, Chars: 26},
@@ -571,7 +572,7 @@ func TestJSONRenderer_RenderTree_AllUnknown(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := NewJSONRenderer()
-	dirs := []Directory{
+	dirs := []summary.Directory{
 		{
 			Path:   ".",
 			Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
@@ -605,7 +606,7 @@ func TestHumanRenderer_RenderTree_PerLang(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := newHumanRendererWithMode(testHumanMode)
-	dirs := []Directory{
+	dirs := []summary.Directory{
 		{
 			Path:   ".",
 			Counts: counting.Counts{Bytes: 26, Lines: 2, Words: 2, Chars: 26},
@@ -642,7 +643,7 @@ func TestHumanRenderer_RenderTree_AllUnknown(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := newHumanRendererWithMode(testHumanMode)
-	dirs := []Directory{
+	dirs := []summary.Directory{
 		{
 			Path:   ".",
 			Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},

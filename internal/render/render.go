@@ -11,7 +11,7 @@ import (
 	"io"
 
 	"github.com/evanmschultz/rak/internal/counting"
-	"github.com/evanmschultz/rak/internal/lang"
+	"github.com/evanmschultz/rak/internal/summary"
 )
 
 // Renderer writes counting.Counts values to the supplied io.Writer in one
@@ -24,7 +24,9 @@ import (
 // value (the Drop 2 stdin path) and RenderTree for a per-directory rollup
 // plus a grand total (the Drop 3 directory walk path). Growing the interface
 // is acceptable pre-v1.0 because rak has no external implementers under
-// internal/; see F15 in DROP_3's PLAN.md for the pin.
+// internal/; see F15 in DROP_3's PLAN.md for the pin. The RenderTree
+// parameter type was updated from the provisional render.Directory to
+// summary.Directory in Drop 7 Unit 7.2 (F37).
 type Renderer interface {
 	// Render writes counts to w in the implementation's chosen format. It
 	// returns any error surfaced by the underlying writer or formatter.
@@ -36,31 +38,5 @@ type Renderer interface {
 	// emit the directories in the order the caller supplied; sorting is
 	// the caller's responsibility. Passing a nil or empty errs slice
 	// suppresses any error-summary section in the rendered output.
-	RenderTree(w io.Writer, dirs []Directory, total counting.Counts, errs []error) error
-}
-
-// Directory pairs a walk-relative directory path with the accumulated
-// counting.Counts for every non-skipped file under that directory. It is
-// the minimal shape RenderTree needs today.
-//
-// Directory is PROVISIONAL: Drop 6.1 introduces the canonical
-// internal/summary.Summary type and refactors both renderer implementations
-// to consume it. Treat the Drop 3 shape as a stand-in, not a stable
-// contract — no code outside this package plus cmd/rak should grow a
-// dependency on Directory's field layout beyond what Unit 3.5 itself
-// needs. See the C8 breadcrumb in DROP_3's PLAN.md.
-type Directory struct {
-	// Path is the walk-relative directory path using forward-slash
-	// separators. The walk root itself is represented by the string "."
-	// (matching the io/fs root convention used by cmd/rak's walker).
-	Path string
-
-	// Counts is the aggregated counting.Counts for every file under this
-	// directory that survived the configured walk filters.
-	Counts counting.Counts
-
-	// ByLang carries per-language counts for this directory. Nil when
-	// language detection did not run. Per F33, the LangUnknown key MUST be
-	// filtered out by all renderer implementations before emission.
-	ByLang map[lang.Language]lang.LangCounts
+	RenderTree(w io.Writer, dirs []summary.Directory, total counting.Counts, errs []error) error
 }
