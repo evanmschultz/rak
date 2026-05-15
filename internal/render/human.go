@@ -69,16 +69,18 @@ func (h humanRenderer) Render(w io.Writer, counts counting.Counts) error {
 }
 
 // RenderTree writes one laslig KV block per directory followed by a final
-// "total" KV block and, when errs is non-empty, a laslig Notice summarizing
-// the aggregated walker-level errors. The emitted block order exactly
-// matches the caller-supplied dirs slice — sorting is the caller's job.
+// "total" KV block, an optional "total by language" section (when
+// s.TotalByLang is non-empty after F33 LangUnknown suppression), and, when
+// errs is non-empty, a laslig Notice summarizing the aggregated walker-level
+// errors. The emitted block order exactly matches the caller-supplied s.Dirs
+// slice — sorting is the caller's job before constructing s.
 //
 // When a directory's ByLang map is non-empty (after F33 LangUnknown
 // suppression), each language gets one additional KV row appended under the
 // directory block, sorted by language string for deterministic output.
-func (h humanRenderer) RenderTree(w io.Writer, dirs []summary.Directory, total counting.Counts, errs []error) error {
+func (h humanRenderer) RenderTree(w io.Writer, s summary.Summary, errs []error) error {
 	printer := h.newPrinter(w)
-	for _, d := range dirs {
+	for _, d := range s.Dirs {
 		if err := printer.KV(countsKV("dir: "+d.Path, d.Counts)); err != nil {
 			return fmt.Errorf("render directory %q as human kv block: %w", d.Path, err)
 		}
@@ -93,8 +95,17 @@ func (h humanRenderer) RenderTree(w io.Writer, dirs []summary.Directory, total c
 			}
 		}
 	}
-	if err := printer.KV(countsKV("total", total)); err != nil {
+	if err := printer.KV(countsKV("total", s.Total)); err != nil {
 		return fmt.Errorf("render total as human kv block: %w", err)
+	}
+	// Emit per-language grand totals after the total block when non-empty
+	// (F33: LangUnknown suppressed via sortedKnownLangs).
+	knownTotalLangs := sortedKnownLangs(s.TotalByLang)
+	for _, l := range knownTotalLangs {
+		lc := s.TotalByLang[l]
+		if err := printer.KV(totalLangKV(string(l), lc)); err != nil {
+			return fmt.Errorf("render total lang %q as human kv block: %w", l, err)
+		}
 	}
 	if len(errs) > 0 {
 		detail := make([]string, 0, len(errs))
@@ -143,6 +154,22 @@ func countsKV(title string, counts counting.Counts) laslig.KV {
 func langKV(name string, lc lang.LangCounts) laslig.KV {
 	return laslig.KV{
 		Title: "lang: " + name,
+		Pairs: []laslig.Field{
+			{Label: "Blank", Value: strconv.Itoa(lc.Lines.Blank)},
+			{Label: "Comment", Value: strconv.Itoa(lc.Lines.Comment)},
+			{Label: "Code", Value: strconv.Itoa(lc.Lines.Code)},
+			{Label: "Bytes", Value: strconv.FormatInt(lc.Counts.Bytes, 10)},
+			{Label: "Lines", Value: strconv.FormatInt(lc.Counts.Lines, 10)},
+		},
+	}
+}
+
+// totalLangKV builds a per-language KV block for the top-level
+// "total by language" section. Title is "total lang: <name>" to distinguish
+// it from the per-directory "lang: <name>" rows.
+func totalLangKV(name string, lc lang.LangCounts) laslig.KV {
+	return laslig.KV{
+		Title: "total lang: " + name,
 		Pairs: []laslig.Field{
 			{Label: "Blank", Value: strconv.Itoa(lc.Lines.Blank)},
 			{Label: "Comment", Value: strconv.Itoa(lc.Lines.Comment)},

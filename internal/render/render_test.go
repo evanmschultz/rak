@@ -164,12 +164,14 @@ func TestHumanRenderer_RenderTree_Labels(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := newHumanRendererWithMode(testHumanMode)
-	dirs := []summary.Directory{
-		{Path: ".", Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12}},
-		{Path: "sub", Counts: counting.Counts{Bytes: 4, Lines: 1, Words: 1, Chars: 4}},
+	s := summary.Summary{
+		Dirs: []summary.Directory{
+			{Path: ".", Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12}},
+			{Path: "sub", Counts: counting.Counts{Bytes: 4, Lines: 1, Words: 1, Chars: 4}},
+		},
+		Total: counting.Counts{Bytes: 16, Lines: 2, Words: 3, Chars: 16},
 	}
-	total := counting.Counts{Bytes: 16, Lines: 2, Words: 3, Chars: 16}
-	if err := r.RenderTree(&buf, dirs, total, nil); err != nil {
+	if err := r.RenderTree(&buf, s, nil); err != nil {
 		t.Fatalf("RenderTree: %v", err)
 	}
 
@@ -205,10 +207,11 @@ func TestHumanRenderer_RenderTree_NoErrors(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := newHumanRendererWithMode(testHumanMode)
-	dirs := []summary.Directory{
-		{Path: ".", Counts: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1}},
+	s := summary.Summary{
+		Dirs:  []summary.Directory{{Path: ".", Counts: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1}}},
+		Total: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1},
 	}
-	if err := r.RenderTree(&buf, dirs, dirs[0].Counts, nil); err != nil {
+	if err := r.RenderTree(&buf, s, nil); err != nil {
 		t.Fatalf("RenderTree: %v", err)
 	}
 	got := buf.String()
@@ -227,11 +230,12 @@ func TestHumanRenderer_RenderTree_WithErrors(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := newHumanRendererWithMode(testHumanMode)
-	dirs := []summary.Directory{
-		{Path: ".", Counts: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1}},
+	s := summary.Summary{
+		Dirs:  []summary.Directory{{Path: ".", Counts: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1}}},
+		Total: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1},
 	}
 	errs := []error{errors.New("walk \"foo\": permission denied"), errors.New("walk \"bar\": not a directory")}
-	if err := r.RenderTree(&buf, dirs, dirs[0].Counts, errs); err != nil {
+	if err := r.RenderTree(&buf, s, errs); err != nil {
 		t.Fatalf("RenderTree: %v", err)
 	}
 	got := buf.String()
@@ -250,7 +254,7 @@ func TestHumanRenderer_RenderTree_EmptyDirs(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := newHumanRendererWithMode(testHumanMode)
-	if err := r.RenderTree(&buf, nil, counting.Counts{}, nil); err != nil {
+	if err := r.RenderTree(&buf, summary.Summary{}, nil); err != nil {
 		t.Fatalf("RenderTree: %v", err)
 	}
 	got := buf.String()
@@ -272,12 +276,14 @@ func TestJSONRenderer_RenderTree_Snapshot(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := NewJSONRenderer()
-	dirs := []summary.Directory{
-		{Path: ".", Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12}},
-		{Path: "sub", Counts: counting.Counts{Bytes: 4, Lines: 1, Words: 1, Chars: 4}},
+	s := summary.Summary{
+		Dirs: []summary.Directory{
+			{Path: ".", Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12}},
+			{Path: "sub", Counts: counting.Counts{Bytes: 4, Lines: 1, Words: 1, Chars: 4}},
+		},
+		Total: counting.Counts{Bytes: 16, Lines: 2, Words: 3, Chars: 16},
 	}
-	total := counting.Counts{Bytes: 16, Lines: 2, Words: 3, Chars: 16}
-	if err := r.RenderTree(&buf, dirs, total, nil); err != nil {
+	if err := r.RenderTree(&buf, s, nil); err != nil {
 		t.Fatalf("RenderTree: %v", err)
 	}
 	got := buf.String()
@@ -299,7 +305,7 @@ func TestJSONRenderer_RenderTree_Empty(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := NewJSONRenderer()
-	if err := r.RenderTree(&buf, nil, counting.Counts{}, nil); err != nil {
+	if err := r.RenderTree(&buf, summary.Summary{}, nil); err != nil {
 		t.Fatalf("RenderTree: %v", err)
 	}
 	got := buf.String()
@@ -323,11 +329,12 @@ func TestJSONRenderer_RenderTree_WithErrors(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := NewJSONRenderer()
-	dirs := []summary.Directory{
-		{Path: ".", Counts: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1}},
+	s := summary.Summary{
+		Dirs:  []summary.Directory{{Path: ".", Counts: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1}}},
+		Total: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1},
 	}
 	errs := []error{errors.New("walk \"foo\": permission denied")}
-	if err := r.RenderTree(&buf, dirs, dirs[0].Counts, errs); err != nil {
+	if err := r.RenderTree(&buf, s, errs); err != nil {
 		t.Fatalf("RenderTree: %v", err)
 	}
 	got := buf.String()
@@ -394,12 +401,14 @@ func TestTOONRenderer_RenderTree(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := NewTOONRenderer()
-	dirs := []summary.Directory{
-		{Path: ".", Counts: counting.Counts{Bytes: 5, Lines: 1, Words: 1, Chars: 5}},
-		{Path: "sub", Counts: counting.Counts{Bytes: 3, Lines: 1, Words: 1, Chars: 3}},
+	s := summary.Summary{
+		Dirs: []summary.Directory{
+			{Path: ".", Counts: counting.Counts{Bytes: 5, Lines: 1, Words: 1, Chars: 5}},
+			{Path: "sub", Counts: counting.Counts{Bytes: 3, Lines: 1, Words: 1, Chars: 3}},
+		},
+		Total: counting.Counts{Bytes: 8, Lines: 2, Words: 2, Chars: 8},
 	}
-	total := counting.Counts{Bytes: 8, Lines: 2, Words: 2, Chars: 8}
-	if err := r.RenderTree(&buf, dirs, total, nil); err != nil {
+	if err := r.RenderTree(&buf, s, nil); err != nil {
 		t.Fatalf("RenderTree: %v", err)
 	}
 	got := buf.String()
@@ -420,11 +429,12 @@ func TestTOONRenderer_RenderTree_WithErrors(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := NewTOONRenderer()
-	dirs := []summary.Directory{
-		{Path: ".", Counts: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1}},
+	s := summary.Summary{
+		Dirs:  []summary.Directory{{Path: ".", Counts: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1}}},
+		Total: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1},
 	}
 	errs := []error{errors.New("walk \"foo\": permission denied")}
-	if err := r.RenderTree(&buf, dirs, dirs[0].Counts, errs); err != nil {
+	if err := r.RenderTree(&buf, s, errs); err != nil {
 		t.Fatalf("RenderTree: %v", err)
 	}
 	got := buf.String()
@@ -440,10 +450,11 @@ func TestTOONRenderer_RenderTree_NoErrors(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := NewTOONRenderer()
-	dirs := []summary.Directory{
-		{Path: ".", Counts: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1}},
+	s := summary.Summary{
+		Dirs:  []summary.Directory{{Path: ".", Counts: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1}}},
+		Total: counting.Counts{Bytes: 1, Lines: 0, Words: 0, Chars: 1},
 	}
-	if err := r.RenderTree(&buf, dirs, dirs[0].Counts, nil); err != nil {
+	if err := r.RenderTree(&buf, s, nil); err != nil {
 		t.Fatalf("RenderTree: %v", err)
 	}
 	got := buf.String()
@@ -460,24 +471,26 @@ func TestTOONRenderer_RenderTree_PerLang(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := NewTOONRenderer()
-	dirs := []summary.Directory{
-		{
-			Path:   ".",
-			Counts: counting.Counts{Bytes: 26, Lines: 2, Words: 2, Chars: 26},
-			ByLang: map[lang.Language]lang.LangCounts{
-				lang.LangGo: {
-					Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
-					Counts: counting.Counts{Bytes: 13, Lines: 1, Words: 1, Chars: 13},
-				},
-				lang.LangRust: {
-					Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
-					Counts: counting.Counts{Bytes: 13, Lines: 1, Words: 1, Chars: 13},
+	s := summary.Summary{
+		Dirs: []summary.Directory{
+			{
+				Path:   ".",
+				Counts: counting.Counts{Bytes: 26, Lines: 2, Words: 2, Chars: 26},
+				ByLang: map[lang.Language]lang.LangCounts{
+					lang.LangGo: {
+						Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
+						Counts: counting.Counts{Bytes: 13, Lines: 1, Words: 1, Chars: 13},
+					},
+					lang.LangRust: {
+						Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
+						Counts: counting.Counts{Bytes: 13, Lines: 1, Words: 1, Chars: 13},
+					},
 				},
 			},
 		},
+		Total: counting.Counts{Bytes: 26, Lines: 2, Words: 2, Chars: 26},
 	}
-	total := counting.Counts{Bytes: 26, Lines: 2, Words: 2, Chars: 26}
-	if err := r.RenderTree(&buf, dirs, total, nil); err != nil {
+	if err := r.RenderTree(&buf, s, nil); err != nil {
 		t.Fatalf("RenderTree: %v", err)
 	}
 	got := buf.String()
@@ -498,20 +511,22 @@ func TestTOONRenderer_RenderTree_AllUnknown(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := NewTOONRenderer()
-	dirs := []summary.Directory{
-		{
-			Path:   ".",
-			Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
-			ByLang: map[lang.Language]lang.LangCounts{
-				lang.LangUnknown: {
-					Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
-					Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
+	s := summary.Summary{
+		Dirs: []summary.Directory{
+			{
+				Path:   ".",
+				Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
+				ByLang: map[lang.Language]lang.LangCounts{
+					lang.LangUnknown: {
+						Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
+						Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
+					},
 				},
 			},
 		},
+		Total: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
 	}
-	total := counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12}
-	if err := r.RenderTree(&buf, dirs, total, nil); err != nil {
+	if err := r.RenderTree(&buf, s, nil); err != nil {
 		t.Fatalf("RenderTree: %v", err)
 	}
 	got := buf.String()
@@ -539,24 +554,26 @@ func TestJSONRenderer_RenderTree_PerLang(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := NewJSONRenderer()
-	dirs := []summary.Directory{
-		{
-			Path:   ".",
-			Counts: counting.Counts{Bytes: 26, Lines: 2, Words: 2, Chars: 26},
-			ByLang: map[lang.Language]lang.LangCounts{
-				lang.LangGo: {
-					Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
-					Counts: counting.Counts{Bytes: 13, Lines: 1, Words: 1, Chars: 13},
-				},
-				lang.LangRust: {
-					Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
-					Counts: counting.Counts{Bytes: 13, Lines: 1, Words: 1, Chars: 13},
+	s := summary.Summary{
+		Dirs: []summary.Directory{
+			{
+				Path:   ".",
+				Counts: counting.Counts{Bytes: 26, Lines: 2, Words: 2, Chars: 26},
+				ByLang: map[lang.Language]lang.LangCounts{
+					lang.LangGo: {
+						Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
+						Counts: counting.Counts{Bytes: 13, Lines: 1, Words: 1, Chars: 13},
+					},
+					lang.LangRust: {
+						Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
+						Counts: counting.Counts{Bytes: 13, Lines: 1, Words: 1, Chars: 13},
+					},
 				},
 			},
 		},
+		Total: counting.Counts{Bytes: 26, Lines: 2, Words: 2, Chars: 26},
 	}
-	total := counting.Counts{Bytes: 26, Lines: 2, Words: 2, Chars: 26}
-	if err := r.RenderTree(&buf, dirs, total, nil); err != nil {
+	if err := r.RenderTree(&buf, s, nil); err != nil {
 		t.Fatalf("RenderTree: %v", err)
 	}
 	got := buf.String()
@@ -578,20 +595,22 @@ func TestJSONRenderer_RenderTree_AllUnknown(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := NewJSONRenderer()
-	dirs := []summary.Directory{
-		{
-			Path:   ".",
-			Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
-			ByLang: map[lang.Language]lang.LangCounts{
-				lang.LangUnknown: {
-					Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
-					Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
+	s := summary.Summary{
+		Dirs: []summary.Directory{
+			{
+				Path:   ".",
+				Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
+				ByLang: map[lang.Language]lang.LangCounts{
+					lang.LangUnknown: {
+						Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
+						Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
+					},
 				},
 			},
 		},
+		Total: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
 	}
-	total := counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12}
-	if err := r.RenderTree(&buf, dirs, total, nil); err != nil {
+	if err := r.RenderTree(&buf, s, nil); err != nil {
 		t.Fatalf("RenderTree: %v", err)
 	}
 	got := buf.String()
@@ -612,24 +631,26 @@ func TestHumanRenderer_RenderTree_PerLang(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := newHumanRendererWithMode(testHumanMode)
-	dirs := []summary.Directory{
-		{
-			Path:   ".",
-			Counts: counting.Counts{Bytes: 26, Lines: 2, Words: 2, Chars: 26},
-			ByLang: map[lang.Language]lang.LangCounts{
-				lang.LangGo: {
-					Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
-					Counts: counting.Counts{Bytes: 13, Lines: 1, Words: 1, Chars: 13},
-				},
-				lang.LangPython: {
-					Lines:  lang.LineCounts{Blank: 1, Comment: 0, Code: 0},
-					Counts: counting.Counts{Bytes: 13, Lines: 1, Words: 1, Chars: 13},
+	s := summary.Summary{
+		Dirs: []summary.Directory{
+			{
+				Path:   ".",
+				Counts: counting.Counts{Bytes: 26, Lines: 2, Words: 2, Chars: 26},
+				ByLang: map[lang.Language]lang.LangCounts{
+					lang.LangGo: {
+						Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
+						Counts: counting.Counts{Bytes: 13, Lines: 1, Words: 1, Chars: 13},
+					},
+					lang.LangPython: {
+						Lines:  lang.LineCounts{Blank: 1, Comment: 0, Code: 0},
+						Counts: counting.Counts{Bytes: 13, Lines: 1, Words: 1, Chars: 13},
+					},
 				},
 			},
 		},
+		Total: counting.Counts{Bytes: 26, Lines: 2, Words: 2, Chars: 26},
 	}
-	total := counting.Counts{Bytes: 26, Lines: 2, Words: 2, Chars: 26}
-	if err := r.RenderTree(&buf, dirs, total, nil); err != nil {
+	if err := r.RenderTree(&buf, s, nil); err != nil {
 		t.Fatalf("RenderTree: %v", err)
 	}
 	got := buf.String()
@@ -649,20 +670,22 @@ func TestHumanRenderer_RenderTree_AllUnknown(t *testing.T) {
 
 	var buf bytes.Buffer
 	r := newHumanRendererWithMode(testHumanMode)
-	dirs := []summary.Directory{
-		{
-			Path:   ".",
-			Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
-			ByLang: map[lang.Language]lang.LangCounts{
-				lang.LangUnknown: {
-					Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
-					Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
+	s := summary.Summary{
+		Dirs: []summary.Directory{
+			{
+				Path:   ".",
+				Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
+				ByLang: map[lang.Language]lang.LangCounts{
+					lang.LangUnknown: {
+						Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
+						Counts: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
+					},
 				},
 			},
 		},
+		Total: counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12},
 	}
-	total := counting.Counts{Bytes: 12, Lines: 1, Words: 2, Chars: 12}
-	if err := r.RenderTree(&buf, dirs, total, nil); err != nil {
+	if err := r.RenderTree(&buf, s, nil); err != nil {
 		t.Fatalf("RenderTree: %v", err)
 	}
 	got := buf.String()
@@ -670,4 +693,180 @@ func TestHumanRenderer_RenderTree_AllUnknown(t *testing.T) {
 	if strings.Contains(strings.ToLower(got), "unknown") {
 		t.Errorf("human all-unknown ByLang must not emit unknown language row; got:\n%s", got)
 	}
+}
+
+// --- Unit 9.0 TotalByLang tests ---
+
+// totalByLangFixture builds a summary.Summary with two directories and a
+// populated TotalByLang map containing Go and Markdown entries. Used by
+// TestRenderer_TotalByLang_TOON, TestRenderer_TotalByLang_JSON, and
+// TestRenderer_TotalByLang_Human.
+func totalByLangFixture() summary.Summary {
+	goLang := lang.LangCounts{
+		Lines:  lang.LineCounts{Blank: 1, Comment: 2, Code: 5},
+		Counts: counting.Counts{Bytes: 100, Lines: 8, Words: 20, Chars: 100},
+	}
+	mdLang := lang.LangCounts{
+		Lines:  lang.LineCounts{Blank: 3, Comment: 0, Code: 10},
+		Counts: counting.Counts{Bytes: 200, Lines: 13, Words: 50, Chars: 200},
+	}
+	return summary.Summary{
+		Dirs: []summary.Directory{
+			{
+				Path:   ".",
+				Counts: counting.Counts{Bytes: 100, Lines: 8, Words: 20, Chars: 100},
+				ByLang: map[lang.Language]lang.LangCounts{lang.LangGo: goLang},
+			},
+			{
+				Path:   "docs",
+				Counts: counting.Counts{Bytes: 200, Lines: 13, Words: 50, Chars: 200},
+				ByLang: map[lang.Language]lang.LangCounts{lang.LangMarkdown: mdLang},
+			},
+		},
+		Total: counting.Counts{Bytes: 300, Lines: 21, Words: 70, Chars: 300},
+		TotalByLang: map[lang.Language]lang.LangCounts{
+			lang.LangGo:       goLang,
+			lang.LangMarkdown: mdLang,
+		},
+	}
+}
+
+// TestRenderer_TotalByLang_TOON verifies that a Summary with two languages in
+// TotalByLang causes a total_by_lang tabular array to appear in TOON output,
+// containing both language names (F33 LangUnknown suppressed).
+func TestRenderer_TotalByLang_TOON(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := NewTOONRenderer()
+	if err := r.RenderTree(&buf, totalByLangFixture(), nil); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "total_by_lang") {
+		t.Errorf("TOON TotalByLang: output missing total_by_lang key; got:\n%s", got)
+	}
+	if !strings.Contains(got, "go") {
+		t.Errorf("TOON TotalByLang: output missing go language row; got:\n%s", got)
+	}
+	if !strings.Contains(got, "markdown") {
+		t.Errorf("TOON TotalByLang: output missing markdown language row; got:\n%s", got)
+	}
+}
+
+// TestRenderer_TotalByLang_JSON verifies that a Summary with two languages in
+// TotalByLang causes a total_by_lang field to appear in JSON output with both
+// language keys (F33 LangUnknown suppressed, omitempty suppresses when empty).
+func TestRenderer_TotalByLang_JSON(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := NewJSONRenderer()
+	if err := r.RenderTree(&buf, totalByLangFixture(), nil); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "total_by_lang") {
+		t.Errorf("JSON TotalByLang: output missing total_by_lang key; got:\n%s", got)
+	}
+	if !strings.Contains(got, `"go"`) {
+		t.Errorf("JSON TotalByLang: output missing go key; got:\n%s", got)
+	}
+	if !strings.Contains(got, `"markdown"`) {
+		t.Errorf("JSON TotalByLang: output missing markdown key; got:\n%s", got)
+	}
+}
+
+// TestRenderer_TotalByLang_Human verifies that a Summary with two languages in
+// TotalByLang causes a "total lang: <name>" KV block to appear in human output
+// for each known language after the "total" block (F33 LangUnknown suppressed).
+func TestRenderer_TotalByLang_Human(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := newHumanRendererWithMode(testHumanMode)
+	if err := r.RenderTree(&buf, totalByLangFixture(), nil); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "total lang: go") {
+		t.Errorf("human TotalByLang: output missing 'total lang: go'; got:\n%s", got)
+	}
+	if !strings.Contains(got, "total lang: markdown") {
+		t.Errorf("human TotalByLang: output missing 'total lang: markdown'; got:\n%s", got)
+	}
+	// The total block must precede any total lang blocks.
+	idxTotal := strings.Index(got, "total")
+	idxTotalLang := strings.Index(got, "total lang:")
+	if idxTotalLang >= 0 && idxTotal >= idxTotalLang {
+		t.Errorf("human TotalByLang: 'total' block must precede 'total lang:' blocks; got:\n%s", got)
+	}
+}
+
+// TestRenderer_TotalByLang_LangUnknownSuppressed verifies that when
+// TotalByLang contains only LangUnknown, no total_by_lang block is emitted by
+// any renderer (F33 uniform suppression).
+func TestRenderer_TotalByLang_LangUnknownSuppressed(t *testing.T) {
+	t.Parallel()
+
+	s := summary.Summary{
+		Dirs: []summary.Directory{
+			{
+				Path:   ".",
+				Counts: counting.Counts{Bytes: 5, Lines: 1, Words: 1, Chars: 5},
+				ByLang: map[lang.Language]lang.LangCounts{
+					lang.LangUnknown: {
+						Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
+						Counts: counting.Counts{Bytes: 5, Lines: 1, Words: 1, Chars: 5},
+					},
+				},
+			},
+		},
+		Total: counting.Counts{Bytes: 5, Lines: 1, Words: 1, Chars: 5},
+		TotalByLang: map[lang.Language]lang.LangCounts{
+			lang.LangUnknown: {
+				Lines:  lang.LineCounts{Blank: 0, Comment: 0, Code: 1},
+				Counts: counting.Counts{Bytes: 5, Lines: 1, Words: 1, Chars: 5},
+			},
+		},
+	}
+
+	t.Run("toon", func(t *testing.T) {
+		t.Parallel()
+		var buf bytes.Buffer
+		r := NewTOONRenderer()
+		if err := r.RenderTree(&buf, s, nil); err != nil {
+			t.Fatalf("RenderTree: %v", err)
+		}
+		got := buf.String()
+		if strings.Contains(got, "total_by_lang") {
+			t.Errorf("TOON: all-unknown TotalByLang must not emit total_by_lang; got:\n%s", got)
+		}
+	})
+
+	t.Run("json", func(t *testing.T) {
+		t.Parallel()
+		var buf bytes.Buffer
+		r := NewJSONRenderer()
+		if err := r.RenderTree(&buf, s, nil); err != nil {
+			t.Fatalf("RenderTree: %v", err)
+		}
+		got := buf.String()
+		if strings.Contains(got, "total_by_lang") {
+			t.Errorf("JSON: all-unknown TotalByLang must not emit total_by_lang; got:\n%s", got)
+		}
+	})
+
+	t.Run("human", func(t *testing.T) {
+		t.Parallel()
+		var buf bytes.Buffer
+		r := newHumanRendererWithMode(testHumanMode)
+		if err := r.RenderTree(&buf, s, nil); err != nil {
+			t.Fatalf("RenderTree: %v", err)
+		}
+		got := buf.String()
+		if strings.Contains(got, "total lang:") {
+			t.Errorf("human: all-unknown TotalByLang must not emit 'total lang:' block; got:\n%s", got)
+		}
+	})
 }

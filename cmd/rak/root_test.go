@@ -648,9 +648,10 @@ type dirResultWithLang struct {
 }
 
 type treeResultWithLang struct {
-	Directories []dirResultWithLang `json:"directories"`
-	Total       counting.Counts     `json:"total"`
-	Errors      []string            `json:"errors,omitempty"`
+	Directories []dirResultWithLang       `json:"directories"`
+	Total       counting.Counts           `json:"total"`
+	TotalByLang map[string]langCountsJSON `json:"total_by_lang,omitempty"`
+	Errors      []string                  `json:"errors,omitempty"`
 }
 
 // TestRootCmd_PerLangRollup verifies that walkAndCount accumulates per-language
@@ -1103,5 +1104,94 @@ func TestRootCmd_FilesField_SurvivesLabelDirectories(t *testing.T) {
 	}
 	if got := filesByPath["myroot/sub"]; got != 3 {
 		t.Errorf("expected myroot/sub files=3, got %d (F44: Files must survive labelDirectories)", got)
+	}
+}
+
+// TestRootCmd_TotalByLang_EndToEnd verifies that walkAndCount aggregates
+// TotalByLang correctly across multiple directories and that the JSON renderer
+// surfaces it under total_by_lang. The fixture has Go files in the root
+// directory and Python files in a sub directory; the total_by_lang must contain
+// both "go" and "python" keys, and their aggregate counts must equal the sum
+// of the corresponding per-directory ByLang entries (F46).
+func TestRootCmd_TotalByLang_EndToEnd(t *testing.T) {
+	t.Parallel()
+
+	// a.go: 1 line, "package main\n" = 13 bytes.
+	// b.go: 1 line, "package main\n" = 13 bytes.
+	// sub/c.py: 1 line, "x = 1\n" = 6 bytes.
+	// sub/d.py: 1 line, "x = 1\n" = 6 bytes.
+	fsys := fstest.MapFS{
+		"a.go":     {Data: []byte("package main\n")},
+		"b.go":     {Data: []byte("package main\n")},
+		"sub/c.py": {Data: []byte("x = 1\n")},
+		"sub/d.py": {Data: []byte("x = 1\n")},
+	}
+
+	opts := listerOpts(&rootFlags{})
+	source := lister.NewWalkLister(fsys, ".", opts)
+	renderer := render.NewJSONRenderer()
+
+	var out bytes.Buffer
+	if err := runDirectory(context.Background(), &out, source, "", false, nil, "lines", false, renderer, 0); err != nil {
+		t.Fatalf("runDirectory: %v", err)
+	}
+
+	var decoded treeResultWithLang
+	if err := json.Unmarshal(out.Bytes(), &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(%s): %v", out.String(), err)
+	}
+
+	// TotalByLang must contain "go" and "python" keys.
+	if decoded.TotalByLang == nil {
+		t.Fatalf("expected total_by_lang to be non-nil; got:\n%s", out.String())
+	}
+	goTotal, hasGo := decoded.TotalByLang["go"]
+	if !hasGo {
+		t.Errorf("total_by_lang missing 'go' key; got keys: %v", byLangKeys(decoded.TotalByLang))
+	}
+	pyTotal, hasPy := decoded.TotalByLang["python"]
+	if !hasPy {
+		t.Errorf("total_by_lang missing 'python' key; got keys: %v", byLangKeys(decoded.TotalByLang))
+	}
+	// LangUnknown must not appear.
+	if _, hasUnknown := decoded.TotalByLang[""]; hasUnknown {
+		t.Errorf("total_by_lang must not contain LangUnknown key; got keys: %v", byLangKeys(decoded.TotalByLang))
+	}
+
+	// Go aggregate: 2 files × 13 bytes each = 26 bytes, 2 lines.
+	if hasGo {
+		if goTotal.Counts.Bytes != 26 {
+			t.Errorf("total_by_lang[go].Counts.Bytes: want 26, got %d", goTotal.Counts.Bytes)
+		}
+		if goTotal.Counts.Lines != 2 {
+			t.Errorf("total_by_lang[go].Counts.Lines: want 2, got %d", goTotal.Counts.Lines)
+		}
+	}
+	// Python aggregate: 2 files × 6 bytes each = 12 bytes, 2 lines.
+	if hasPy {
+		if pyTotal.Counts.Bytes != 12 {
+			t.Errorf("total_by_lang[python].Counts.Bytes: want 12, got %d", pyTotal.Counts.Bytes)
+		}
+		if pyTotal.Counts.Lines != 2 {
+			t.Errorf("total_by_lang[python].Counts.Lines: want 2, got %d", pyTotal.Counts.Lines)
+		}
+	}
+
+	// Verify aggregate equals sum of per-dir ByLang values for each language.
+	// Collect per-dir totals from the directories slice.
+	var sumGoBytes, sumPyBytes int64
+	for _, d := range decoded.Directories {
+		if goEntry, ok := d.ByLang["go"]; ok {
+			sumGoBytes += goEntry.Counts.Bytes
+		}
+		if pyEntry, ok := d.ByLang["python"]; ok {
+			sumPyBytes += pyEntry.Counts.Bytes
+		}
+	}
+	if hasGo && sumGoBytes != goTotal.Counts.Bytes {
+		t.Errorf("total_by_lang[go].Bytes (%d) != sum of per-dir go bytes (%d)", goTotal.Counts.Bytes, sumGoBytes)
+	}
+	if hasPy && sumPyBytes != pyTotal.Counts.Bytes {
+		t.Errorf("total_by_lang[python].Bytes (%d) != sum of per-dir python bytes (%d)", pyTotal.Counts.Bytes, sumPyBytes)
 	}
 }

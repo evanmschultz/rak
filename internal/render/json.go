@@ -92,25 +92,50 @@ func filterUnknown(d summary.Directory) summary.Directory {
 	}
 }
 
-// treeJSON is the top-level envelope for RenderTree. Errors is omitted
-// entirely (via omitempty) when the caller passes a nil / empty slice so
-// the common no-errors case emits a clean two-field object.
+// treeJSON is the top-level envelope for RenderTree. TotalByLang is omitted
+// (via omitempty) when nil or empty (after LangUnknown filtering — F33).
+// Errors is omitted entirely (via omitempty) when the caller passes a nil /
+// empty slice so the common no-errors case emits a clean object.
 type treeJSON struct {
-	Directories []directoryJSON `json:"directories"`
-	Total       counting.Counts `json:"total"`
-	Errors      []string        `json:"errors,omitempty"`
+	Directories []directoryJSON                   `json:"directories"`
+	Total       counting.Counts                   `json:"total"`
+	TotalByLang map[lang.Language]lang.LangCounts `json:"total_by_lang,omitempty"`
+	Errors      []string                          `json:"errors,omitempty"`
 }
 
-// RenderTree encodes the per-directory rollup plus grand total as a JSON
-// object with keys "directories", "total", and (when errs is non-empty)
-// "errors". The emitted directories slice preserves the caller-supplied
-// order; callers are responsible for sorting.
-func (jsonRenderer) RenderTree(w io.Writer, dirs []summary.Directory, total counting.Counts, errs []error) error {
-	payload := treeJSON{
-		Directories: make([]directoryJSON, 0, len(dirs)),
-		Total:       total,
+// filterTotalByLangUnknown returns a copy of totalByLang with lang.LangUnknown
+// removed. If the result is empty, returns nil so omitempty suppresses the
+// field in JSON output (F33 — LangUnknown suppression uniform across all
+// renderers).
+func filterTotalByLangUnknown(totalByLang map[lang.Language]lang.LangCounts) map[lang.Language]lang.LangCounts {
+	if len(totalByLang) == 0 {
+		return nil
 	}
-	for _, d := range dirs {
+	filtered := make(map[lang.Language]lang.LangCounts, len(totalByLang))
+	for k, v := range totalByLang {
+		if k != lang.LangUnknown {
+			filtered[k] = v
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
+}
+
+// RenderTree encodes the per-directory rollup plus grand total, optional
+// per-language grand totals, and optional errors as a JSON object with keys
+// "directories", "total", "total_by_lang" (omitted when empty), and
+// "errors" (omitted when empty). The emitted directories slice preserves
+// the caller-supplied order in s.Dirs; callers are responsible for sorting
+// before constructing s.
+func (jsonRenderer) RenderTree(w io.Writer, s summary.Summary, errs []error) error {
+	payload := treeJSON{
+		Directories: make([]directoryJSON, 0, len(s.Dirs)),
+		Total:       s.Total,
+		TotalByLang: filterTotalByLangUnknown(s.TotalByLang),
+	}
+	for _, d := range s.Dirs {
 		payload.Directories = append(payload.Directories, directoryJSON(filterUnknown(d)))
 	}
 	if len(errs) > 0 {

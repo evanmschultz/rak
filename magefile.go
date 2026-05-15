@@ -12,11 +12,16 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/magefile/mage/mg"
 	"github.com/magefile/mage/sh"
 )
+
+// coverageFloor is the minimum acceptable line coverage percentage for the
+// ./internal/... scope. mage coverage enforces this gate; mage ci invokes it.
+const coverageFloor = 70.0
 
 // Build compiles every package in the module.
 func Build() error {
@@ -54,9 +59,10 @@ func Lint() error {
 }
 
 // CI is the pre-push gate: asserts `gofumpt -l .` output is empty, then runs
-// Lint, then Test. Any failure fails CI.
+// Lint, then Test, then Coverage (70% floor on ./internal/...). Any failure
+// fails CI.
 func CI() error {
-	mg.SerialDeps(gofumptClean, Lint, Test)
+	mg.SerialDeps(gofumptClean, Lint, Test, Coverage)
 	return nil
 }
 
@@ -104,8 +110,9 @@ func Run() error {
 }
 
 // Coverage runs `go test -race -coverpkg=./internal/... -coverprofile=coverage.out ./...`
-// then `go tool cover -func=coverage.out`. report-only until Drop 9.3 flips
-// the 70% floor on as a gate.
+// then `go tool cover -func=coverage.out`. Enforces a coverageFloor (70.0%)
+// on the ./internal/... scope (cmd/rak CLI wiring excluded per decision 22).
+// Exits non-zero if the total percentage falls below the floor.
 func Coverage() error {
 	if err := sh.RunV(
 		"go", "test", "-race",
@@ -115,10 +122,57 @@ func Coverage() error {
 	); err != nil {
 		return fmt.Errorf("mage coverage: test: %w", err)
 	}
-	if err := sh.RunV("go", "tool", "cover", "-func=coverage.out"); err != nil {
+
+	out, err := sh.Output("go", "tool", "cover", "-func=coverage.out")
+	if err != nil {
 		return fmt.Errorf("mage coverage: cover func: %w", err)
 	}
+
+	// Print the full report so the caller can read the per-function breakdown.
+	fmt.Println(out)
+
+	// Parse the total: line. Format: "total:\t(statements)\t87.3%"
+	pct, err := parseCoverageTotal(out)
+	if err != nil {
+		return fmt.Errorf("mage coverage: parse total: %w", err)
+	}
+
+	fmt.Printf("coverage: %.1f%% (floor: %.1f%%, scope: ./internal/...)\n", pct, coverageFloor)
+
+	if pct < coverageFloor {
+		return fmt.Errorf(
+			"coverage %.1f%% is below the %.0f%% floor (scope: ./internal/...)",
+			pct, coverageFloor,
+		)
+	}
+
 	return nil
+}
+
+// parseCoverageTotal extracts the total coverage percentage from `go tool cover
+// -func` output. It expects a line of the form:
+//
+//	total:	(statements)	87.3%
+//
+// Returns an error if no such line is found or the percentage cannot be parsed.
+func parseCoverageTotal(output string) (float64, error) {
+	for _, line := range strings.Split(output, "\n") {
+		if !strings.HasPrefix(line, "total:") {
+			continue
+		}
+		fields := strings.Fields(line)
+		// fields[0]="total:", fields[1]="(statements)", fields[2]="87.3%"
+		if len(fields) < 3 {
+			return 0, fmt.Errorf("unexpected total line format: %q", line)
+		}
+		pctStr := strings.TrimSuffix(fields[len(fields)-1], "%")
+		pct, err := strconv.ParseFloat(pctStr, 64)
+		if err != nil {
+			return 0, fmt.Errorf("cannot parse coverage percentage %q: %w", pctStr, err)
+		}
+		return pct, nil
+	}
+	return 0, fmt.Errorf("no total: line found in go tool cover output")
 }
 
 // PlanCheck will diff main/PLAN.md container titles + states against

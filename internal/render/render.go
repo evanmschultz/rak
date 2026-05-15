@@ -26,17 +26,23 @@ import (
 // is acceptable pre-v1.0 because rak has no external implementers under
 // internal/; see F15 in DROP_3's PLAN.md for the pin. The RenderTree
 // parameter type was updated from the provisional render.Directory to
-// summary.Directory in Drop 7 Unit 7.2 (F37).
+// summary.Directory in Drop 7 Unit 7.2 (F37). In Drop 9 Unit 9.0 the
+// signature was updated to accept a summary.Summary value, collapsing the
+// separate dirs/total/TotalByLang params into one coherent type (F25/F32
+// authorized — no external implementers).
 type Renderer interface {
 	// Render writes counts to w in the implementation's chosen format. It
 	// returns any error surfaced by the underlying writer or formatter.
 	Render(w io.Writer, counts counting.Counts) error
 
-	// RenderTree writes a per-directory rollup (dirs) plus a grand total
-	// (total) and an optional slice of aggregated walker-level errors
-	// (errs) that the caller collected while walking. Implementations must
-	// emit the directories in the order the caller supplied; sorting is
-	// the caller's responsibility. Passing a nil or empty errs slice
-	// suppresses any error-summary section in the rendered output.
-	RenderTree(w io.Writer, dirs []summary.Directory, total counting.Counts, errs []error) error
+	// RenderTree writes a per-directory rollup (s.Dirs) plus a grand total
+	// (s.Total), an optional per-language grand total (s.TotalByLang), and
+	// an optional slice of aggregated walker-level errors (errs) that the
+	// caller collected while walking. Implementations must emit directories
+	// in the order the caller supplied inside s.Dirs; sorting is the
+	// caller's responsibility before constructing s. Passing a nil or empty
+	// errs slice suppresses any error-summary section in the rendered output.
+	// s.TotalByLang nil or empty suppresses any per-language totals block;
+	// F33 LangUnknown suppression is each implementation's responsibility.
+	RenderTree(w io.Writer, s summary.Summary, errs []error) error
 }

@@ -28,7 +28,7 @@ Orch wrote this inline (tier B/C mixed — no planner subagent per WORKFLOW.md �
 
 ### Unit 9.0 — Per-language totals across all dirs
 
-- **State:** todo
+- **State:** done
 - **Paths:**
   - `main/internal/summary/summary.go` (add field)
   - `main/internal/render/render.go` (interface grows)
@@ -90,7 +90,7 @@ Orch wrote this inline (tier B/C mixed — no planner subagent per WORKFLOW.md �
 
 ### Unit 9.3 — Flip mage coverage to a 70% floor gate
 
-- **State:** todo
+- **State:** done
 - **Paths:** `main/magefile.go`, `main/.github/workflows/ci.yml`
 - **Packages:** — (build automation only)
 - **Acceptance:**

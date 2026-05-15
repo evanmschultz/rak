@@ -39,8 +39,9 @@ type Directory struct {
 }
 
 // Summary is the top-level rollup container produced by a completed walk. It
-// holds the per-directory breakdown and a grand-total Counts aggregated across
-// all accepted files in all directories.
+// holds the per-directory breakdown, a grand-total Counts aggregated across
+// all accepted files in all directories, and a per-language grand-total map
+// collapsed across all directories.
 type Summary struct {
 	// Dirs holds one Directory entry per distinct directory observed during
 	// the walk. The ordering of Dirs is determined by the caller (typically
@@ -50,4 +51,12 @@ type Summary struct {
 	// Total is the aggregate byte/line/word/char totals across every accepted
 	// file in every directory.
 	Total counting.Counts
+
+	// TotalByLang is the per-language aggregate collapsed across all accepted
+	// files in all directories. It mirrors the per-directory Directory.ByLang
+	// field but rolled up to the walk level. A nil map means no language
+	// detection data was collected (e.g. all files were LangUnknown). Renderers
+	// apply F33 LangUnknown suppression before emitting this field; it is
+	// their responsibility, not the walk's.
+	TotalByLang map[lang.Language]lang.LangCounts
 }

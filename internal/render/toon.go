@@ -61,19 +61,35 @@ type toonLangRow struct {
 	Lines   int64  `toon:"lines"`
 }
 
+// toonTotalLangRow is a single per-language row in the top-level
+// total_by_lang tabular array. It carries the language name plus the
+// three-way line split and raw counts collapsed across all directories.
+// LangUnknown rows are suppressed before construction (F33).
+type toonTotalLangRow struct {
+	Lang    string `toon:"lang"`
+	Blank   int    `toon:"blank"`
+	Comment int    `toon:"comment"`
+	Code    int    `toon:"code"`
+	Bytes   int64  `toon:"bytes"`
+	Lines   int64  `toon:"lines"`
+}
+
 // toonTree is the top-level envelope for RenderTree. The directories field is
 // a tabular TOON array; the total field is a nested toonCounts block carrying
 // the grand total (spike-confirmed: toon-go emits struct-in-struct as an
-// indented nested block — F20 nested-total contract satisfied); by_lang is a
-// tabular TOON array of per-directory/per-language rows, omitted when empty
-// (F33 — LangUnknown entries never appear); errors is omitted entirely (via
-// omitempty) when the caller passes a nil or empty errs slice — spike-confirmed:
-// toon-go omitempty drops zero/empty fields from output (C7).
+// indented nested block — F20 nested-total contract satisfied); total_by_lang
+// is a tabular TOON array of per-language grand-total rows sorted alphabetically
+// by language string, omitted when empty (F33 — LangUnknown entries never
+// appear); by_lang is a tabular TOON array of per-directory/per-language rows,
+// omitted when empty; errors is omitted entirely (via omitempty) when the
+// caller passes a nil or empty errs slice — spike-confirmed: toon-go omitempty
+// drops zero/empty fields from output (C7).
 type toonTree struct {
-	Directories []toonDirectory `toon:"directories"`
-	Total       toonCounts      `toon:"total"`
-	ByLang      []toonLangRow   `toon:"by_lang,omitempty"`
-	Errors      []string        `toon:"errors,omitempty"`
+	Directories []toonDirectory    `toon:"directories"`
+	Total       toonCounts         `toon:"total"`
+	TotalByLang []toonTotalLangRow `toon:"total_by_lang,omitempty"`
+	ByLang      []toonLangRow      `toon:"by_lang,omitempty"`
+	Errors      []string           `toon:"errors,omitempty"`
 }
 
 // Render marshals a single counting.Counts value as a TOON document to w.
@@ -102,18 +118,21 @@ func (toonRenderer) Render(w io.Writer, counts counting.Counts) error {
 	return nil
 }
 
-// RenderTree marshals a per-directory rollup plus a grand total and optional
-// errors as a TOON document to w. The directories slice is emitted as a
-// tabular TOON array (pipe-delimited columns — F20); the grand total is
-// emitted as a nested "total" block (toonCounts — F20 nested-total contract);
-// by_lang is emitted as a tabular array of per-directory/per-language rows
-// when any directory carries non-unknown language data (F33); errors are
-// omitted when the caller passes nil or an empty slice. The emitted directory
-// order exactly matches the caller-supplied dirs slice; sorting is the
-// caller's responsibility.
-func (toonRenderer) RenderTree(w io.Writer, dirs []summary.Directory, total counting.Counts, errs []error) error {
-	rows := make([]toonDirectory, 0, len(dirs))
-	for _, d := range dirs {
+// RenderTree marshals a per-directory rollup plus a grand total, an optional
+// per-language grand total, and optional errors as a TOON document to w. The
+// directories slice (s.Dirs) is emitted as a tabular TOON array
+// (pipe-delimited columns — F20); the grand total (s.Total) is emitted as a
+// nested "total" block (toonCounts — F20 nested-total contract); total_by_lang
+// is emitted as a tabular array of per-language grand-total rows when
+// s.TotalByLang is non-empty after F33 LangUnknown suppression; by_lang is
+// emitted as a tabular array of per-directory/per-language rows when any
+// directory carries non-unknown language data; errors are omitted when the
+// caller passes nil or an empty slice. The emitted directory order exactly
+// matches the caller-supplied s.Dirs slice; sorting is the caller's
+// responsibility before constructing s.
+func (toonRenderer) RenderTree(w io.Writer, s summary.Summary, errs []error) error {
+	rows := make([]toonDirectory, 0, len(s.Dirs))
+	for _, d := range s.Dirs {
 		rows = append(rows, toonDirectory{
 			Path:  d.Path,
 			Bytes: d.Counts.Bytes,
@@ -127,7 +146,7 @@ func (toonRenderer) RenderTree(w io.Writer, dirs []summary.Directory, total coun
 	// (F33: LangUnknown suppressed). The by_lang field is omitted entirely
 	// via omitempty when the resulting slice is empty.
 	var langRows []toonLangRow
-	for _, d := range dirs {
+	for _, d := range s.Dirs {
 		knownLangs := sortedKnownLangs(d.ByLang)
 		for _, l := range knownLangs {
 			lc := d.ByLang[l]
@@ -151,15 +170,33 @@ func (toonRenderer) RenderTree(w io.Writer, dirs []summary.Directory, total coun
 		return langRows[i].Lang < langRows[j].Lang
 	})
 
+	// Build total_by_lang rows from s.TotalByLang sorted alphabetically by
+	// language (F33: LangUnknown suppressed). Omitted entirely via omitempty
+	// when the resulting slice is empty.
+	knownTotalLangs := sortedKnownLangs(s.TotalByLang)
+	var totalLangRows []toonTotalLangRow
+	for _, l := range knownTotalLangs {
+		lc := s.TotalByLang[l]
+		totalLangRows = append(totalLangRows, toonTotalLangRow{
+			Lang:    string(l),
+			Blank:   lc.Lines.Blank,
+			Comment: lc.Lines.Comment,
+			Code:    lc.Lines.Code,
+			Bytes:   lc.Counts.Bytes,
+			Lines:   lc.Counts.Lines,
+		})
+	}
+
 	payload := toonTree{
 		Directories: rows,
 		Total: toonCounts{
-			Bytes: total.Bytes,
-			Lines: total.Lines,
-			Words: total.Words,
-			Chars: total.Chars,
+			Bytes: s.Total.Bytes,
+			Lines: s.Total.Lines,
+			Words: s.Total.Words,
+			Chars: s.Total.Chars,
 		},
-		ByLang: langRows,
+		TotalByLang: totalLangRows,
+		ByLang:      langRows,
 	}
 	if len(errs) > 0 {
 		msgs := make([]string, 0, len(errs))

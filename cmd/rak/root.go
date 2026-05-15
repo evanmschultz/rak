@@ -248,7 +248,7 @@ func runDirectory(
 	renderer render.Renderer,
 	maxFiles int,
 ) error {
-	dirs, total, aggErrs, err := walkAndCount(ctx, source, binary, langs, maxFiles)
+	dirs, total, totalByLang, aggErrs, err := walkAndCount(ctx, source, binary, langs, maxFiles)
 	if err != nil {
 		return err
 	}
@@ -264,7 +264,12 @@ func runDirectory(
 	// operates on the final user-facing paths (Decision 3.3, F39).
 	summary.SortDirs(labeled, summary.SortKey(sortKey), sortAsc)
 
-	if err := renderer.RenderTree(w, labeled, total, aggErrs); err != nil {
+	s := summary.Summary{
+		Dirs:        labeled,
+		Total:       total,
+		TotalByLang: totalByLang,
+	}
+	if err := renderer.RenderTree(w, s, aggErrs); err != nil {
 		return fmt.Errorf("render tree: %w", err)
 	}
 	return nil
@@ -272,7 +277,8 @@ func runDirectory(
 
 // walkAndCount iterates source.List(ctx), aggregates per-directory counts,
 // and returns the directory list (in deterministic lexical order), the
-// grand total, and any per-entry errors the caller should surface via the
+// grand total, a per-language grand total collapsed across all directories
+// (F46), and any per-entry errors the caller should surface via the
 // renderer's error summary.
 //
 // Only ctx.Err() and the --max-files limit abort the walk; all other error
@@ -300,12 +306,15 @@ func runDirectory(
 // accepted for v0.1.0. Split errors are aggregated into aggErrs but do not
 // prevent the file's byte/line/word/char counts from being included. The
 // per-dir/per-lang LangCounts are accumulated into byDirLang and surfaced via
-// Directory.ByLang. LangUnknown suppression (F33) is the renderer's
-// responsibility; walkAndCount includes LangUnknown in byDirLang.
-func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, langs []string, maxFiles int) ([]summary.Directory, counting.Counts, []error, error) {
+// Directory.ByLang. The walk-level totalByLang map accumulates the same
+// LangCounts across all directories (F46). LangUnknown suppression (F33) is
+// the renderer's responsibility; walkAndCount includes LangUnknown in both
+// byDirLang and totalByLang.
+func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, langs []string, maxFiles int) ([]summary.Directory, counting.Counts, map[lang.Language]lang.LangCounts, []error, error) {
 	byDir := map[string]counting.Counts{}
 	byDirLang := map[string]map[lang.Language]lang.LangCounts{}
 	byDirFiles := map[string]int64{}
+	totalByLang := map[lang.Language]lang.LangCounts{}
 	var total counting.Counts
 	var aggErrs []error
 	var acceptedFiles int
@@ -327,7 +336,7 @@ func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, la
 			// The lister yields ctx.Err() once and then stops; treat it
 			// as fatal here because the user asked to cancel.
 			if errors.Is(walkErr, context.Canceled) || errors.Is(walkErr, context.DeadlineExceeded) {
-				return nil, counting.Counts{}, nil, fmt.Errorf("walk: %w", walkErr)
+				return nil, counting.Counts{}, nil, nil, fmt.Errorf("walk: %w", walkErr)
 			}
 			// Any other per-entry error goes into the error summary and
 			// the walk continues (F6).
@@ -397,7 +406,7 @@ func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, la
 		// reaches the limit. Partial results are discarded to avoid misleading
 		// callers with an incomplete view of the tree.
 		if maxFiles > 0 && acceptedFiles >= maxFiles {
-			return nil, counting.Counts{}, nil, fmt.Errorf("rak: file count exceeded --max-files %d: %w", maxFiles, ErrMaxFilesExceeded)
+			return nil, counting.Counts{}, nil, nil, fmt.Errorf("rak: file count exceeded --max-files %d: %w", maxFiles, ErrMaxFilesExceeded)
 		}
 
 		// Accumulate per-lang LangCounts for this directory (F30).
@@ -407,6 +416,11 @@ func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, la
 		lc := byDirLang[dir][detectedLang]
 		lc.Add(lang.LangCounts{Lines: lineCounts, Counts: fileCounts})
 		byDirLang[dir][detectedLang] = lc
+
+		// Accumulate per-lang LangCounts across all directories (F46).
+		tlc := totalByLang[detectedLang]
+		tlc.Add(lang.LangCounts{Lines: lineCounts, Counts: fileCounts})
+		totalByLang[detectedLang] = tlc
 	}
 
 	dirs := make([]summary.Directory, 0, len(byDir))
@@ -414,7 +428,7 @@ func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, la
 		dirs = append(dirs, summary.Directory{Path: p, Counts: c, ByLang: byDirLang[p], Files: byDirFiles[p]})
 	}
 
-	return dirs, total, aggErrs, nil
+	return dirs, total, totalByLang, aggErrs, nil
 }
 
 // countFile opens f via the lister-reported handle, streams it through
