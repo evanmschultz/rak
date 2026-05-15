@@ -24,7 +24,7 @@ Import DAG extension: `lister → fileset, ignore, os/exec` (new leaf-ish mid-ti
 
 ### Unit 4.0 — Add toon-go dep via mage addDep
 
-- **State:** todo
+- **State:** done
 - **Paths:** `main/go.mod`, `main/go.sum`
 - **Packages:** — (dep-management only; no Go source files changed)
 - **Acceptance:**
