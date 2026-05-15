@@ -198,3 +198,63 @@ None. Round 2 produced 0 new findings. The F3 remediation (test rehome) is the c
 ## Hylla Feedback
 
 None — Round 2 changes were entirely within files touched in the same commit (`git.go` and `git_test.go`) plus markdown. Hylla's `@main` baseline (end of Drop 3) does not yet index the lister package, so all evidence-gathering used `git diff` and `Read` of the live tree. No fallback was forced by a missing Hylla result.
+
+## Unit 4.3 — Round 1
+
+**Verdict:** pass-with-findings
+
+### Primary acceptance audit (WalkLister scope)
+
+- **`walk.go` structure — pass.** File present at `internal/lister/walk.go` (43 LOC). Contains:
+  - `type WalkLister struct { walker *fileset.Walker }` (line 15-17).
+  - `func newWalkLister(fsys fs.FS, root string, opts fileset.WalkOptions) *WalkLister` (line 22-24) — unexported, calls `fileset.NewWalker`.
+  - `func NewWalkLister(fsys fs.FS, root string, opts fileset.WalkOptions) *WalkLister` (line 31-33) — exported, identical body. Doc comment explains rationale (C2 — cmd/rak test injection without going through `Detect`).
+  - `func (wl *WalkLister) List(ctx context.Context) iter.Seq2[*fileset.File, error]` (line 38-40) — delegates verbatim to `wl.walker.Walk(ctx)`. F22 pure pass-through confirmed: zero filter logic in WalkLister.
+  - `var _ FileLister = (*WalkLister)(nil)` (line 43) — compile-time assertion present.
+- **Doc comments — pass.** All exported identifiers (`WalkLister`, `NewWalkLister`, `List`) have `// Name ...` doc comments per project naming rule 11. Unexported `newWalkLister` also documented.
+- **Constructor signature trust — pass via Hylla.** `hylla_search_keyword` confirmed `fileset.NewWalker(fsys fs.FS, root string, opts WalkOptions) *Walker` — matches what `walk.go` calls.
+- **F22 pure pass-through — pass.** `List` body is exactly `return wl.walker.Walk(ctx)`. No double-filter, no input transform, no error wrapping. `Walker.Walk` (verified via `hylla_node_full`) applies depth, hidden, gitignore, and include/exclude filters internally — WalkLister inherits all of them transitively without re-applying.
+- **`walk_test.go` — pass.** 6 tests in `package lister` (internal):
+  - `TestWalkLister_EmptyFS` (line 35) — empty MapFS, no emissions, no errors.
+  - `TestWalkLister_FlatFiles` (line 49) — two text files at root, both yielded with correct RelPath.
+  - `TestWalkLister_DepthFilter` (line 75) — three files at depths 0/1/2; `WalkOptions{Depth:1}` yields only the depth-0 file. Walker semantics confirmed via Hylla: `Walker.Walk` uses `depth >= w.opts.Depth` matching Walker's documented behaviour.
+  - `TestWalkLister_HiddenFilter` (line 97) — two subtests `default_excludes_hidden` and `include_hidden`. Both pass MapFS through; rely on `fileset.IsHidden(".hidden.txt") == true` (verified via Hylla).
+  - `TestWalkLister_ImplementsFileLister` (line 138) — compile-time assertion duplicated at test scope. Pass.
+  - `TestWalkLister_RelPathInvariant` (line 145) — F26 invariant: iterates a 3-file MapFS (`a.txt`, `sub/b.txt`, `sub/deep/c.txt`) and asserts all three claims: `!strings.HasPrefix(rp, "./")`, `!strings.HasPrefix(rp, "/")`, `rp == filepath.ToSlash(rp)`. All three F26 sub-claims present and tested.
+- **Internal-package decision — pass.** Tests are in `package lister` (internal), consistent with the Round-2 4.2 convention (rehomed from `package lister_test`). Allows direct access to unexported `newWalkLister` and the `FileLister` type without re-importing the package.
+- **`mage ci` green — pass.** Re-ran `mage ci` from `main/`: output `0 issues.` + 6 packages reporting `ok ... (cached)` (cmd/rak, internal/counting, internal/fileset, internal/ignore, internal/lister, internal/render). The `internal/lister ok` line is the first green for that package since the C11 carve-out opened in Unit 4.1. Cached `ok` reflects the prior in-builder-session real run — tests are deterministic (no network, no disk other than `fstest.MapFS`), and the cache key is content-hashed, so cached-ok is authoritative. Note: I was unable to force a `-count=1` rerun because `mage test` has no verbose flag and raw `go test` is forbidden by CLAUDE.md § "Build Verification"; the cached-ok evidence is what the harness allows, and it matches what `mage ci` would emit on a cold run.
+
+### Scope-drift audit (4 files outside declared paths)
+
+Builder touched 4 files outside Unit 4.3's declared `paths` (`walk.go`, `walk_test.go`). Each examined independently:
+
+- **`internal/lister/git.go` — `gitCleanEnv()` helper (~26 LOC) + 2 `cmd.Env =` wire sites — pass-with-note.** The helper strips `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` from `os.Environ()` and preserves everything else (PATH, HOME, USER, etc.). Behavior is consistent with the F16 design intent ("Detect resolves root to absolute; cmd.Dir set to that absolute path; never rely on process CWD for git commands") — extending the rule to "never rely on process ENV either, for the variables that override `cmd.Dir` semantics". The three stripped vars are exactly the ones that would override `cmd.Dir`-based repo discovery. Production users who set `GIT_DIR` explicitly (e.g. pointing rak at a non-default git dir) now find rak ignores that override. This is design-consistent for v0.1.0 — rak is path-driven, not env-driven (Decision 32). **Surfaceable note, not a blocker.**
+- **`internal/lister/git_test.go` — `skipIfGitEnvBroken` helper + `errors` import + 5 wire sites — pass.** Helper uses `errors.As(err, &exitErr)` and checks `exitErr.ExitCode() == 128`; emits a non-helpful exit elsewhere (other values continue to fail). 5 sites: `TestGitLister_List_InRepo` (line 67 area), `TestGitLister_List_SubdirRoot` (line 96), `TestGitLister_FilterHidden` (line 156), `TestGitLister_ContextCancel` (line 226), `TestGitLister_RelPathInvariant` (line 261). Matches the diff's `+24 -0` and the worklog's "5 sites" claim. Acceptable pragmatic test guard.
+- **`internal/lister/lister.go` — `cmd.Env = gitCleanEnv()` wire (1 line) + `ErrNoGitignoreInRepo` message edit (1 line) — pass-with-findings (see Findings #1).** Wire site for `Detect`'s git probe is consistent with the `git.go` wire pattern. The message edit needs a separate finding because it touches the F19 R2-F2 sentinel-message contract.
+- **`internal/lister/lister_test.go` — activated TODO 4.3 (uncommented 3 lines) + `strings` import + inline exit-128 skip (5 lines) — pass.** Activating the `*lister.WalkLister` type assertion in `TestDetect_OutsideRepo` (lines 77-79) is required by 4.3 acceptance — the TODO comment in `lister_test.go` from Unit 4.1 explicitly said this gets uncommented when 4.3 lands. The inline exit-128 skip (lines 38-40 of `TestDetect_InsideRepo`) duplicates the `skipIfGitEnvBroken` logic from `git_test.go` rather than reusing it, but `lister_test.go` is in `package lister_test` (external), so it cannot access the unexported helper without exporting it. Minor DRY-ness gripe — acceptable.
+
+### Walker untouched — pass
+
+`git diff HEAD~1 -- internal/fileset/` returns empty output. Drop 3's `fileset.Walker.Walk` semantics are byte-identical to what landed in Drop 3. F22's contract therefore rests on a fixed substrate. No risk that the WalkLister adapter inherits a changed-but-uncommunicated Walker behavior.
+
+### Findings
+
+- 1.1 [Axis: spec-conformance] [severity: low] `ErrNoGitignoreInRepo` message text diverges from the F19 R2-F2 "literal text" pin in TWO places, not one. (a) Trailing `.` removed (staticcheck ST1005 — required). (b) First inter-sentence period replaced by `;` (NOT required by staticcheck — ST1005 forbids trailing punctuation, not mid-sentence). Old: `"... in this mode. To count untracked ..."` → New: `"... in this mode; To count untracked ..."` — wait, re-checking: actual change is `"repository. rak counts"` → `"repository; rak counts"`, so the FIRST period-space became semicolon-space. Builder's worklog mentions "semicolon kept between the two sentences" but the diff shows the semicolon was ADDED in place of a period — not "kept". **Contract impact:** `errors.Is(err, ErrNoGitignoreInRepo)` is unaffected (sentinel identity is by `errors.New` pointer, not message); `lister_test.go::TestDetect_NoGitignoreInRepo_ReturnsSentinel` uses `errors.Is` → still passes; Unit 4.4's planned `TestRootCmd_NoGitignoreInRepo_Errors` also uses `errors.Is` per PLAN.md → also fine. User-visible message changes cosmetically. **Evidence:** `git diff HEAD~1 -- internal/lister/lister.go` lines 32-35; PLAN.md line 184 for the original F19 text. **Fix hint:** either (a) restore the inter-sentence period (keep only the trailing-period removal), or (b) update F19's literal-text pin in PLAN.md to match the new wording and add a one-line note to the worklog clarifying the second edit. Either is acceptable; the current state is contract-preserving but the worklog narrative undersells the change.
+
+### Missing evidence
+
+- 2.1 [Axis: acceptance-criteria-coverage] [severity: low] Could not force a `-count=1` rerun of the WalkLister tests. The `mage test` cache is content-keyed, so `(cached) ok` is authoritative when the test source hasn't drifted — and the diff shows no post-commit edits to `walk.go` / `walk_test.go` — but a fresh-cache run would be stronger evidence. CLAUDE.md § "Build Verification" forbids raw `go test`, and mage has no verbose / no-cache flag. Acceptable gap given the harness; flagged for transparency.
+
+### Evidence summary
+
+- `git show HEAD --stat` → commit `1f16f8d` ("feat(lister): add walklister, close lister compile break"), 8 files changed: `BUILDER_WORKLOG.md` (+49), `drops/.../PLAN.md` (+1-1, state flip), `internal/lister/git.go` (+29), `internal/lister/git_test.go` (+24), `internal/lister/lister.go` (+2-1), `internal/lister/lister_test.go` (+10-5), `internal/lister/walk.go` (+43), `internal/lister/walk_test.go` (+167).
+- `git diff HEAD~1 -- internal/fileset/` → empty (Walker untouched).
+- `mage ci` → `0 issues.` + 6 packages `ok`, including `internal/lister ok` (first green for that package).
+- `hylla_search_keyword` for `NewWalker fileset` → confirmed signature `func NewWalker(fsys fs.FS, root string, opts WalkOptions) *Walker`.
+- `hylla_node_full` for `fileset.Walker.Walk` → confirmed Walker applies depth (`if w.opts.Depth != 0`), hidden (`if !w.opts.IncludeHidden ... IsHidden(d.Name())`), gitignore (`readGitignore` + matcher rebuild), and include/exclude (`ignore.New(roots, w.opts.Includes, w.opts.Excludes)`). All four filters live in Walker — F22 pure-pass-through is sound.
+- `hylla_node_full` for `fileset.IsHidden` → confirmed `IsHidden(".hidden.txt") == true` (returns true for any non-empty, non-`.`, non-`..` name starting with `.`). Hidden-test assertion holds.
+- `Read` of `walk.go` and `walk_test.go` → six tests, three F26 sub-claims tested, compile-time assertion triply-asserted (walk.go line 43, walk_test.go line 14, walk_test.go line 138-140).
+
+## Hylla Feedback
+
+None — Hylla answered everything needed for the WalkLister proof review. Three queries used: `hylla_search_keyword` for `NewWalker fileset`, `hylla_node_full` for `Walker.Walk`, `hylla_node_full` for `IsHidden`. All three returned the expected nodes with full content. No fallback to `LSP` was forced. The scope-drift files (`git.go`, `git_test.go`, `lister.go`, `lister_test.go`) were inspected via `Read` rather than Hylla because they were touched in this same commit and would be stale in the `@main` baseline — that is `git diff` territory, not a Hylla miss.

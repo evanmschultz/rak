@@ -62,6 +62,13 @@ Each drop carries a `Tier:` field in its `PLAN.md` header. The tier sets which p
 
 **Drop 3's tier (hindsight): A.** The cascade caught F14 (yield-false → must return `fs.SkipAll`), C4 (symlink regression guard), and C10 (binary-detection error policy). Worth the cost.
 
+### Carve-out + Scope Discipline (Drop 4 hindsight)
+
+Two cascade-discipline rules surfaced during Drop 4 Unit 4.3 plan-QA. Apply to future drops:
+
+- **Lint coverage is conditional on package compilation.** When a unit deliberately leaves its package non-compiling (a "carve-out" unit per WORKFLOW.md, e.g. Drop 4 Unit 4.1's `internal/lister` C11 carve-out), `mage lint` on that package is a vacuous no-op. Defer lint-acceptance to the unit that *closes* the carve-out. The closing unit's QA should explicitly verify lint cleanliness on the previously-broken package — pre-existing lint errors introduced by carve-out units only surface when the package compiles for the first time. Drop 4 saw this with a staticcheck ST1005 error from Unit 4.1 only catching at Unit 4.3's `mage ci`.
+- **Out-of-paths changes should be pre-declared OR split.** When a builder's diff touches files outside the unit's declared `Paths`, the surrounding cascade can lose track of what concerns are bundled. Rule of thumb: out-of-paths changes are acceptable when (a) they are necessary for the unit's acceptance criteria (e.g. fixing a lint error blocking `mage ci`), (b) they are minimal, and (c) the worklog explicitly enumerates each file touched outside scope with a one-line justification. If any of (a)/(b)/(c) fails, the cleaner discipline is a separate pre-build hygiene commit before the unit lands. Drop 4 Unit 4.3 bundled three concerns (WalkLister adapter + sandbox-env workaround + Unit 4.1 lint fix) — acceptable but borderline; future cascades should split when feasible.
+
 ---
 
 ## Agent Spawn Contract

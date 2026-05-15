@@ -86,7 +86,7 @@ Import DAG extension: `lister → fileset, ignore, os/exec` (new leaf-ish mid-ti
 
 ### Unit 4.3 — internal/lister.WalkLister: Walker adapter + exported constructor
 
-- **State:** done
+- **State:** in_progress
 - **Paths:** `main/internal/lister/walk.go`, `main/internal/lister/walk_test.go`
 - **Packages:** `github.com/evanmschultz/rak/internal/lister`
 - **Acceptance:**
@@ -213,6 +213,7 @@ This creates a soft conflict with decision 34's strict reading ("whatever git tr
 - **Submodules:** appear as a single tracked entry (the submodule pointer file, not the submodule's contents — this is git's default behavior). rak counts the pointer; it does not recurse into the submodule. No special-case code in v0.1.0. A future `--recurse-submodules` flag may revisit this.
 - **Sparse-checkout:** `git ls-files` returns only what is checked in under the sparse pattern. rak counts whatever git returns.
 - **Worktrees:** rak's own development happens in a worktree (`main/` is a worktree of the bare repo one level up), so this configuration is validated by daily use. No special-case code needed.
+- **Environment variables (Unit 4.3 / F4):** GitLister strips `GIT_DIR`, `GIT_WORK_TREE`, and `GIT_INDEX_FILE` from the environment of every `git` subprocess it spawns (via the `gitCleanEnv()` helper in `git.go`). Rationale: rak is path-driven per decision 32 — repo detection uses `cmd.Dir` set to the absolute walk root, not env-based overrides. Stripping these vars ensures user-set env doesn't divert rak to a different repo than the path argument indicates. End users who rely on `GIT_DIR` to point git at a non-default repo will see rak ignore that var in v0.1.0; this is deliberate. A future `--git-env-passthrough` flag may opt this back in if usage signals.
 
 ### Empirical Notes: Decision E (git ls-files CWD Scoping)
 
