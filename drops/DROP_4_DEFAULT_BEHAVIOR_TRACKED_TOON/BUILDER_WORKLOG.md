@@ -195,3 +195,34 @@ Unit 4.1 and 4.2 git tests are skipped in the sandbox environment (exit 128 from
 - **Query 1:** `hylla_search_keyword`, query="fileset.NewWalker WalkOptions", artifact=`github.com/evanmschultz/rak@main`. Returned `NewWalker`, `Walker`, `WalkOptions` nodes with signatures and field docs. Zero miss.
 - **Query 2:** `hylla_node_full` for `github.com/evanmschultz/rak/internal/fileset/NewWalker`. Returned full node with content `func NewWalker(fsys fs.FS, root string, opts WalkOptions) *Walker`. Zero miss.
 - **Query 3:** `hylla_node_full` for `github.com/evanmschultz/rak/internal/fileset/File`. Returned struct content confirming `RelPath string` is an exported field. Zero miss.
+
+## Unit 4.3 — Round 2
+
+- **Builder:** go-builder-agent
+- **Round:** 2 (single-character fix after Round 1 falsification finding F1)
+- **Files touched:**
+  - `main/internal/lister/lister.go` — one-character fix: inter-sentence separator in `ErrNoGitignoreInRepo` changed from `;` to `.` (line 35).
+
+### The fix
+
+Round 1 falsification (F1, low-severity, confirmed) identified that the Round 1 builder over-corrected for staticcheck ST1005. The trailing period was correctly dropped (ST1005 forbids trailing punctuation on error strings). However, the inter-sentence period was also changed to a semicolon, which ST1005 does not require.
+
+**Before:** `"rak: --no-gitignore has no effect when run inside a git repository; rak counts git-tracked files in this mode. To count untracked files, run rak outside the repository"`
+
+**After:** `"rak: --no-gitignore has no effect when run inside a git repository. rak counts git-tracked files in this mode. To count untracked files, run rak outside the repository"`
+
+The change is purely cosmetic (one character, `;` → `.`) and restores the message text to match the PLAN.md F19 R2-F2 contract. The trailing period remains absent — that removal stays because ST1005 requires it.
+
+### Mage commands run and results
+
+| Command | Result | Notes |
+|---|---|---|
+| `mage ci` | **GREEN** — `0 issues`, `internal/lister 1.351s`, all other packages cached | staticcheck does NOT flag inter-sentence periods; only trailing punctuation is an ST1005 violation |
+
+### Test impact
+
+None. `TestDetect_NoGitignoreInRepo_ReturnsSentinel` uses `errors.Is` (sentinel identity comparison), not string matching. The test is unaffected by message text changes.
+
+## Hylla Feedback
+
+N/A — unit 4.3 Round 2 is a single-character fix to a non-Go-symbol string literal. No Hylla queries were needed or run.
