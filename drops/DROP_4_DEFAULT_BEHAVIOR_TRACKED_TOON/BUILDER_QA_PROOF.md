@@ -141,3 +141,60 @@ N/A — this QA pass touched only Go source files that were freshly added or mod
 ## Hylla Feedback
 
 None — Hylla answered everything needed at the Drop 3 baseline (the symbols `GitLister` consumes — `fileset.IsHidden`, `fileset.NewFile` not yet in Hylla because added in Unit 4.1 post-baseline, `ignore.New`, `fileset.WalkOptions` — were verified via `Read` of the live tree for the Unit 4.1 deltas and from baseline knowledge for the rest). No fallback was forced by a missing Hylla result.
+
+## Unit 4.2 — Round 2
+
+**Verdict:** pass
+
+### Round-1-finding resolution audit
+
+- **F3 (`NewGitListerForTest` deleted + `git_test.go` rehomed)** — **pass**.
+  - **Export deleted:** `git diff HEAD~1 -- internal/lister/git.go` shows the entire `NewGitListerForTest` block removed (7 LOC: doc comment block + `func NewGitListerForTest(...) (*GitLister, error) { return newGitLister(ctx, root, opts) }`). Direct read of `internal/lister/git.go` confirms no `NewGitListerForTest` symbol exists at any line. The only remaining exported lister symbol set is: `GitLister` (struct, line 28 — intentionally kept per Unit 4.1's `lister_test.go` type assertion at line 41) and its `List` method (line 98). No "ForTest" suffix anywhere in the public surface.
+  - **`git_test.go` rehomed:** `git_test.go` line 1 is now `package lister` (verified by direct Read; diff hunk header confirms `-package lister_test` → `+package lister`). The `github.com/evanmschultz/rak/internal/lister` self-import is removed (diff shows `-	"github.com/evanmschultz/rak/internal/lister"`). The current import block is `context`, `os/exec`, `path/filepath`, `strings`, `testing`, `github.com/evanmschultz/rak/internal/fileset` — no self-import.
+  - **All call sites rewritten:** the diff shows 6 substitutions of `lister.NewGitListerForTest(...)` → `newGitLister(...)`, covering every test that constructed a `GitLister`: `TestGitLister_List_InRepo` (line 50), `TestGitLister_List_SubdirRoot` (line 78), `TestGitLister_FilterHidden` (×2 at lines 137 and 155), `TestGitLister_ContextCancel` (line 206), `TestGitLister_RelPathInvariant` (line 240). All 6 now call the unexported `newGitLister` directly, accessible because the test file shares the `lister` package.
+  - **`lister_test.go` unaffected:** Read of `internal/lister/lister_test.go` confirms line 1 still reads `package lister_test`; the type assertion at line 41 still references `*lister.GitLister` (exported type, unchanged). The only symbols `lister_test.go` consumes from package `lister` are `lister.Detect`, `lister.GitLister`, and `lister.ErrNoGitignoreInRepo` — none of which were affected by the F3 fix. No compile break introduced in this file.
+  - **Doc comment on `GitLister` updated:** `git.go` lines 26-27 now read `"GitLister is exported so callers (e.g. lister_test.go) can perform type assertions on the value returned by lister.Detect."` — the stale reference to "TODO unit 4.2 markers" from Round 1 is gone, and the explanation correctly identifies the actual exported use-case (the external `lister_test.go` type assertion).
+
+- **F1 (loop-order note in worklog)** — **pass**. `BUILDER_WORKLOG.md` Round 2 lines 121-123 (verified via Read) contain an explicit section heading `### F1 note — loop-order deviation from PLAN.md acceptance` followed by a 2-sentence note: *"Loop-order deviation from PLAN.md acceptance (context check hoisted from step 5 to step 1 in the `List` per-path loop) is deliberate — provides faster cancellation response without changing the emitted set. PLAN.md lists context as step 5 for narrative ordering; the implementation prioritizes it at step 1 for runtime correctness (fail-fast on cancellation before doing any string work)."* The note documents the deviation, justifies it (cancellation latency), and explicitly clarifies that the emitted set is unchanged — exactly what Round 1's F1 finding asked for.
+
+- **F2 (non-first-segment hidden test)** — **pass**. `git_test.go` lines 180-196 contain a new `t.Run("anySegmentHidden_NonFirstSegment", ...)` sub-test inside `TestGitLister_FilterHidden`. The sub-test directly calls the unexported `anySegmentHidden` helper (accessible now that the test is in `package lister`) with 4 table-driven cases:
+  - `"internal/.cache/x.bin"` → expects `true` (hidden at segment index 1) — **directly exercises the loop body past index 0**, which is the case Round 1 flagged as uncovered.
+  - `"a/b/.hidden/c.txt"` → expects `true` (hidden at segment index 2) — additionally exercises a deeper-nested path.
+  - `"normal/path/file.go"` → expects `false` (negative case, verifies the function correctly returns false when no segment is hidden).
+  - `".hidden"` → expects `true` (hidden at index 0, kept for completeness).
+  The new sub-test is paired with a doc-comment update at lines 128-129 explaining the F2 coverage purpose. The negative case (`"normal/path/file.go"`) is critical — without it, the test could pass with a buggy `anySegmentHidden` that always returns true.
+
+### Regression checks
+
+- **Mage scoped subset green** — **pass**. Ran `mage test ./internal/fileset/... ./internal/counting/... ./internal/ignore/... ./internal/render/... ./internal/summary/... ./cmd/...`. (Mage's `test` target wraps `go test -race ./...`, so output enumerates the full module.) Results:
+  - `ok cmd/rak (cached)`
+  - `ok internal/counting (cached)`
+  - `ok internal/fileset (cached)`
+  - `ok internal/ignore (cached)`
+  - `ok internal/render (cached)`
+  - `FAIL internal/lister [build failed]` — expected C11 carve-out (see next bullet).
+  - `internal/summary` and `internal/tokens` packages do not exist yet (forward-looking in PLAN.md project map); absence is correct for the current tree, not a regression.
+- **C11 narrowing unchanged** — **pass**. Ran `mage build ./internal/lister/...`. Exit 1 with exactly two compile errors, both `undefined: newWalkLister`:
+  - `internal/lister/lister.go:57:10: undefined: newWalkLister`
+  - `internal/lister/lister.go:77:10: undefined: newWalkLister`
+  Identical to Round 1's output (same two lines, same symbol). No NEW undefined symbols appeared after the F3 rehome — confirming `newGitLister`, `anySegmentHidden`, and the test-internal access pattern all resolve correctly within `package lister`. The lister package will remain in this exact state until Unit 4.3 lands `newWalkLister`.
+- **Unit state back to done** — **pass**. `drops/DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON/PLAN.md` line 60 reads `- **State:** done` (under `### Unit 4.2 — internal/lister.GitLister: git-backed file enumeration`). The diff confirms the line flipped from `in_progress` to `done` in the same commit (`d65b97c`). Round 1's findings were addressed in-place with no new compile or test surface area added beyond the F2 sub-test.
+
+### Findings
+
+None. Round 2 produced 0 new findings. The F3 remediation (test rehome) is the cleaner of the two options Round 1 floated (delete the export entirely vs. switch to `export_test.go` shim) — it removes the public-surface noise without introducing a new test-only file, and aligns the lister package's test-style with the project's mixed internal/external pattern (consistent with how `fileset` and `counting` keep tests internal). F1 worklog note is precise and load-bearing (documents intentional deviation). F2 sub-test directly exercises the previously-uncovered loop body of `anySegmentHidden` with both positive (deeper-than-first-segment) and negative cases.
+
+### Evidence summary
+
+- `git log --oneline -5` → revise commit is `d65b97c` ("refactor(lister): drop newgitlisterfortest, rehome gitlister tests").
+- `git show HEAD --stat` → 4 files changed: `BUILDER_WORKLOG.md` (+42), `drops/.../PLAN.md` (+1-1, state flip), `internal/lister/git.go` (+2-10, NewGitListerForTest delete + doc update), `internal/lister/git_test.go` (+31-8, package decl + import drop + 6 call-site rewrites + F2 sub-test).
+- `git diff HEAD~1 -- internal/lister/`: matches the four edits above; no other lister deltas.
+- Direct Read of `internal/lister/git.go`: no `NewGitListerForTest` symbol present; `GitLister` still exported; doc comment refreshed.
+- Direct Read of `internal/lister/git_test.go`: `package lister` at line 1; no `lister` self-import; all `newGitLister(...)` call sites; new `anySegmentHidden_NonFirstSegment` t.Run at lines 180-196 with 4 table cases (3 positive + 1 negative).
+- Direct Read of `internal/lister/lister_test.go`: still `package lister_test` at line 1; still imports `internal/lister`; type assertion at line 41 still `*lister.GitLister` (exported type unaffected).
+- `mage build ./internal/lister/...`: exit 1 with exactly two `undefined: newWalkLister` errors (lines 57 + 77 of lister.go). Same narrowing as Round 1.
+- `mage test ./internal/fileset/... ./internal/counting/... ./internal/ignore/... ./internal/render/... ./internal/summary/... ./cmd/...`: 5 non-lister packages report `ok ... (cached)`; only `internal/lister` fails (expected C11 carve-out).
+
+## Hylla Feedback
+
+None — Round 2 changes were entirely within files touched in the same commit (`git.go` and `git_test.go`) plus markdown. Hylla's `@main` baseline (end of Drop 3) does not yet index the lister package, so all evidence-gathering used `git diff` and `Read` of the live tree. No fallback was forced by a missing Hylla result.
