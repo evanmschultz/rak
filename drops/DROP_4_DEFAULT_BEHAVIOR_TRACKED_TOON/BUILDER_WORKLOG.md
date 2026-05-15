@@ -452,3 +452,28 @@ No other logic changed. Tests are untouched.
 
 **Local mage ci result:** All packages pass green (including `internal/lister` — 1.580s).
 - **Missed because:** Same stale snapshot reason as Query 1.
+
+## Drop 4 CI Fix v2 — hermetic Detect tests
+
+- **Builder:** go-builder-agent
+- **Date:** 2026-05-14
+
+**Why safe.directory didn't suffice:**
+
+The `-c safe.directory=*` patch addressed the dubious-ownership failure mode, but CI still failed. The deeper root cause is that the tests used `filepath.Abs("../../..")` to resolve the rak repo root from the package directory. On GitHub Actions Linux runners the working directory at test time does not resolve to a valid git work tree as seen by `git rev-parse` — either the resolved path isn't recognized, or the environment is structured differently from a standard checkout. The tests were environment-coupled: they assumed "the package directory is inside the rak git repo at a known relative depth," which is only true on a full developer checkout.
+
+**Fix — hermetic tempdir + git init:**
+
+Rewrote `TestDetect_InsideRepo` and `TestDetect_NoGitignoreInRepo_ReturnsSentinel` in `internal/lister/lister_test.go` to:
+
+1. `exec.LookPath("git")` — skip if no git binary.
+2. `tmp := t.TempDir()` — fresh isolated dir.
+3. `exec.Command("git", "init", "--template=", tmp)` — init a bare-minimum git repo with no global template files (avoids any platform template that might inject a `.gitignore`). Skip if `git init` fails.
+4. Call `lister.Detect(ctx, tmp, opts)` against the temp repo.
+5. Assert expected behavior (GitLister vs sentinel error).
+
+`TestDetect_OutsideRepo` was already hermetic — left unchanged. The `safe.directory=*` calls in the production lister code are retained as defense-in-depth for the GitHub Actions ownership check.
+
+Removed now-unused `path/filepath` and `strings` imports from the test file.
+
+**mage ci result:** All packages pass green. `internal/lister` ran in 1.349s (not cached — tests actually executed).
