@@ -70,7 +70,7 @@ The plan below is the working shape. Each row is a level_1 container drop. **Eac
 | `DROP_0_BOOTSTRAP` | — | done | — | (out-of-band; predates this workflow) |
 | `DROP_1_CODE_SCAFFOLD_MAGE_CI` | A (hindsight) | done | — | `main/drops/DROP_1_CODE_SCAFFOLD_MAGE_CI/` |
 | `DROP_2_COUNTING_DOMAIN_RENDER_BOUNDARY` | A (hindsight) | done | DROP_1 | `main/drops/DROP_2_COUNTING_DOMAIN_RENDER_BOUNDARY/` |
-| `DROP_3_DIRECTORY_WALK_GITIGNORE_DEPTH` | A (hindsight) | building | DROP_2 | `main/drops/DROP_3_DIRECTORY_WALK_GITIGNORE_DEPTH/` |
+| `DROP_3_DIRECTORY_WALK_GITIGNORE_DEPTH` | A (hindsight) | done | DROP_2 | `main/drops/DROP_3_DIRECTORY_WALK_GITIGNORE_DEPTH/` |
 | `DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON` | A | todo | DROP_3 | `main/drops/DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON/` |
 | `DROP_5_LANGUAGE_DETECTION_CODE_SPLITS` | A | todo | DROP_4 | `main/drops/DROP_5_LANGUAGE_DETECTION_CODE_SPLITS/` |
 | `DROP_6_STDIN_PIPE_BEHAVIOR` | C | todo (no-op close expected) | DROP_5 | `main/drops/DROP_6_STDIN_PIPE_BEHAVIOR/` |
@@ -113,7 +113,7 @@ DROP_2 — Counting domain + render boundary  (DONE — historical record)
   2.4 TTY-vs-pipe auto-detect via laslig.
   2.5 Unit tests.
 
-DROP_3 — Directory walk + gitignore + depth  (BUILDING — all units done, awaiting close)
+DROP_3 — Directory walk + gitignore + depth  (DONE — closed 2026-05-15)
   3.0 mage addDep for gitignore + glob deps.
   3.1 internal/ignore: Matcher interface + gitignore + --include/--exclude globs.
   3.2 internal/fileset.File: Open + Peek + IsHidden.
@@ -180,19 +180,11 @@ DROP_9 — Release + docs  (slimmed per decision 30; mixed tier)
 
 ## Immediate Next Step
 
-Drops 0/1/2 are done. Drop 3 is `building` with all 6 units done — awaiting Phase 6 + 7. The orchestrator's next moves, in order:
+Drops 0/1/2/3 are done (Drop 3 closed 2026-05-15 at commit `cf021ac`, CI run 25898996914, Hylla task `task-1bbf641644105060`). The orchestrator's next moves, in order:
 
-1. **Close Drop 3** (Phase 6 + 7 of WORKFLOW.md, against the current drop dir):
-   - `mage ci` from `main/` (must pass clean).
-   - `git push` (currently 20+ commits ahead of origin/main).
-   - `gh run watch --exit-status` until CI green.
-   - `mcp__hylla__hylla_ingest` against `github.com/evanmschultz/rak@main` with `enrichment_mode=full_enrichment`.
-   - Flip `main/drops/DROP_3_DIRECTORY_WALK_GITIGNORE_DEPTH/PLAN.md` header `state: done`.
-   - Flip this PLAN.md's Drop 3 row to `done`.
-   - Commit (`docs(drop-3): close, advance plan`) and push.
-2. **Stamp Drop 4**: copy `main/drops/_TEMPLATE/` → `main/drops/DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON/`. Set its `PLAN.md` header `state: planning`, `Tier: A`. Commit (`docs(drop-4): scaffold drop dir from template`).
-3. **Spawn `go-planning-agent`** per WORKFLOW.md § "Phase 1 — Plan" with the paradigm-override preamble. Planner decomposes Drop 4 into the six expected units (4.0–4.5 in the Drop Tree section above), each with `paths` / `packages` / `acceptance` / `blocked_by`.
-4. Continue through Phase 2 (parallel plan-QA — Drop 4 is tier A), Phase 3 (discuss + cleanup), looping until plan accepted, then Phases 4–7 unit by unit.
+1. **Stamp Drop 4**: copy `main/drops/_TEMPLATE/` → `main/drops/DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON/`. Set its `PLAN.md` header `state: planning`, `Tier: A`. Commit (`docs(drop-4): scaffold drop dir from template`).
+2. **Spawn `go-planning-agent`** per WORKFLOW.md § "Phase 1 — Plan" with the paradigm-override preamble. Planner decomposes Drop 4 into the six expected units (4.0–4.5 in the Drop Tree section above), each with `paths` / `packages` / `acceptance` / `blocked_by`.
+3. Continue through Phase 2 (parallel plan-QA — Drop 4 is tier A), Phase 3 (discuss + cleanup), looping until plan accepted, then Phases 4–7 unit by unit.
 
 ## Follow-Ups / Outstanding Orchestration Tasks
 
@@ -202,6 +194,7 @@ Items tracked for future sessions, separate from the Drop 0–9 hierarchy:
 - **Pin `gofumpt` + `golangci-lint` versions in Drop 9** — Drop 1.6's CI workflow installs both without version pins, relying on `actions/setup-go` + latest-tag semantics. Surfaced by Drop 1 plan-QA falsification (C4) as a real CI-vs-local drift risk. Defer to Drop 9 (release polish) and pin via `go.mod` `tool` directives or a pinned `go run` invocation.
 - **Drop 3 close docs update** — `main/CLAUDE.md` § "Project Structure" → "File Breakdown" was updated in the 2026-05-14 scope-refit commit; verify the `internal/fileset/file_test.go`, `binary.go`, `binary_test.go` rows are present before flipping Drop 3 to `done`. (This is the O1/O3 follow-up from the drop's PLAN.md.)
 - **Drop 4 → Drop 6 cascade ratification** — Drop 6 (stdin pipe behavior) is tier C with an expected no-op close. If Drop 4 changes anything about stdin handling (e.g. `--toon` default applies to stream mode too), revisit Drop 6's no-op claim before stamping.
+- **Node.js 20 actions deprecation (CI workflow)** — surfaced during Drop 3 close CI run (run 25898996914, 2026-05-15): `actions/checkout@v4` and `actions/setup-go@v5` currently run on Node.js 20, scheduled for removal from GitHub runners on 2026-09-16. Defer to Drop 9 (release polish) — bump both actions to versions that support Node.js 24, or set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` on the workflow.
 
 ## Stashed Legacy Files
 

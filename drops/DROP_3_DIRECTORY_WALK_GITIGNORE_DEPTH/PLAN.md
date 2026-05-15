@@ -1,13 +1,14 @@
 # DROP_3 — DIRECTORY_WALK_GITIGNORE_DEPTH
 
-**State:** building
+**State:** done
+**Tier:** A (in hindsight — full cascade caught F14 yield-false panic, C4 symlink regression, C10 binary-error policy)
 **Blocked by:** DROP_2
 **Paths (expected):** `main/internal/fileset/` (new package — `File` type, `Walker`), `main/internal/ignore/` (new package — gitignore + include/exclude globs), `main/cmd/rak/root.go` (wire `len(args)==1` path case into walker), `main/cmd/rak/root_test.go` (extend) or `main/cmd/rak/integration_test.go` (extend fixture tree), `main/cmd/rak/testdata/` (may grow a real directory fixture), plus per-package `*_test.go` files
 **Packages (expected):** `github.com/evanmschultz/rak/internal/fileset` (new), `github.com/evanmschultz/rak/internal/ignore` (new), `github.com/evanmschultz/rak/cmd/rak`
 **PLAN.md ref:** main/PLAN.md → `DROP_3_DIRECTORY_WALK_GITIGNORE_DEPTH` row
 **Workflow:** main/drops/WORKFLOW.md
 **Started:** 2026-04-21
-**Closed:** —
+**Closed:** 2026-05-15 (CI run 25898996914 green; Hylla ingest task task-1bbf641644105060 at commit cf021ac)
 
 ## Scope
 
