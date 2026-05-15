@@ -57,7 +57,7 @@ Import DAG extension: `lister → fileset, ignore, os/exec` (new leaf-ish mid-ti
 
 ### Unit 4.2 — internal/lister.GitLister: git-backed file enumeration
 
-- **State:** todo
+- **State:** done
 - **Paths:** `main/internal/lister/git.go`, `main/internal/lister/git_test.go`
 - **Packages:** `github.com/evanmschultz/rak/internal/lister`
 - **Acceptance:**

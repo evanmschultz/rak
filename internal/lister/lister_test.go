@@ -38,11 +38,9 @@ func TestDetect_InsideRepo(t *testing.T) {
 		t.Fatal("Detect returned nil lister, want non-nil")
 	}
 
-	// TODO unit 4.2: uncomment after GitLister lands in git.go.
-	// if _, ok := got.(*lister.GitLister); !ok {
-	// 	t.Errorf("Detect returned %T, want *lister.GitLister", got)
-	// }
-	_ = got
+	if _, ok := got.(*lister.GitLister); !ok {
+		t.Errorf("Detect returned %T, want *lister.GitLister", got)
+	}
 }
 
 // TestDetect_OutsideRepo verifies that Detect returns a *WalkLister when

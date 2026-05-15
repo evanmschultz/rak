@@ -48,7 +48,7 @@ var ErrNoGitignoreInRepo = errors.New("rak: --no-gitignore has no effect when ru
 func Detect(ctx context.Context, root string, opts fileset.WalkOptions) (FileLister, error) {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("lister: detect: %w", err)
 	}
 
 	// Fast-path: if git is not installed, skip the probe and fall back to the

@@ -56,3 +56,51 @@ Per PLAN.md Unit 4.1 § "Compile note (C11)": `internal/lister/lister.go` contai
 - **Missed because:** `newFile` is unexported; Hylla's public-only default visibility filter excludes it.
 - **Worked via:** `Read` of `internal/fileset/file.go` — `newFile` signature confirmed at line 52.
 - **Suggestion:** A `visibility_mode=include_private` option would let builders confirm unexported constructors without falling back to `Read`. The filter exists in the schema (`public_only|include_private`) but the default excludes unexported symbols entirely.
+
+## Unit 4.2 — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-14
+- **Files touched:**
+  - `main/internal/lister/git.go` — new file: `GitLister` struct + `newGitLister` constructor + `NewGitListerForTest` export + `anySegmentHidden` helper + `List` method (~125 LOC)
+  - `main/internal/lister/git_test.go` — new file: 5 tests (~165 LOC)
+  - `main/internal/lister/lister.go` — F1 carry-over fix: wrap `filepath.Abs` error with `"lister: detect: %w"` (1-line change)
+  - `main/internal/lister/lister_test.go` — activated `TODO unit 4.2` type assertion for `*lister.GitLister`
+
+### Mage commands run and results
+
+| Command | Result |
+|---|---|
+| `mage format` | clean (no output) |
+| `mage build` | `internal/lister [build failed]` — `undefined: newWalkLister` only (singular, as expected) |
+| `mage test` | `cmd/rak ok`, `internal/counting ok`, `internal/fileset ok`, `internal/ignore ok`, `internal/render ok`, `internal/lister [build failed]` (C11 carve-out) |
+
+### C11 carve-out: compile-break narrowed
+
+`mage build` output after Unit 4.2:
+```
+# github.com/evanmschultz/rak/internal/lister
+internal/lister/lister.go:57:10: undefined: newWalkLister
+internal/lister/lister.go:77:10: undefined: newWalkLister
+```
+
+Exactly one undefined symbol remains (`newWalkLister`). The `undefined: newGitLister` error from Unit 4.1 is gone — `git.go` landed cleanly.
+
+### Decision E empirical result (F17 prefix-strip)
+
+The spawn appendix confirms Decision E is locked: `git ls-files --full-name -z` emits toplevel-relative paths regardless of `cmd.Dir` CWD. The prefix-strip in `List` is therefore always active when `g.prefix != ""` (i.e. when the walk root is a subdirectory of the repo toplevel). The code handles both cases:
+- `g.prefix == ""`: relPath = rawPath (no stripping needed, walk root IS the toplevel).
+- `g.prefix != ""`: entries not prefixed with `g.prefix + "/"` are skipped; the prefix is stripped to yield walk-root-relative relPath.
+
+`TestGitLister_List_SubdirRoot` validates this for `internal/fileset/` as walk root — emitted paths like `"file.go"` and `"walker.go"` must be walk-root-relative, not `"internal/fileset/file.go"`.
+
+### Design decisions
+
+- **`NewGitListerForTest` exported helper**: `git_test.go` is in package `lister_test` (external), so it cannot call unexported `newGitLister`. Added `NewGitListerForTest` that delegates to `newGitLister`. Matches the pattern used by `NewWalkLister` (4.3) for the same reason.
+- **`TestGitLister_ContextCancel` t.Skip instead of t.Error on buffered git**: The test may receive a file rather than a context-cancel error if git's output is already buffered before the cancel propagates through `exec.CommandContext`. This is acceptable behavior on fast machines — added a `t.Skip` rather than `t.Fail` for that path.
+- **`fileset.NewFile(g.fsys, relPath, relPath)` — path and relPath both set to relPath**: For GitLister's `fs.FS` (which is `os.DirFS(absRoot)`), the file path relative to the DirFS root is the same as relPath (relative to the walk root). Setting both `Path` and `RelPath` to `relPath` is correct here.
+
+### Hylla Feedback / Gap Notes
+
+- All Hylla queries returned the needed symbols: `fileset.IsHidden`, `ignore.New`, `ignore.Matcher.Match`, `fileset.NewFile`, `fileset.WalkOptions`. Zero misses.
+- **Gap note:** `TestGitLister_MidWalkGitFailure` is NOT implemented in 4.2. Cleanly stubbing `exec.Command` at the package level is complex. The integration path relies on OS-level EOF behavior (partial output → partial list).
