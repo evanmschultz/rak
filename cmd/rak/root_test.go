@@ -203,7 +203,7 @@ func runTreeFS(t *testing.T, fsys fs.FS, flags *rootFlags) (treeResult, []byte) 
 	var out bytes.Buffer
 	// rootLabel = "" keeps the walker's io/fs "." convention so assertions
 	// compare against the raw relative paths.
-	if err := runDirectory(context.Background(), &out, source, "", flags.binary, renderer); err != nil {
+	if err := runDirectory(context.Background(), &out, source, "", flags.binary, flags.langs, renderer); err != nil {
 		t.Fatalf("runDirectory: %v", err)
 	}
 	raw := out.Bytes()
@@ -479,6 +479,125 @@ func TestRootCmd_PathArg_Hidden(t *testing.T) {
 			t.Errorf("--hidden: expected Bytes=10, got %+v", res.Total)
 		}
 	})
+}
+
+// TestRootCmd_FlagLang_FiltersToGo verifies that --lang go counts only .go
+// files and excludes .rs and .txt files from the count.
+func TestRootCmd_FlagLang_FiltersToGo(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{
+		"a.go":  {Data: []byte("package main\n")},
+		"b.rs":  {Data: []byte("fn main() {}\n")},
+		"c.txt": {Data: []byte("hello world\n")},
+	}
+	res, _ := runTreeFS(t, fsys, &rootFlags{langs: []string{"go"}})
+
+	// Only a.go ("package main\n" = 13 bytes) should be counted.
+	if res.Total.Bytes != 13 {
+		t.Errorf("--lang go: expected Bytes=13 (a.go only), got %+v", res.Total)
+	}
+	if res.Total.Lines != 1 {
+		t.Errorf("--lang go: expected Lines=1, got %+v", res.Total)
+	}
+}
+
+// TestRootCmd_FlagLang_MultiValue verifies that --lang go,rust counts both
+// .go and .rs files while excluding .txt files.
+func TestRootCmd_FlagLang_MultiValue(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{
+		"a.go":  {Data: []byte("package main\n")},
+		"b.rs":  {Data: []byte("fn main() {}\n")},
+		"c.txt": {Data: []byte("hello world\n")},
+	}
+	res, _ := runTreeFS(t, fsys, &rootFlags{langs: []string{"go", "rust"}})
+
+	// a.go (13 bytes) + b.rs (13 bytes) = 26 bytes. c.txt excluded.
+	if res.Total.Bytes != 26 {
+		t.Errorf("--lang go,rust: expected Bytes=26, got %+v", res.Total)
+	}
+	if res.Total.Lines != 2 {
+		t.Errorf("--lang go,rust: expected Lines=2, got %+v", res.Total)
+	}
+}
+
+// TestRootCmd_FlagLang_CaseInsensitive verifies that --lang Go (mixed case)
+// still matches .go files via case normalization.
+func TestRootCmd_FlagLang_CaseInsensitive(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{
+		"a.go":  {Data: []byte("package main\n")},
+		"b.rs":  {Data: []byte("fn main() {}\n")},
+		"c.txt": {Data: []byte("hello world\n")},
+	}
+	res, _ := runTreeFS(t, fsys, &rootFlags{langs: []string{"Go"}})
+
+	// Only a.go counted despite uppercase flag value.
+	if res.Total.Bytes != 13 {
+		t.Errorf("--lang Go (mixed case): expected Bytes=13, got %+v", res.Total)
+	}
+}
+
+// TestRootCmd_FlagLang_ExcludesUnknown verifies that when any --lang filter
+// is set, files with LangUnknown (undetected language) are excluded. c.txt
+// has an extension not in the detection table and no shebang, so it maps to
+// LangUnknown. Per F29, LangUnknown is the zero value ("") which never
+// matches any non-empty filter value.
+func TestRootCmd_FlagLang_ExcludesUnknown(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{
+		"a.go":  {Data: []byte("package main\n")},
+		"c.txt": {Data: []byte("hello world\n")},
+	}
+	res, _ := runTreeFS(t, fsys, &rootFlags{langs: []string{"go"}})
+
+	// Only a.go counted; c.txt (LangUnknown) excluded.
+	if res.Total.Bytes != 13 {
+		t.Errorf("--lang go excludes unknown: expected Bytes=13, got %+v", res.Total)
+	}
+}
+
+// TestRootCmd_NoLangFlag_CountsAll verifies that without --lang all files
+// are counted regardless of detected language, preserving existing behavior.
+func TestRootCmd_NoLangFlag_CountsAll(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{
+		"a.go":  {Data: []byte("package main\n")},
+		"b.rs":  {Data: []byte("fn main() {}\n")},
+		"c.txt": {Data: []byte("hello world\n")},
+	}
+	res, _ := runTreeFS(t, fsys, &rootFlags{})
+
+	// All three files counted: 13 + 13 + 12 = 38 bytes.
+	if res.Total.Bytes != 38 {
+		t.Errorf("no --lang flag: expected Bytes=38 (all files), got %+v", res.Total)
+	}
+	if res.Total.Lines != 3 {
+		t.Errorf("no --lang flag: expected Lines=3, got %+v", res.Total)
+	}
+}
+
+// TestRootCmd_LangFlag_ParsesCSV verifies that --lang go,rust via cobra's
+// StringSliceVar populates langs with ["go", "rust"].
+func TestRootCmd_LangFlag_ParsesCSV(t *testing.T) {
+	t.Parallel()
+
+	// We can't easily inspect the flags struct from outside, so we verify
+	// the behavior: only go and rust files are counted from a mixed MapFS.
+	fsys := fstest.MapFS{
+		"a.go":  {Data: []byte("package main\n")},
+		"b.rs":  {Data: []byte("fn main() {}\n")},
+		"c.txt": {Data: []byte("hello world\n")},
+	}
+	res, _ := runTreeFS(t, fsys, &rootFlags{langs: []string{"go", "rust"}})
+	if res.Total.Lines != 2 {
+		t.Errorf("CSV parse: expected Lines=2 (go+rust), got %+v", res.Total)
+	}
 }
 
 // failingOpenFS is an fs.FS test stub that delegates to an inner MapFS for

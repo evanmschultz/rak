@@ -7,6 +7,7 @@ import (
 	"io"
 	"path"
 	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -31,6 +32,7 @@ type rootFlags struct {
 	binary      bool
 	includes    []string
 	excludes    []string
+	langs       []string
 }
 
 // newRootCmd builds the root Cobra command for rak. The factory returns a
@@ -110,6 +112,12 @@ func newRootCmd() *cobra.Command {
 		nil,
 		"glob pattern that dropped files must match (repeatable; exclude wins over include)",
 	)
+	cmd.Flags().StringSliceVar(
+		&flags.langs,
+		"lang",
+		nil,
+		"filter counted files to comma-separated language names (e.g. go,rust); default: count all",
+	)
 
 	return cmd
 }
@@ -161,7 +169,7 @@ func runRoot(c *cobra.Command, args []string, flags *rootFlags) error {
 			// wrapping needed here (F19 contract).
 			return err
 		}
-		return runDirectory(ctx, c.OutOrStdout(), source, args[0], flags.binary, renderer)
+		return runDirectory(ctx, c.OutOrStdout(), source, args[0], flags.binary, flags.langs, renderer)
 	}
 
 	counts, err := counting.Count(c.InOrStdin())
@@ -180,16 +188,18 @@ func runRoot(c *cobra.Command, args []string, flags *rootFlags) error {
 // path string that appears in the rendered "dir: <path>" titles; in
 // production this is args[0], in tests it is whatever label makes the
 // assertion readable. binary controls whether binary files are counted or
-// skipped (F23).
+// skipped (F23). langs is the raw --lang filter values from rootFlags; an
+// empty slice means no filtering (count all languages).
 func runDirectory(
 	ctx context.Context,
 	w io.Writer,
 	source lister.FileLister,
 	rootLabel string,
 	binary bool,
+	langs []string,
 	renderer render.Renderer,
 ) error {
-	dirs, total, aggErrs, err := walkAndCount(ctx, source, binary)
+	dirs, total, aggErrs, err := walkAndCount(ctx, source, binary, langs)
 	if err != nil {
 		return err
 	}
@@ -219,10 +229,25 @@ func runDirectory(
 // per-entry errors) at the aggregation boundary and matches C10 (IsBinary
 // open failures are aggregated, not fatal). The binary-check policy is
 // preserved verbatim (F23).
-func walkAndCount(ctx context.Context, source lister.FileLister, binary bool) ([]render.Directory, counting.Counts, []error, error) {
+//
+// langs is the --lang filter value set. When non-empty, only files whose
+// detected language is in the set are counted; all others (including
+// LangUnknown files) are silently skipped (F29, Decision 24).
+func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, langs []string) ([]render.Directory, counting.Counts, []error, error) {
 	byDir := map[string]counting.Counts{}
 	var total counting.Counts
 	var aggErrs []error
+
+	// Build the lang-filter lookup set once before the per-file loop.
+	// Case-insensitive normalization: user values are lowercased to match
+	// the lowercase Language constant convention (C6, F29).
+	var wantedLangs map[lang.Language]struct{}
+	if len(langs) > 0 {
+		wantedLangs = make(map[lang.Language]struct{}, len(langs))
+		for _, v := range langs {
+			wantedLangs[lang.Language(strings.ToLower(v))] = struct{}{}
+		}
+	}
 
 	for f, walkErr := range source.List(ctx) {
 		if walkErr != nil {
@@ -254,10 +279,20 @@ func walkAndCount(ctx context.Context, source lister.FileLister, binary bool) ([
 
 		// Detect language once per file. The value is stored in a
 		// per-iteration local so downstream consumers (5.3's Split call and
-		// 5.4's filter gate) can read it without a second Detect invocation.
-		// Not yet consumed — 5.3 and 5.4 wire in their respective uses.
+		// the filter gate below) can read it without a second Detect
+		// invocation.
 		detectedLang := lang.Detect(f)
-		_ = detectedLang // consumed by 5.3 (Split) and 5.4 (--lang filter)
+
+		// Lang-filter gate (F29, Decision 24): when --lang is set, skip
+		// any file whose detected language is not in the wanted set.
+		// LangUnknown ("") is implicitly excluded because it never matches
+		// any non-empty filter value unless the user explicitly passes
+		// --lang "" (which cobra's StringSliceVar rejects).
+		if wantedLangs != nil {
+			if _, ok := wantedLangs[detectedLang]; !ok {
+				continue
+			}
+		}
 
 		fileCounts, err := countFile(f)
 		if err != nil {

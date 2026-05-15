@@ -67,7 +67,7 @@ Drop 4's spine is preserved: `internal/lister`, `internal/fileset`, `internal/ig
 
 ### Unit 5.2 — internal/lang: blank/comment/code line split
 
-- **State:** todo
+- **State:** done
 - **Paths:**
   - `main/internal/lang/split.go` (new file)
   - `main/internal/lang/split_test.go` (new file)
@@ -132,7 +132,7 @@ Drop 4's spine is preserved: `internal/lister`, `internal/fileset`, `internal/ig
 
 ### Unit 5.4 — --lang walk-filter flag
 
-- **State:** todo
+- **State:** done
 - **Paths:**
   - `main/cmd/rak/root.go` (add `langs []string` to `rootFlags`, add cobra `--lang` flag, add lang-filter gate in `walkAndCount`)
   - `main/cmd/rak/root_test.go` (add `--lang` flag-parsing tests + filter-behavior tests)
