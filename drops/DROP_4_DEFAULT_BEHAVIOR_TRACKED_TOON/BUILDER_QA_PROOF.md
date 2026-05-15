@@ -258,3 +258,41 @@ Builder touched 4 files outside Unit 4.3's declared `paths` (`walk.go`, `walk_te
 ## Hylla Feedback
 
 None — Hylla answered everything needed for the WalkLister proof review. Three queries used: `hylla_search_keyword` for `NewWalker fileset`, `hylla_node_full` for `Walker.Walk`, `hylla_node_full` for `IsHidden`. All three returned the expected nodes with full content. No fallback to `LSP` was forced. The scope-drift files (`git.go`, `git_test.go`, `lister.go`, `lister_test.go`) were inspected via `Read` rather than Hylla because they were touched in this same commit and would be stale in the `@main` baseline — that is `git diff` territory, not a Hylla miss.
+
+---
+
+## Unit 4.3 — Round 2
+
+**Verdict:** PASS
+
+**Scope:** Revise-verify only. Round 2 builder fixed F1 from Round 1 (semicolon between sentences in `ErrNoGitignoreInRepo`'s message text). One-character edit.
+
+### Evidence
+
+- `git show HEAD --stat` → commit `de7dcd3` ("fix(lister): restore intersentence period in errnogitignoreinrepo"), 3 files changed: `BUILDER_WORKLOG.md` (+31), `drops/.../PLAN.md` (+1-1, state flip back to `done`), `internal/lister/lister.go` (+1-1).
+- `git diff HEAD~1 HEAD -- internal/lister/lister.go` → single hunk at line 35: `"... git repository; rak counts ..."` → `"... git repository. rak counts ..."`. Exactly one character changed.
+- `Read internal/lister/lister.go` line 35 → confirms current text: `"rak: --no-gitignore has no effect when run inside a git repository. rak counts git-tracked files in this mode. To count untracked files, run rak outside the repository"`. Trailing period still absent (ST1005 still satisfied).
+- `mage ci` → `0 issues.` + 6 packages `ok` (cached but content-keyed — diff confirms no test source drift). golangci-lint (which carries stylecheck/ST1005) finds nothing.
+- `git diff HEAD~1 HEAD -- drops/DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON/PLAN.md` → Unit 4.3 row state line changed from `in_progress` to `done`.
+- Diff stat — exactly 3 files (lister.go, PLAN.md, worklog). No scope creep.
+
+### Verification of acceptance criteria
+
+1. **`;` → `.` applied** — confirmed via diff and current file content.
+2. **ST1005 still satisfied** (no trailing punctuation) — confirmed via `mage ci` green and direct inspection (last char is `y`).
+3. **`mage ci` green** — `0 issues.` + all packages `ok`.
+4. **Sentinel identity preserved** — `var ErrNoGitignoreInRepo = errors.New(...)` declaration form unchanged; `errors.Is` compares the `*errorString` pointer, not the message text. Independently, `mage ci` green confirms `lister_test.go::TestDetect_NoGitignoreInRepo_ReturnsSentinel` (which uses `errors.Is`) still passes.
+5. **PLAN.md Unit 4.3 state back to `done`** — confirmed via diff.
+6. **No other code changes** — diff stat shows 3 files only; lister.go change is one character.
+
+### Findings
+
+None.
+
+### Missing evidence
+
+None.
+
+### Hylla Feedback
+
+N/A — Round 2 revise-verify was a one-character edit on a Go file touched in this same uncommitted-then-just-committed work. Diff territory, not Hylla territory. No Hylla queries were needed or attempted.

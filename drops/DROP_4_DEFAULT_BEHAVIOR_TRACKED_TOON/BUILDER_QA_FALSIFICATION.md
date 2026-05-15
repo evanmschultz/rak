@@ -244,3 +244,40 @@ WalkLister itself (declared scope: `walk.go`, `walk_test.go`) is clean — F22 h
 
 - **Query 1:** `hylla_search_keyword`, query="NewWalker fileset", artifact=`github.com/evanmschultz/rak@main`, node_type=block, fields=[content, summary]. Returned `NewWalker` and `Walker` nodes with full docstrings confirming the "applies WalkOptions filters internally" claim that F22 leans on. Zero miss.
 - All other evidence came from `Read` of the modified files (which are post-HEAD relative to the last Hylla ingest at Drop 3 close — so Hylla is stale for `internal/lister/*` and Hylla's miss is expected, not a feedback item per the `## Hylla Feedback` rule: "changed since last ingest → git diff territory").
+
+## Unit 4.3 — Round 2
+
+- **QA:** go-qa-falsification-agent
+- **Reviewed:** 2026-05-14
+- **HEAD under review:** `de7dcd3` (`fix(lister): restore intersentence period in errnogitignoreinrepo`)
+- **Verdict:** `pass` — Round 1's CONFIRMED F1 sentinel-text drift is fully remediated. The revise is surgical: one character changed in `internal/lister/lister.go` (`;` → `.`) plus the two pre-agreed markdown documentation updates (PLAN.md § "Git Edge Cases" env-vars bullet, WORKFLOW.md § "Cascade Tiering" → "Carve-out + Scope Discipline" subsection). `mage ci` re-runs green. Zero new counterexamples. Round 1's F2/F3/F4 process findings are now routed and recorded in the durable docs.
+
+### Revise verification
+
+| Surface | Outcome | Evidence |
+|---|---|---|
+| **A1 — Fix landed in the right place, byte-exact** | **verified.** `git diff HEAD~1 HEAD -- internal/lister/lister.go` is exactly `-1/+1` on `lister.go:35`. The only character changed is the inter-sentence boundary: `repository;` → `repository.`. The trailing period (intentionally absent per ST1005) is preserved (no terminating period was re-added). The line now reads: `var ErrNoGitignoreInRepo = errors.New("rak: --no-gitignore has no effect when run inside a git repository. rak counts git-tracked files in this mode. To count untracked files, run rak outside the repository")`. This matches PLAN.md F19(a) (line 184) inter-sentence boundary AND matches PLAN.md Unit 4.4 line 119's user-visible error message format for the first-sentence break. The intentional trailing-period absence is consistent with Round 1's F1 split-remediation (F19(a) updated in plan-side at Round 1 close to drop the trailing period for ST1005 compliance; the inter-sentence period is the only diverging character that needed restoring). |
+| **A2 — Fix did not break anything (`mage ci` green)** | **verified.** Re-ran `mage ci` from `main/`. Output: `0 issues.` + all 6 packages OK (`cmd/rak`, `counting`, `fileset`, `ignore`, `lister`, `render`) — all `(cached)`. The cache hit is sound because only one byte of one Go source string literal changed, and lister's tests do not text-match the sentinel message (`TestDetect_NoGitignoreInRepo_ReturnsSentinel` uses `errors.Is`, not string compare). Format, lint, vet, and test all green. |
+| **A3 — F4 env-vars policy documented in PLAN.md § "Git Edge Cases"** | **verified.** `drops/DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON/PLAN.md:216` carries the new bullet *"Environment variables (Unit 4.3 / F4): GitLister strips `GIT_DIR`, `GIT_WORK_TREE`, and `GIT_INDEX_FILE` from the environment of every `git` subprocess it spawns (via the `gitCleanEnv()` helper in `git.go`). Rationale: rak is path-driven per decision 32 — repo detection uses `cmd.Dir` set to the absolute walk root, not env-based overrides. Stripping these vars ensures user-set env doesn't divert rak to a different repo than the path argument indicates. End users who rely on `GIT_DIR` to point git at a non-default repo will see rak ignore that var in v0.1.0; this is deliberate. A future `--git-env-passthrough` flag may opt this back in if usage signals."* Names the three env vars stripped, names the helper (`gitCleanEnv`), states the rationale (path-driven per decision 32), and routes the future opt-in path. Covers what the Round 1 F4 finding asked for. |
+| **A4 — F2/F3 process findings documented in WORKFLOW.md § "Cascade Tiering"** | **verified.** `drops/WORKFLOW.md:65–70` carries a new `### Carve-out + Scope Discipline (Drop 4 hindsight)` subsection with two bullets: (a) *"Lint coverage is conditional on package compilation"* — captures Round 1 F2 (vacuous `mage lint` over the non-compiling `internal/lister` at Units 4.1/4.2); (b) *"Out-of-paths changes should be pre-declared OR split"* — captures Round 1 F3 (Unit 4.3 bundled three concerns: WalkLister adapter + sandbox-env workaround + Unit 4.1 lint fix). Bullet (a) explicitly defers lint-acceptance to the unit that closes the carve-out and cites the staticcheck ST1005 case from this drop. Bullet (b) defines the three conditions (a)/(b)/(c) under which out-of-paths is acceptable and recommends a separate pre-build hygiene commit otherwise. Both findings routed correctly. |
+| **A5 — No Round-1 regressions** | **verified.** Diff scope was inspected: `git show HEAD --stat` shows exactly 3 files touched: `internal/lister/lister.go` (1 byte change), `drops/DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON/BUILDER_WORKLOG.md` (round notes), `drops/DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON/PLAN.md` (state flip). No edits to `git.go`, `git_test.go`, `walk.go`, `walk_test.go`, `lister_test.go`, or any other Unit 4.3 / prior-unit code surface. Round 1's already-mitigated invariants (gitCleanEnv runtime safety, skipIfGitEnvBroken pattern, F22 pure pass-through, F26 RelPath assertions, NUL-parsing edges, F17 prefix logic, F18/F19/F21 filter chain) are byte-identical to Round 1 HEAD. The previously CONFIRMED F1 remediation is the only behavior change. |
+
+### Counterexamples
+
+None. Round 1's F1 is closed. Zero new counterexamples in Round 2.
+
+### Findings (residual, non-blocking)
+
+- None active. Round 1's F2/F3/F4 are now documented in WORKFLOW.md and PLAN.md respectively and pass through to future-drop discipline; they are no longer outstanding against Drop 4.
+
+### Unknowns
+
+- The end-to-end GitHub Actions CI verification still lands at Phase 6 (`git push` + `gh run watch --exit-status`). Local `mage ci` is green; the prediction is "CI green," but the truth is the orchestrator's next step. Round 1 already noted this same Unknown.
+
+### Summary
+
+Round 2's revise is one byte of Go source + two markdown additions, end-to-end. The Round 1 F1 sentinel-text drift is closed at the exact character where it diverged (inter-sentence `;` → `.`); the intentional trailing-period absence remains for ST1005 compliance. `mage ci` re-runs green with 0 issues across all 6 packages. The Round 1 F4 product-behavior transparency requirement is satisfied by the new PLAN.md § "Git Edge Cases" env-vars bullet (names the three env vars, names the helper, states the rationale). The Round 1 F2 and F3 process findings are routed into the durable WORKFLOW.md § "Cascade Tiering" → "Carve-out + Scope Discipline" subsection for future-drop discipline. No regressions to Round 1's already-mitigated surfaces (`mage ci` cache-hit on all packages confirms zero Go-source delta beyond the one character). Unit 4.3 is clean for Phase 6 verify.
+
+## Hylla Feedback
+
+None — Hylla answered everything needed. Round 2 evidence came from `git show HEAD --stat`, `git diff HEAD~1 HEAD -- internal/lister/lister.go`, `mage ci` re-run, and `Read` of the four post-revise files (`internal/lister/lister.go`, `drops/DROP_4_DEFAULT_BEHAVIOR_TRACKED_TOON/PLAN.md`, `drops/WORKFLOW.md`, `BUILDER_QA_FALSIFICATION.md`). No Hylla queries were issued — the revise touches `internal/lister/lister.go` (post-Drop-3 file, stale in Hylla until drop-end reingest) plus markdown (out of Hylla scope), so direct file reads + git plumbing are the appropriate evidence layer.
