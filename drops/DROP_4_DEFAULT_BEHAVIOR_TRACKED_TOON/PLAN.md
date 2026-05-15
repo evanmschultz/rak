@@ -36,7 +36,7 @@ Import DAG extension: `lister → fileset, ignore, os/exec` (new leaf-ish mid-ti
 
 ### Unit 4.1 — internal/lister: FileLister interface + Detect factory + fileset.NewFile export
 
-- **State:** todo
+- **State:** done
 - **Paths:** `main/internal/lister/lister.go`, `main/internal/lister/lister_test.go`, `main/internal/fileset/file.go`
 - **Packages:** `github.com/evanmschultz/rak/internal/lister` (new), `github.com/evanmschultz/rak/internal/fileset` (NewFile export)
 - **Acceptance:**

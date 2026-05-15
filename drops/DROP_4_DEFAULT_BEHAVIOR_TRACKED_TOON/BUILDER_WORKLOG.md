@@ -15,3 +15,44 @@ Append a `## Unit N.M — Round K` section per build attempt. See `main/drops/WO
 ## Hylla Feedback
 
 N/A — unit 4.0 is dep-management only; no Go source files were read or searched. No Hylla queries were needed or run.
+
+## Unit 4.1 — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-14
+- **Files touched:**
+  - `main/internal/fileset/file.go` — added `NewFile` exported wrapper (7 LOC)
+  - `main/internal/lister/lister.go` — new file, new package (83 LOC)
+  - `main/internal/lister/lister_test.go` — 3 tests (103 LOC)
+
+### Mage commands run and results
+
+| Command | Result | Notes |
+|---|---|---|
+| `mage test ./internal/fileset/...` | `internal/fileset ok`; `internal/lister [build failed]` | Expected — C11 deliberate compile-break. All other packages green. |
+| `mage format` | clean (no output) | Both new files already gofumpt-formatted. |
+| `mage format` (second run after fmt import added) | clean | No drift. |
+
+### Deliberate compile-break acknowledgment (C11 carve-out)
+
+Per PLAN.md Unit 4.1 § "Compile note (C11)": `internal/lister/lister.go` contains calls to `newGitLister` (defined in `git.go`, Unit 4.2) and `newWalkLister` (defined in `walk.go`, Unit 4.3). Neither symbol exists at this commit boundary. `mage build ./...` and `mage test ./internal/lister/...` are therefore broken intentionally and expected to remain so until Unit 4.3 closes. All packages OTHER than `internal/lister` compile and test green, confirmed by the `mage test` output above.
+
+### Design decisions
+
+- **`fmt.Errorf` wrapping for `ErrNoGitignoreInRepo`** — per F19 R2-F2 contract, `Detect` wraps the sentinel as `fmt.Errorf("lister: detect: %w", ErrNoGitignoreInRepo)` so cobra's error display shows the "lister: detect: rak: ..." chain. The test uses `errors.Is` which traverses the wrapper, so `TestDetect_NoGitignoreInRepo_ReturnsSentinel` will pass at 4.3.
+- **`exec.LookPath` fast-path** — checked before spawning the git probe to avoid a SIGCHLD/process spawn cost on machines without git. Non-zero `LookPath` error → immediate `newWalkLister` without running any git command.
+- **OS-level failure wrapping** — `exec.ExitError` (non-zero exit from git) is distinguished from other `runErr` values so that "not in a git repo" is silently handled and true OS-level failures (e.g. permission errors on the process spawn) are wrapped with `"lister: detect: %w"` prefix and surfaced.
+
+### Test stubs for future activation
+
+`TestDetect_InsideRepo` and `TestDetect_OutsideRepo` both call `Detect` and verify `err == nil` + non-nil lister at this stage. Type assertions against `*GitLister` / `*WalkLister` are commented out with `// TODO unit 4.2:` / `// TODO unit 4.3:` markers. They become active after those units land.
+
+`TestDetect_NoGitignoreInRepo_ReturnsSentinel` is written in final form — it tests only the sentinel branch of `Detect`, which doesn't require the forward-referenced constructors. It will pass at 4.3's compile boundary.
+
+## Hylla Feedback
+
+- **Query:** `hylla_search_keyword`, query="newFile fileset constructor", artifact=`github.com/evanmschultz/rak@main`, node_type=block.
+- **Result:** Hylla returned `File` struct and `NewWalker`/`Walker.Walk` nodes but NOT the unexported `newFile` function. Expected — Hylla indexes only public symbols (`visibility: "public"` in results).
+- **Missed because:** `newFile` is unexported; Hylla's public-only default visibility filter excludes it.
+- **Worked via:** `Read` of `internal/fileset/file.go` — `newFile` signature confirmed at line 52.
+- **Suggestion:** A `visibility_mode=include_private` option would let builders confirm unexported constructors without falling back to `Read`. The filter exists in the schema (`public_only|include_private`) but the default excludes unexported symbols entirely.

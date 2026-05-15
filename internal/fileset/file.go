@@ -57,6 +57,13 @@ func newFile(fsys fs.FS, path, relPath string) *File {
 	}
 }
 
+// NewFile constructs a File for the given path. Callers outside
+// internal/fileset use this to create File handles when they have obtained a
+// path from a non-Walker source (e.g. GitLister).
+func NewFile(fsys fs.FS, path, relPath string) *File {
+	return newFile(fsys, path, relPath)
+}
+
 // Open opens the file for reading. The returned io.ReadCloser is the
 // fs.File returned by the underlying fs.FS; callers must Close it.
 //
