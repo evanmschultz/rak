@@ -1,6 +1,6 @@
 # DROP_4 — DEFAULT_BEHAVIOR_TRACKED_TOON
 
-**State:** planning
+**State:** building
 **Tier:** A
 **Blocked by:** DROP_3
 **Paths (expected):** `main/go.mod`, `main/go.sum` (dep add), `main/internal/fileset/file.go` (export `NewFile` constructor), `main/internal/lister/` (new package — `FileLister` interface + `GitLister` + `WalkLister` + `Detect` factory + tests), `main/internal/render/render.go` (interface unchanged), `main/internal/render/toon.go` (new), `main/internal/render/render_test.go` (extend snapshot tests), `main/cmd/rak/root.go` (rewire `runDirectory` from direct `fileset.Walker` to `lister.Detect`; replace `--format` flag with bool `--human` / `--json` / `--toon`), `main/cmd/rak/root_test.go` (update flag-parsing cases), `main/cmd/rak/integration_test.go` (extend for tracked-only default behavior + TOON output snapshot)
