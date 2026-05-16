@@ -60,10 +60,11 @@ func newRootCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "rak [path]",
-		Short: "Summarize code in a directory: line, word, and token counts by language",
+		Short: "Summarize code in a directory: per-directory and per-language counts",
 		Long: "rak walks a path, detects languages, and reports byte, line, " +
-			"word, character, and (eventually) token counts rolled up by " +
-			"directory and language.\n\n" +
+			"word, character, and file counts rolled up by " +
+			"directory and language. Default output is TOON for LLM-first " +
+			"consumption; pass --human or --json for other formats.\n\n" +
 			"With no positional argument rak reads stdin and reports totals " +
 			"for the stream. With a single path argument rak walks the " +
 			"directory and reports per-directory rollups plus a grand total.",

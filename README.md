@@ -19,18 +19,18 @@ rak version v0.1.0
 $ rak internal/counting
 directories[1|]{path|bytes|lines|words|chars}:
   internal/counting|3495|138|523|3490
+by_lang[1|]{dir|lang|blank|comment|code|bytes|lines}:
+  internal/counting|go|13|25|100|3495|138
+total_by_lang[1|]{lang|blank|comment|code|bytes|lines}:
+  go|13|25|100|3495|138
 total:
   bytes: 3495
   lines: 138
   words: 523
   chars: 3490
-total_by_lang[1|]{lang|blank|comment|code|bytes|lines}:
-  go|13|25|100|3495|138
-by_lang[1|]{dir|lang|blank|comment|code|bytes|lines}:
-  internal/counting|go|13|25|100|3495|138
 ```
 
-That's the default TOON output — compact, structured, designed for LLMs. The `total_by_lang` block answers "how much Go is in this repo?"; the `by_lang` block breaks it down per directory.
+That's the default TOON output — compact, structured, designed for LLMs. Reading top to bottom: per-directory rollups, per-directory-per-language detail, per-language aggregates across the whole walk, grand total. The `total` block answers "how big is this repo?"; `total_by_lang` answers "how much Go vs Markdown is in it?"; `by_lang` breaks language detail down per directory.
 
 ### Human-readable
 
