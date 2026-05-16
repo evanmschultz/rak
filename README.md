@@ -118,13 +118,13 @@ Mutually exclusive: `--human`, `--json`, `--toon` (cobra rejects more than one).
 
 ## Languages detected
 
-C, C++, CMakeLists.txt, CSS, Dockerfile, Go, HTML, Java, JavaScript, JSON, Kotlin, Makefile, Markdown, PHP, Python, Ruby, Rust, Shell (sh/bash/zsh/fish), Swift, TOML, TypeScript, YAML. Detection priority: special filename → extension → shebang → content heuristic. Files whose language can't be detected appear in counts but are excluded from `--lang` filtering and the `total_by_lang` block.
+C, C++, CMakeLists.txt, CSS, Dockerfile, Go, HTML (also `.xml`), Java, JavaScript, JSON, Kotlin, Makefile, Markdown, PHP, Python, Ruby, Rust, Shell (sh/bash/zsh/fish), Swift, TOML, TypeScript, YAML. Detection priority: special filename → extension → shebang → content heuristic. Files whose language can't be detected appear in counts but are excluded from `--lang` filtering and the `total_by_lang` block.
 
 ## Roadmap
 
-rak v0.1.0 is deliberately small. Planned for v0.2:
+rak v0.1.x is deliberately small. Planned for v0.2:
 
-- **Full polyglot language detection** — v0.1.0 covers 22 languages; v0.2 aims for full polyglot coverage.
+- **Broader polyglot language detection** — v0.1.x covers 22 languages; v0.2 expands toward templating, config, and data-format coverage.
 - **Token counting** (`--tokens`, tiktoken).
 - **Spinner / progress indication.**
 - **Parallel walk.**

@@ -98,21 +98,19 @@ func AddDep(module string) error {
 	return nil
 }
 
-// Run executes `go run ./cmd/rak`. Two invocation patterns are supported:
+// Run executes `go run ./cmd/rak` for local smoke testing from source.
 //
-// Preferred — use the `--` separator to pass flag-prefixed arguments:
+// Two invocation patterns are supported:
 //
-//	mage run -- --help
-//	mage run -- --version
-//	mage run -- ../
+//   - `mage run -- <args>` — preferred for positional args (paths). Mage's
+//     CLI may emit "Unknown target specified: --" stderr noise and exit 2
+//     when <args> contains flag-prefixed tokens (e.g. --version, --help),
+//     even though rak itself ran successfully. Use RAK_ARGS for those.
 //
-// Fallback — set RAK_ARGS when the mage CLI rejects flag-prefixed args after `--`:
+//   - `RAK_ARGS="<args>" mage run` — preferred for flag-prefixed args. Mage
+//     exits 0 cleanly because no extra tokens follow the target name.
 //
-//	RAK_ARGS="--version" mage run
-//	RAK_ARGS="--human ." mage run
-//
-// Without `--` and without RAK_ARGS, no arguments are forwarded and rak
-// reads stdin.
+// If both are set, the `--` separator path wins.
 func Run() error {
 	args := []string{"run", "./cmd/rak"}
 	// Prefer `--` separator in os.Args (e.g. `mage run -- <args>`).
