@@ -155,7 +155,7 @@ Orch wrote this inline (tier B/C mixed — no planner subagent per WORKFLOW.md �
 
 ### Unit 9.7 — Release polish (README + completion + VHS gifs + CLAUDE.md audit)
 
-- **State:** todo
+- **State:** in_progress
 - **Paths:**
   - `main/README.md` — re-pass example output for `files` column + add `rak completion` mention under Install
   - `main/docs/tapes/*.tape` — new VHS tape scripts
