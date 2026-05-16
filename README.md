@@ -73,6 +73,10 @@ cat README.md | rak          # wc-parity counts on stdin
 cat data.json | rak --json   # JSON output on stdin
 ```
 
+**About `--sort`:** the value is a **key** — one of `lines`, `files`, `bytes`, `path` — not a path. Numeric keys (`lines`/`files`/`bytes`) sort descending by default; `path` sorts ascending. Pass `--sort-asc` to flip the default direction. The positional argument (e.g. `.` or `./internal`) is the walk root — separate from the sort key.
+
+![rak --sort files demo](docs/sort-files.gif)
+
 ## Default behavior
 
 - **Git-tracked by default.** When the walk root is inside a git repository, rak enumerates files via `git ls-files` — same set git itself considers tracked. Outside a git repo, rak falls back to a filesystem walker that respects `.gitignore`.
