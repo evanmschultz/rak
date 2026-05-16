@@ -663,6 +663,179 @@ func TestHumanRenderer_RenderTree_PerLang(t *testing.T) {
 	}
 }
 
+// --- Unit 9.6 DirectoriesFilesColumn tests ---
+
+// dirFilesFixture returns a summary.Summary with two directories at distinct
+// Files counts (3 and 5) so tests can assert presence and correct values. The
+// second directory has Files=0 so JSON omitempty behavior is testable too.
+func dirFilesFixture() summary.Summary {
+	return summary.Summary{
+		Dirs: []summary.Directory{
+			{
+				Path:   "alpha",
+				Counts: counting.Counts{Bytes: 300, Lines: 10, Words: 20, Chars: 300},
+				Files:  3,
+			},
+			{
+				Path:   "beta",
+				Counts: counting.Counts{Bytes: 500, Lines: 20, Words: 40, Chars: 500},
+				Files:  5,
+			},
+			{
+				Path:   "gamma",
+				Counts: counting.Counts{Bytes: 100, Lines: 5, Words: 10, Chars: 100},
+				Files:  0, // zero — JSON omitempty suppresses "files" key for this dir
+			},
+		},
+		Total: counting.Counts{Bytes: 900, Lines: 35, Words: 70, Chars: 900},
+	}
+}
+
+// TestRenderer_DirectoriesFilesColumn_TOON verifies that the TOON directories
+// array header contains "files" between "path" and "bytes", and that each row
+// carries the expected file count as the second pipe-delimited column.
+func TestRenderer_DirectoriesFilesColumn_TOON(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := NewTOONRenderer()
+	if err := r.RenderTree(&buf, dirFilesFixture(), nil); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	got := buf.String()
+
+	// Header must contain "files" between "path" and "bytes".
+	// toon-go emits tabular headers as {path|files|bytes|lines|words|chars}:
+	if !strings.Contains(got, "files") {
+		t.Errorf("TOON directories: output missing \"files\" column; got:\n%s", got)
+	}
+	// Verify column ordering: "path" appears before "files" before "bytes" in the header.
+	idxPath := strings.Index(got, "path")
+	idxFiles := strings.Index(got, "files")
+	idxBytes := strings.Index(got, "bytes")
+	if idxPath < 0 || idxFiles < 0 || idxBytes < 0 {
+		t.Fatalf("TOON header missing path/files/bytes; got:\n%s", got)
+	}
+	if idxPath >= idxFiles || idxFiles >= idxBytes {
+		t.Errorf("TOON column order wrong: path=%d files=%d bytes=%d; got:\n%s", idxPath, idxFiles, idxBytes, got)
+	}
+
+	// Each row with Files>0 must contain the expected value as a pipe-delimited field.
+	// alpha has Files=3: row starts "alpha|3|..."
+	if !strings.Contains(got, "alpha|3|") {
+		t.Errorf("TOON row for alpha: expected Files=3 column, missing \"alpha|3|\"; got:\n%s", got)
+	}
+	// beta has Files=5: row starts "beta|5|..."
+	if !strings.Contains(got, "beta|5|") {
+		t.Errorf("TOON row for beta: expected Files=5 column, missing \"beta|5|\"; got:\n%s", got)
+	}
+	// gamma has Files=0: row starts "gamma|0|..."
+	if !strings.Contains(got, "gamma|0|") {
+		t.Errorf("TOON row for gamma: expected Files=0 column, missing \"gamma|0|\"; got:\n%s", got)
+	}
+}
+
+// TestRenderer_DirectoriesFilesColumn_JSON verifies that JSON output carries
+// "files" for directories where Files>0, and omits it (omitempty) where Files==0.
+func TestRenderer_DirectoriesFilesColumn_JSON(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := NewJSONRenderer()
+	if err := r.RenderTree(&buf, dirFilesFixture(), nil); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	got := buf.String()
+
+	// Parse top-level to inspect per-directory files fields.
+	var parsed struct {
+		Directories []struct {
+			Path   string          `json:"path"`
+			Files  *int64          `json:"files"`
+			Counts counting.Counts `json:"counts"`
+		} `json:"directories"`
+		Total counting.Counts `json:"total"`
+	}
+	if err := json.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("json.Unmarshal: %v (body: %s)", err, got)
+	}
+	if len(parsed.Directories) != 3 {
+		t.Fatalf("expected 3 directories, got %d", len(parsed.Directories))
+	}
+
+	// alpha: Files=3 — must be present with value 3.
+	if parsed.Directories[0].Path != "alpha" {
+		t.Fatalf("directories[0].path: got %q, want %q", parsed.Directories[0].Path, "alpha")
+	}
+	if parsed.Directories[0].Files == nil {
+		t.Errorf("directories[alpha].files: expected 3, got nil (omitted)")
+	} else if *parsed.Directories[0].Files != 3 {
+		t.Errorf("directories[alpha].files: got %d, want 3", *parsed.Directories[0].Files)
+	}
+
+	// beta: Files=5 — must be present with value 5.
+	if parsed.Directories[1].Path != "beta" {
+		t.Fatalf("directories[1].path: got %q, want %q", parsed.Directories[1].Path, "beta")
+	}
+	if parsed.Directories[1].Files == nil {
+		t.Errorf("directories[beta].files: expected 5, got nil (omitted)")
+	} else if *parsed.Directories[1].Files != 5 {
+		t.Errorf("directories[beta].files: got %d, want 5", *parsed.Directories[1].Files)
+	}
+
+	// gamma: Files=0 — must be absent per omitempty.
+	if parsed.Directories[2].Path != "gamma" {
+		t.Fatalf("directories[2].path: got %q, want %q", parsed.Directories[2].Path, "gamma")
+	}
+	if parsed.Directories[2].Files != nil {
+		t.Errorf("directories[gamma].files: expected nil (omitted by omitempty for Files=0), got %d", *parsed.Directories[2].Files)
+	}
+}
+
+// TestRenderer_DirectoriesFilesColumn_Human verifies that human per-directory
+// KV blocks include a "Files" row before "Bytes", and that the grand-total
+// block does NOT include a "Files" row (s.Total is counting.Counts, no Files).
+func TestRenderer_DirectoriesFilesColumn_Human(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	r := newHumanRendererWithMode(testHumanMode)
+	if err := r.RenderTree(&buf, dirFilesFixture(), nil); err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	got := buf.String()
+
+	// Per-dir blocks must contain "Files".
+	if !strings.Contains(got, "Files") {
+		t.Errorf("human per-dir blocks: output missing \"Files\" label; got:\n%s", got)
+	}
+
+	// "Files" must appear before "Bytes" within the per-dir section.
+	// Since there are multiple blocks, verify first occurrence of "Files" is
+	// before first occurrence of "Bytes".
+	idxFiles := strings.Index(got, "Files")
+	idxBytes := strings.Index(got, "Bytes")
+	if idxFiles < 0 || idxBytes < 0 {
+		t.Fatalf("human output missing Files or Bytes; got:\n%s", got)
+	}
+	if idxFiles >= idxBytes {
+		t.Errorf("human: \"Files\" must appear before \"Bytes\"; Files=%d Bytes=%d; got:\n%s", idxFiles, idxBytes, got)
+	}
+
+	// Grand-total block must NOT contain a "Files" row. The total block is
+	// identified by the "total" title. We find the start of the total block and
+	// verify no "Files" label appears between it and end-of-output.
+	idxTotal := strings.LastIndex(got, "total")
+	if idxTotal < 0 {
+		t.Fatalf("human output missing 'total' block; got:\n%s", got)
+	}
+	totalSection := got[idxTotal:]
+	// "Files" must not appear in the total section (only Bytes/Lines/Words/Chars).
+	if strings.Contains(totalSection, "Files") {
+		t.Errorf("human grand-total block must NOT contain 'Files' row; got total section:\n%s", totalSection)
+	}
+}
+
 // TestHumanRenderer_RenderTree_AllUnknown verifies that when ByLang contains
 // only LangUnknown, no language row appears in the human output (F33).
 func TestHumanRenderer_RenderTree_AllUnknown(t *testing.T) {

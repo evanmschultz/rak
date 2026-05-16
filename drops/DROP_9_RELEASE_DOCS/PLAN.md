@@ -12,13 +12,15 @@
 
 ## Scope
 
-Final drop for v0.1.0. Six units, slimmed per decision 30:
+Final drop for v0.1.0. Eight units (six original + two polish additions):
 - **9.0** (NEW pre-9.1) — Per-language totals across all dirs. The `wc++ for LLMs` framing makes "how much Go vs Markdown in this repo" a first-class question; the existing per-dir × per-lang detail is good but doesn't aggregate. Add `Summary.TotalByLang` + render block.
 - **9.1** README rewrite (orch-direct, tier C).
 - **9.2** `--version` via `fang.WithVersion` (tier B builder).
 - **9.3** Flip `mage coverage` to a 70% floor gate (tier B builder).
 - **9.4** Flip repo public (tier C dev-manual).
 - **9.5** Tag `v0.1.0` + push tag (tier C dev-manual).
+- **9.6** (added 2026-05-15) — `files` column in directories tabular output. Surfaced during `--sort files` demo: column was being sorted on but never displayed.
+- **9.7** (added 2026-05-15) — Release polish: README accuracy re-pass + `rak completion` mention + VHS demo gifs + minor `main/CLAUDE.md` audit.
 
 Drop 9 close = v0.1.0 ship.
 
@@ -126,6 +128,47 @@ Orch wrote this inline (tier B/C mixed — no planner subagent per WORKFLOW.md �
   - The tag points at the exact commit the README + per-lang totals + --version + coverage gate ship at.
 - **Blocked by:** 9.4.
 - **Tier C** (dev-manual; orch coordinates).
+
+### Unit 9.6 — `files` column in directories tabular output
+
+- **State:** done
+- **Paths:**
+  - `main/internal/render/toon.go` (add `Files` field to `toonDirectory`; populate in `RenderTree`)
+  - `main/internal/render/json.go` (verify `directoryJSON.Files` wire — already exists with `omitempty`; decide whether to keep or drop `omitempty`)
+  - `main/internal/render/human.go` (add `Files` row to per-dir KV block; do NOT add to grand-total block)
+  - `main/internal/render/render_test.go` (extend snapshots for new column)
+- **Packages:** `github.com/evanmschultz/rak/internal/render`
+- **Acceptance:**
+  - **TOON:** `toonDirectory` grows a `Files int64` field with tag `toon:"files"` between `Path` and `Bytes` so the canonical column order is `path|files|bytes|lines|words|chars`. `RenderTree` populates `Files` from `d.Files` for each Directory. Emitted header is `directories[N|]{path|files|bytes|lines|words|chars}:` and each row carries five numeric columns.
+  - **JSON:** `directoryJSON.Files` already exists with `json:"files,omitempty"` and is propagated via F44 through `filterUnknown`. **Recommendation: keep `omitempty`** — preserves existing zero-count snapshot behavior; `--sort files` only orders dirs with `Files > 0` so the field surfaces where it matters. Confirm wire end-to-end (root.go → walkAndCount → Summary.Dirs[i].Files → directoryJSON.Files) with an explicit assertion in a test.
+  - **Human:** per-directory KV blocks currently emit Bytes/Lines/Words/Chars via shared `countsKV("dir: "+d.Path, d.Counts)`. Modify so per-dir blocks emit `Files` BEFORE `Bytes`; grand-total block (`countsKV("total", s.Total)`) MUST NOT show Files (s.Total is `counting.Counts`, has no Files data). Cleanest: introduce a `dirKV(title, files, counts)` helper for per-dir; keep `countsKV` for grand total. Document the helper split in the worklog.
+  - **F44 (`Files` propagation):** confirm `filterUnknown` in `json.go` still carries `Files` through reconstruction. No regression to F44.
+  - **Grand-total file count not in scope.** A separate v0.2 follow-up may add `Summary.TotalFiles` if desired; for v0.1.0 the column is per-directory only.
+  - **Tests:**
+    - `TestRenderer_DirectoriesFilesColumn_TOON` — fixture with two directories at different Files counts (e.g. 3 and 5); verify the emitted TOON output's `directories` header line contains `files` between `path` and `bytes`, AND each emitted row carries the expected file count.
+    - `TestRenderer_DirectoriesFilesColumn_JSON` — same fixture; verify `directoryJSON.Files` present (matching value) for dirs where Files > 0 and absent (per `omitempty`) where Files == 0.
+    - `TestRenderer_DirectoriesFilesColumn_Human` — same fixture; verify per-dir block contains `Files <n>` row AND grand-total block does NOT contain Files row.
+    - Update any existing snapshot tests in `render_test.go` that fail due to the new column header / value.
+  - `mage ci` green from `main/`.
+- **Blocked by:** —
+- **Tier B** (builder + falsification-only QA).
+
+### Unit 9.7 — Release polish (README + completion + VHS gifs + CLAUDE.md audit)
+
+- **State:** todo
+- **Paths:**
+  - `main/README.md` — re-pass example output for `files` column + add `rak completion` mention under Install
+  - `main/docs/tapes/*.tape` — new VHS tape scripts
+  - `main/docs/*.gif` — generated demo gifs
+- **Packages:** — (markdown + asset only)
+- **Acceptance:**
+  - README example output blocks reflect the new `files` column in TOON, JSON, and human samples.
+  - One-liner under Install: "Optional: shell completions via `rak completion <bash|zsh|fish|powershell>`."
+  - `vhs` installed (`go install github.com/charmbracelet/vhs@latest`); tape scripts authored in `main/docs/tapes/` for: default TOON walk, `--human`, `--json | jq`, `--lang go,rust`, `--sort files`, `--max-files` triggering, `--version`. Gifs generated under `main/docs/` and embedded near the README's Quick Examples section.
+  - Dev signs off on README + gif outputs before close.
+  - **Note:** the `main/CLAUDE.md` line 173 audit originally bundled with 9.7 was landed inline during Wave 1 of polish dispatch (drop `tokens` from naming-rules example, decision 30 cut). Recorded here for tracking.
+- **Blocked by:** 9.6 (files column must land first so example output + gifs reflect final shape)
+- **Tier C** (orch-direct + dev review).
 
 ## Notes
 

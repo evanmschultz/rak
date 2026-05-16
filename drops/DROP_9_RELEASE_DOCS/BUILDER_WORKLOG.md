@@ -72,3 +72,27 @@ None — Hylla answered everything needed. The unit only touched `cmd/rak` packa
 ## Hylla Feedback (pre-9.4 round)
 
 N/A — task touched only `internal/render/*.go` files; Hylla is Go-indexed but the specific work here was a struct-field reorder fully visible from direct file reads + LSP. No Hylla queries were needed.
+
+## Unit 9.6 — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-15
+- **Files touched:**
+  - `internal/render/toon.go` — added `Files int64 \`toon:"files"\`` to `toonDirectory` between `Path` and `Bytes`; updated `RenderTree` per-directory loop to set `Files: d.Files`.
+  - `internal/render/human.go` — introduced `dirKV(title string, files int64, counts counting.Counts) laslig.KV` helper that prepends a `Files` row before Bytes/Lines/Words/Chars; updated `RenderTree` per-directory loop to call `dirKV` instead of `countsKV`; `countsKV` unchanged (still used for grand-total block).
+  - `internal/render/render_test.go` — added `dirFilesFixture()` helper (3 dirs: Files=3, Files=5, Files=0) and three new tests: `TestRenderer_DirectoriesFilesColumn_TOON`, `TestRenderer_DirectoriesFilesColumn_JSON`, `TestRenderer_DirectoriesFilesColumn_Human`. Fixed one lint finding (De Morgan's law on `!(a < b && b < c)` → `a >= b || b >= c`).
+- **JSON wire status:** confirmed. `directoryJSON.Files int64 \`json:"files,omitempty"\`` already existed. `filterUnknown` already propagated `Files: d.Files` (F44). `RenderTree` uses `directoryJSON(filterUnknown(d))` bare-struct conversion — no code change needed. Wire confirmed by `TestRenderer_DirectoriesFilesColumn_JSON`.
+- **dirKV / countsKV split rationale:** `countsKV` operates on `counting.Counts` which has no `Files` field. The grand-total block calls `countsKV("total", s.Total)` — adding `Files` there would require a parallel field that doesn't exist yet (`Summary.TotalFiles` is a v0.2 follow-up). The `dirKV` helper accepts `files int64` separately so the per-dir block can include Files without polluting the total block. This is the minimal, non-speculative split.
+- **TDD cycle:**
+  - RED: added all three new tests → `mage test` fails (`Files` missing from human output, `files` missing from TOON header).
+  - GREEN: added `Files` field to `toonDirectory`, populated in loop; introduced `dirKV`, updated `RenderTree`. `mage test` all packages pass.
+  - REFACTOR: fixed lint finding (De Morgan). `mage ci` pass green.
+- **Existing snapshot impact:** None. `TestJSONRenderer_RenderTree_Snapshot` uses `Files=0` dirs — `omitempty` suppresses `files` key, output unchanged. `TestTOONRenderer_RenderTree` checks `".|"` substring — with `Files=0` the row is `.|0|5|...`, still contains `".|"`. `TestHumanRenderer_*` tests use `Files=0` dirs — `dirKV` emits `Files 0` row but no existing tests assert absence of `Files` in dir blocks.
+- **Mage targets run:** `mage test` (pass), `mage ci` (pass — 87.8% coverage, floor 70%, lint clean, format clean).
+
+## Hylla Feedback (unit 9.6)
+
+- **Query:** `hylla_search_keyword` for `toonDirectory struct path bytes files`, `directoryJSON filterUnknown files omitempty`, `countsKV human renderer directory`, `summary Directory Files struct`.
+- **Missed because:** Hylla's last ingest predates Drop 4 render work; the `toonDirectory`, `directoryJSON`, `humanRenderer.RenderTree`, and `summary.Directory` symbols were not returned from any of these queries.
+- **Worked via:** Direct `Read` of `internal/render/toon.go`, `internal/render/json.go`, `internal/render/human.go`, `internal/summary/summary.go`.
+- **Suggestion:** Re-ingest after this commit so Drop 4–9 render/summary symbols become searchable. The `directoryJSON` and `toonDirectory` structs would be valuable Hylla nodes for future render-layer work.

@@ -37,10 +37,13 @@ type toonCounts struct {
 }
 
 // toonDirectory is a single row in the directories array for RenderTree
-// output. It combines the walk-relative path with the four count fields so
-// the tabular array has all five columns per row.
+// output. It combines the walk-relative path with the accepted-file count and
+// four count fields so the tabular array has all six columns per row. Field
+// declaration order is load-bearing: toon-go emits columns in struct order, so
+// the canonical column order path|files|bytes|lines|words|chars is fixed here.
 type toonDirectory struct {
 	Path  string `toon:"path"`
+	Files int64  `toon:"files"`
 	Bytes int64  `toon:"bytes"`
 	Lines int64  `toon:"lines"`
 	Words int64  `toon:"words"`
@@ -138,6 +141,7 @@ func (toonRenderer) RenderTree(w io.Writer, s summary.Summary, errs []error) err
 	for _, d := range s.Dirs {
 		rows = append(rows, toonDirectory{
 			Path:  d.Path,
+			Files: d.Files,
 			Bytes: d.Counts.Bytes,
 			Lines: d.Counts.Lines,
 			Words: d.Counts.Words,

@@ -81,7 +81,7 @@ func (h humanRenderer) Render(w io.Writer, counts counting.Counts) error {
 func (h humanRenderer) RenderTree(w io.Writer, s summary.Summary, errs []error) error {
 	printer := h.newPrinter(w)
 	for _, d := range s.Dirs {
-		if err := printer.KV(countsKV("dir: "+d.Path, d.Counts)); err != nil {
+		if err := printer.KV(dirKV("dir: "+d.Path, d.Files, d.Counts)); err != nil {
 			return fmt.Errorf("render directory %q as human kv block: %w", d.Path, err)
 		}
 		// Per F33: filter LangUnknown before emitting per-lang rows.
@@ -135,13 +135,33 @@ func (h humanRenderer) newPrinter(w io.Writer) *laslig.Printer {
 	return laslig.New(w, h.policy)
 }
 
-// countsKV builds the shared KV body used by both Render and RenderTree.
-// Title is empty for the single-stream case and carries a label (dir: ...
-// or "total") for the tree case.
+// countsKV builds the shared KV body used by both Render and the grand-total
+// block in RenderTree. Title is empty for the single-stream case and carries a
+// label ("total") for the tree case. It does NOT include a Files row because
+// counting.Counts has no Files field; grand-total file counts are not in scope
+// for v0.1.0 (a separate Summary.TotalFiles field is deferred to v0.2).
 func countsKV(title string, counts counting.Counts) laslig.KV {
 	return laslig.KV{
 		Title: title,
 		Pairs: []laslig.Field{
+			{Label: "Bytes", Value: strconv.FormatInt(counts.Bytes, 10)},
+			{Label: "Lines", Value: strconv.FormatInt(counts.Lines, 10)},
+			{Label: "Words", Value: strconv.FormatInt(counts.Words, 10)},
+			{Label: "Chars", Value: strconv.FormatInt(counts.Chars, 10)},
+		},
+	}
+}
+
+// dirKV builds a KV block for a single per-directory rollup. It prepends a
+// "Files" row before the four count fields so the displayed order is:
+// Files / Bytes / Lines / Words / Chars. This helper is distinct from
+// countsKV so the grand-total block (which uses countsKV) never emits a
+// Files row — summary.Summary.Total is counting.Counts and has no Files field.
+func dirKV(title string, files int64, counts counting.Counts) laslig.KV {
+	return laslig.KV{
+		Title: title,
+		Pairs: []laslig.Field{
+			{Label: "Files", Value: strconv.FormatInt(files, 10)},
 			{Label: "Bytes", Value: strconv.FormatInt(counts.Bytes, 10)},
 			{Label: "Lines", Value: strconv.FormatInt(counts.Lines, 10)},
 			{Label: "Words", Value: strconv.FormatInt(counts.Words, 10)},
