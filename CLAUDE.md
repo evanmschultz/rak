@@ -170,7 +170,7 @@ Non-test Go: ~2,250 LOC. Test Go: ~3,100 LOC. Total v0.1.0: ~5,350 LOC. (Origina
 
 ### Go-Idiomatic Naming Rules
 
-1. **Package names:** lowercase, single-word, singular noun. No underscores, no mixedCase, no plurals. (`counting`, `fileset`, `lang`, `ignore`, `render`, `summary`, `tokens`.)
+1. **Package names:** lowercase, single-word, singular noun. No underscores, no mixedCase, no plurals. (`counting`, `fileset`, `lang`, `ignore`, `render`, `summary`.) (`tokens` was cut to v0.2 per `main/PLAN.md` decision 30.)
 2. **Exported:** `MixedCase`. Unexported: `mixedCase`.
 3. **Acronyms:** fully capitalized when leading or standalone (`JSONEncoder`, `parseHTTP`, `URL`); lowercase when internal (`id`, `url`).
 4. **Getters:** omit `Get` — `f.Size()`, not `f.GetSize()`. Direct field access for plain data.
