@@ -503,6 +503,10 @@ func addCounts(a, b counting.Counts) counting.Counts {
 // empty rootLabel returns the input unchanged, preserving the io/fs
 // convention for test callers that want it.
 //
+// rootLabel is normalized by stripping any trailing slashes before use so
+// that `rak ../` (trailing slash) does not produce double-slash paths such
+// as "..//sub" in the rendered output.
+//
 // Files is propagated verbatim through the reconstruction (F44): failing to
 // carry d.Files would cause --sort files to produce degenerate ordering
 // (all zeros) and would silently omit the JSON "files" field via omitempty.
@@ -510,6 +514,9 @@ func labelDirectories(dirs []summary.Directory, rootLabel string) []summary.Dire
 	if rootLabel == "" {
 		return dirs
 	}
+	// Strip trailing slashes so a user-supplied path like "../" or "./"
+	// does not produce double-slash directory paths in rendered output.
+	rootLabel = strings.TrimRight(rootLabel, "/")
 	out := make([]summary.Directory, len(dirs))
 	for i, d := range dirs {
 		if d.Path == "." {
