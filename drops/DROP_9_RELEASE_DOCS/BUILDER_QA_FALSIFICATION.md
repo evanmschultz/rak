@@ -245,3 +245,95 @@ PASS. Zero counterexamples constructed across ten declared attack surfaces plus 
 ### Hylla Feedback
 
 N/A — Unit 9.2 touched only `cmd/rak/main.go` (package `main`, entry point — Hylla indexes it but the change is a 1-line option append + const declaration, both verifiable from `git diff`) and `cmd/rak/root_test.go` (test file, not part of Hylla's exported surface in a meaningful way for this attack). All evidence sources for the attack — `git diff`, `Read`, `go doc fang`, `go doc cobra.Command`, `git grep`, `mage ci` — sufficed directly. No Hylla query attempted, no fallback miss.
+
+## Unit 9.6 — Round 1
+
+**Verdict:** PASS (no counterexamples found).
+**Tier:** B — sole QA gate, no proof companion.
+**Working dir:** `/Users/evanschultz/Documents/Code/hylla/rak/main`.
+**Builder change under review:** Unit 9.6 — `files` column added to per-directory tabular output (`internal/render/toon.go`, `internal/render/human.go`, `internal/render/render_test.go`); `internal/render/json.go` field already wired (F44).
+
+### Premises
+
+- TOON `directories` tabular array gains a `files` column between `path` and `bytes`; canonical column order becomes `path|files|bytes|lines|words|chars`.
+- JSON `directoryJSON.Files int64 \`json:"files,omitempty"\`` already existed; Unit 9.6 verifies wire end-to-end without a code change.
+- Human per-directory KV blocks gain a `Files` row before `Bytes`; grand-total KV block (`countsKV("total", s.Total)`) MUST NOT emit `Files` because `counting.Counts` has no `Files` field.
+- F44 (Files propagation through `filterUnknown` reconstruction) preserved; F33 (LangUnknown suppression) unaffected.
+- Three new tests added: `TestRenderer_DirectoriesFilesColumn_TOON|JSON|Human` plus `dirFilesFixture` helper (3 dirs at Files=3, Files=5, Files=0).
+
+### Evidence
+
+- `Read internal/render/toon.go` lines 44-51: `toonDirectory` declares `Path → Files → Bytes → Lines → Words → Chars` in struct order; doc comment line 41-43 explicitly notes "Field declaration order is load-bearing: toon-go emits columns in struct order".
+- `Read internal/render/json.go` lines 58-63: `directoryJSON` declares `Path, Counts, ByLang, Files` (matches `summary.Directory` order at `summary/summary.go:19-39` for bare struct conversion, F43); `Files int64 \`json:"files,omitempty"\``.
+- `Read internal/render/json.go` lines 74-93: `filterUnknown` returns new `summary.Directory` with explicit `Files: d.Files` (F44 doc comment lines 71-73).
+- `Read internal/render/human.go` lines 81-110: per-dir loop calls `dirKV("dir: "+d.Path, d.Files, d.Counts)` (line 84); grand-total uses `countsKV("total", s.Total)` (line 108).
+- `Read internal/render/human.go` lines 143-153: `countsKV` body lists ONLY `Bytes/Lines/Words/Chars` — no `Files` field.
+- `Read internal/render/human.go` lines 160-171: `dirKV` prepends a `Files` row before the four count rows.
+- `Read cmd/rak/root.go`: `walkAndCount` (lines 314-433) accumulates `byDirFiles[dir]++` (line 403) and constructs `summary.Directory{... Files: byDirFiles[p]}` (line 429); `labelDirectories` (lines 486-504) propagates Files at lines 493 and 500. F44 wire intact.
+- `Read internal/render/render_test.go` lines 666-836: `dirFilesFixture` (Files=3, 5, 0); three new tests covering TOON column ordering, JSON omitempty, human grand-total Files-absence.
+- `mage test`: all 8 packages `ok`.
+- `mage ci`: all green; coverage 87.8% (floor 70.0%); lint clean; format clean.
+
+### Trace or cases — attack surface results
+
+1. **Column-order regression** — REFUTED. `toonDirectory` struct field order is `Path → Files → Bytes → Lines → Words → Chars` (toon.go:44-51). toon-go marshals struct-field-order to TOON column order (confirmed via Drop 3-4 work and explicit doc comment "field declaration order is load-bearing"). Test `TestRenderer_DirectoriesFilesColumn_TOON` (render_test.go:697-736) asserts `idxPath < idxFiles < idxBytes` in header text — would catch any reorder.
+
+2. **JSON omitempty wire end-to-end** — REFUTED. End-to-end trace: `walkAndCount` populates `byDirFiles[dir]++` (root.go:403) → constructs `summary.Directory{Files: byDirFiles[p]}` (root.go:429) → `labelDirectories` preserves Files (root.go:493, 500) → `filterUnknown` preserves Files (json.go:91) → `directoryJSON(filterUnknown(d))` bare-struct conversion (json.go:145) → `json.Encoder.Encode` honors `json:"files,omitempty"` tag. Test `TestRenderer_DirectoriesFilesColumn_JSON` (render_test.go:740-793) asserts Files=3 present, Files=5 present, Files=0 absent (via `*int64` pointer to detect omitempty). Wire confirmed.
+
+3. *(skipped per spawn prompt)*
+
+4. **Human renderer grand-total Files leak** — REFUTED. Grand-total path is `countsKV("total", s.Total)` (human.go:108). `countsKV` body (lines 143-153) builds `Pairs` from ONLY Bytes/Lines/Words/Chars — no Files row. Doc comment lines 140-142 explicitly states "It does NOT include a Files row because counting.Counts has no Files field". Test `TestRenderer_DirectoriesFilesColumn_Human` (render_test.go:825-836) uses `strings.LastIndex(got, "total")` to isolate the grand-total section and explicitly asserts absence of `Files` in that section. Would catch any leak.
+
+5. **TOON omitempty mismatch** — REFUTED (acknowledged design trade-off). toon-go tabular arrays emit ALL declared columns per row (no per-row omitempty); a Files=0 dir renders as `gamma|0|...`. Test asserts `gamma|0|` substring at line 733 explicitly verifying this. The asymmetry (TOON shows zeros visibly; JSON omits zeros via omitempty) is documented in PLAN.md acceptance ("preserves existing zero-count snapshot behavior") and in the dirFilesFixture's gamma directory exercising both paths. Acceptable trade-off, not a bug.
+
+6. **Snapshot drift in pre-existing tests** — REFUTED. Audited every pre-existing test that touches `RenderTree`:
+   - `TestJSONRenderer_RenderTree_Snapshot` (line 274): byte-exact `want` string. Uses Files=0 dirs → `omitempty` suppresses `files` key → want-string remains valid. Confirmed.
+   - `TestJSONRenderer_RenderTree_Empty` (line 303): byte-exact, no dirs → no `files` field. Unchanged.
+   - `TestJSONRenderer_RenderTree_WithErrors` (line 327): byte-exact, Files=0 → omitted. Unchanged.
+   - `TestTOONRenderer_RenderTree` (line 399): substring `".|"` — Files=0 row becomes `.|0|5|1|1|5`, still contains `".|"`. Loose assertion accommodates the new column intentionally.
+   - `TestTOONRenderer_RenderTree_WithErrors` / `_NoErrors` / `_PerLang` / `_AllUnknown`: substring assertions on `errors`, `directories`, `go`, `rust`, `unknown`. None assert columns; new column does not break.
+   - `TestHumanRenderer_RenderTree_Labels` (line 162): substring assertions on `dir:`, `total`, `Bytes/Lines/Words/Chars`, numeric values. Block-order assertion uses `strings.Index` for `dir:` and `total` — the new `Files 0` row appears within dir blocks but does not interfere with this test's assertions.
+   - `TestHumanRenderer_RenderTree_NoErrors` / `_WithErrors` / `_EmptyDirs` / `_PerLang` / `_AllUnknown`: substring assertions, none assert absence of `Files` in dir blocks.
+   No silent-pass — strict byte-exact tests use Files=0 dirs (omitempty path), loose substring tests are unaffected by the new column.
+
+7. **F33 LangUnknown interaction** — REFUTED. `Files` lives on `summary.Directory`, not on per-lang rows. F33 lives in `sortedKnownLangs` (filters lang rows) and `filterUnknown`/`filterTotalByLangUnknown` (filters `by_lang` / `total_by_lang` map fields). The Files column on the per-directory row is independent — a dir with all LangUnknown content still has its Files count emitted in the directories tabular row, but its `by_lang` sub-object is suppressed. `filterUnknown` (json.go:74-93) explicitly preserves `Files: d.Files` even when `ByLang` is filtered to nil. Behavior matches PLAN.md acceptance.
+
+8. **F44 Files-propagation regression** — REFUTED. `filterUnknown` (json.go:74-93) returns a NEW `summary.Directory` with explicit `Files: d.Files` at line 91; doc comment lines 71-73 explicitly call out F44. `labelDirectories` (root.go:486-504) preserves Files at lines 493 (root case) and 500 (sub case); doc comment lines 483-485 explicitly call out F44. F44 wire intact end-to-end.
+
+9. **dirKV vs countsKV split caller audit** — REFUTED. Three call sites for the two helpers across the human renderer:
+   - `Render` (single-stream, human.go:65): `countsKV("", counts)` — correct, single-stream Counts has no per-dir context.
+   - `RenderTree` per-dir loop (human.go:84): `dirKV("dir: "+d.Path, d.Files, d.Counts)` — correct, per-dir uses dirKV.
+   - `RenderTree` grand-total (human.go:108): `countsKV("total", s.Total)` — correct, s.Total is `counting.Counts` with no Files field.
+   No caller misuses countsKV for per-dir context. The split is clean.
+
+10. **Test fixture realism — `dirFilesFixture`** — REFUTED. `dirFilesFixture` (render_test.go:671-692) covers three boundary cases:
+    - **Files > 0, distinct values (3 vs 5):** distinguishes the column from a constant or coincidental match (a fixture using only `Files=3` could pass even if the column was hardcoded to 3).
+    - **Files == 0:** exercises JSON `omitempty` boundary (key absent) AND TOON tabular always-present boundary (`gamma|0|...`).
+    - **Three distinct dir names (alpha/beta/gamma):** lexically ordered for deterministic assertions; covers multi-dir output ordering.
+    All three v0.1.0-relevant boundary conditions covered. No additional counterexample fixture surfaces a missed case.
+
+### Additional self-attacks
+
+- **`directoryJSON.Files` int64 vs int unmarshal mismatch:** the test uses `Files *int64 \`json:"files"\`` to detect omitempty (nil pointer vs zero). Type matches `directoryJSON.Files int64`. Correct.
+- **`laslig.Field` zero-value suppression:** verified `dirKV` emits `Files: strconv.FormatInt(files, 10)` — laslig prints zero values literally (`Files 0`). Confirmed by `TestRenderer_DirectoriesFilesColumn_Human` passing on gamma's Files=0 (the `idxFiles < idxBytes` assertion would fail if laslig dropped the row).
+- **Concurrency:** rendering is single-goroutine — no race surface introduced.
+- **Error swallowing:** no new error paths introduced — `dirKV` is pure construction; both renderer paths still wrap printer errors with `fmt.Errorf("...: %w", err)`.
+- **Raw go commands:** none used; all verification via `mage test` / `mage ci`.
+- **`mage install`:** not invoked.
+- **YAGNI:** Files column has 1 user (per-dir directories tabular output) but is justified by acceptance criteria explicitly listing it. The dirKV/countsKV split has 3 call sites (one each), so the split is minimal not premature.
+
+### Conclusion
+
+PASS. All 10 attack surfaces from the spawn prompt + 7 supplementary self-attacks REFUTED with concrete code references. No unmitigated counterexample constructed.
+
+### Unknowns
+
+- **Coverage delta of new code:** `dirKV` shows 100.0% in `mage ci` output; `countsKV` shows 100.0%; `RenderTree` (toon.go) at 90.6%; `RenderTree` (json.go) at 90.0%; `RenderTree` (human.go) at 80.0%. No coverage regression. Not a blocker.
+- **End-to-end `rak --sort files` + `--toon` smoke verification:** the new column would surface in real `rak` output; not directly exercised by an automated `cmd/rak` integration test. Tests live at the renderer-package level only. Acceptable for v0.1.0 because (a) the unit tests cover the boundary cases and (b) Drop 9.7 (release polish) will refresh README example output which is the de-facto end-to-end smoke check. Surfaceable to orch as a non-blocking observation.
+
+### Hylla Feedback
+
+- **Query 1:** `hylla_search_keyword` (implicit, recorded in builder worklog at lines 95-98) for `toonDirectory struct path bytes files`, `directoryJSON filterUnknown files omitempty`, `countsKV human renderer directory`, `summary Directory Files struct`.
+- **Missed because:** Hylla's last ingest predates Drop 4 render work; the `toonDirectory`, `directoryJSON`, `humanRenderer.RenderTree`, and `summary.Directory` symbols are not in the current snapshot.
+- **Worked via:** Direct `Read` of `internal/render/toon.go`, `internal/render/json.go`, `internal/render/human.go`, `internal/summary/summary.go`, `cmd/rak/root.go`.
+- **Suggestion:** Re-ingest at Drop 9 close so Drop 4-9 render/summary symbols become searchable for v0.2 work. The `directoryJSON`, `toonDirectory`, `dirKV`, `countsKV`, and `filterUnknown` symbols would be valuable Hylla nodes for future render-layer work.
