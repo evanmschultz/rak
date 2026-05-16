@@ -440,3 +440,125 @@ PASS. All 12 attack surfaces from the spawn prompt + 5 supplementary self-attack
 ### Hylla Feedback
 
 N/A — Unit 9.8 touched only `cmd/rak/root.go` (cobra command field addition) and `cmd/rak/root_test.go` (one test function). The change required no Go symbol navigation or cross-package reference lookup; direct `Read` + `git diff` + `git show --stat` covered all evidence needs. Context7 was queried for cobra's help-template semantics (one query) since that's an external-library contract Hylla cannot answer. No Hylla queries attempted, no fallback misses to report.
+
+## Unit 9.9 — Round 1
+
+**Verdict:** PASS (no counterexamples found; one cosmetic Unknown surfaced).
+**Tier:** B — sole QA gate, no proof companion.
+**Working dir:** `/Users/evanschultz/Documents/Code/hylla/rak/main`.
+**Commit under review:** `9d030db feat(lang): add ruby java php kotlin swift detection`.
+
+### Premises
+
+- Unit 9.9 adds five new `Language` constants (LangRuby, LangJava, LangPHP, LangKotlin, LangSwift) plus extension/filename/shebang map entries for each, plus `grammar` entries that introduce a `linePrefix2` field for PHP's dual `//`+`#` line-comment prefix. Acceptance pinned in `main/drops/DROP_9_RELEASE_DOCS/PLAN.md` § "Unit 9.9".
+- README "Languages detected" sentence updated to include the five new languages in alphabetical order.
+- `mage ci` must remain green; coverage gate (70% floor on `./internal/...`) must hold.
+
+### Evidence
+
+- `Read internal/lang/lang.go` (full file) — 5 new constants at lines 36, 39, 42, 44, 47; 2 new `specialFilenames` keys (`gemfile`, `rakefile`); 9 new `extensionTable` keys (`.gemspec`, `.java`, `.kt`, `.kts`, `.php`, `.phtml`, `.rake`, `.rb`, `.swift`); 1 new `shebangsTable` key (`ruby`).
+- `Read internal/lang/split.go` (full file) — new `linePrefix2 string` field on `grammar` at line 60; 5 new `grammarTable` entries (LangJava 92, LangKotlin 93, LangSwift 97, LangPHP 100, LangRuby 115); Split function (lines 140-211) checks `linePrefix2` after `linePrefix` at lines 174-179.
+- `Read internal/lang/lang_test.go` lines 170-294 — 6 new test funcs: TestDetect_Ruby (9 subcases), TestDetect_Java, TestDetect_PHP (2), TestDetect_Kotlin (2), TestDetect_Swift, TestDetect_NewLanguages_UnknownNegative.
+- `Read internal/lang/split_test.go` lines 219-422 — 5 new test funcs: TestSplit_Ruby (3 subcases), TestSplit_Java (3), TestSplit_PHP (3), TestSplit_Kotlin (2), TestSplit_Swift (2).
+- `Read README.md` line 112 — "Languages detected" sentence lists all 22 languages alphabetically (Shell parenthetical groups variants but counts as one entry).
+- `mage ci`: lint clean, all 8 packages `ok`, coverage `87.9% (floor: 70.0%, scope: ./internal/...)` — 17.9 points above floor. Coverage on internal/lang/lang.go: Detect 100.0%, detectShebang 85.7%, detectContent 44.4%; on split.go: Split 94.9%, Add 100.0%.
+- `mage test`: all 8 packages `ok` (cached).
+- `git log --oneline -1` confirms only commit under review is `9d030db feat(lang): add ruby java php kotlin swift detection`.
+
+### Trace or cases — attack surface results
+
+1. **Extension priority correctness (`.kts` collision risk).** REFUTED.
+   - `.kts` (Kotlin script) maps uniquely to LangKotlin (lang.go:86). Not present anywhere else in extensionTable. No collision possible because Go maps cannot have duplicate keys.
+   - For `build.gradle.kts`: special-filename lookup runs first on lowercased basename `build.gradle.kts` (lang.go:148-151) — not in specialFilenames. Falls to extension lookup on `filepath.Ext("build.gradle.kts")` = `.kts` → LangKotlin. Test `TestDetect_Kotlin/build.gradle.kts` (lang_test.go:253) verifies this exact path.
+
+2. **Filename detection case-sensitivity (`Rakefile`/`Gemfile`/`Gemfile.lock`).** REFUTED.
+   - lang.go:148 lowercases the basename via `strings.ToLower(filepath.Base(f.RelPath))` BEFORE the specialFilenames lookup. specialFilenames stores keys lowercased (`gemfile`, `rakefile`). Therefore `rakefile`, `Rakefile`, `RAKEFILE` all match. `TestDetect_Ruby/Rakefile filename` (lang_test.go:184) and `nested Rakefile` (lang_test.go:186) verify the case + nested-path interaction.
+   - `Gemfile.lock`: lowercased basename = `gemfile.lock`, NOT in specialFilenames. Falls through to extension lookup on `.lock`, not in extensionTable → LangUnknown. **This is intended** (lockfiles aren't Ruby source). No counterexample, just an intentional non-match. Not regression-tested but the surrounding behavior (extension fallthrough → LangUnknown for unknown extensions) is covered by `TestDetect_NewLanguages_UnknownNegative`.
+
+3. **Shebang correctness — `#!/usr/bin/env -S ruby --some-flag`.** REFUTED.
+   - lang.go:208-217: when interpreter basename is `env`, the loop iterates `parts[1:]` and SKIPS any arg starting with `-` (line 212: `if !strings.HasPrefix(arg, "-")`). For `#!/usr/bin/env -S ruby --some-flag`: parts = `[/usr/bin/env, -S, ruby, --some-flag]`. Loop skips `-S`, picks `ruby`, breaks. interp = `filepath.Base("ruby")` = `ruby` → maps to LangRuby. Works correctly. The implementation's flag-skip handling makes `env -S` a fully supported pattern.
+   - Existing test `TestDetect_Shebang_Python` (lang_test.go:112) exercises `env python3` (no `-S`). New `TestDetect_Ruby/shebang env ruby` (lang_test.go:187) exercises `env ruby`. The `env -S` flag-skip path is exercised structurally by the loop's flag-handling branch (line 211-216) but is not directly fixture-tested for ruby. Existing detectShebang is at 85.7% coverage so likely the `env -S` branch is one of the uncovered statements. **Minor coverage gap, not a counterexample** — the code path is correct by inspection.
+
+4. **PHP dual prefix (`//` AND `#`) — split correctness on both, no impact on single-prefix langs.** REFUTED.
+   - split.go:174-179: `linePrefix` checked first; if no match AND `linePrefix2 != ""`, secondary checked. For all non-PHP langs, `linePrefix2 == ""` (Go zero value), so guard skips secondary check. Pre-existing single-prefix behavior is byte-identical for Go/Rust/Python/etc. — no regression surface.
+   - PHP grammar entry (split.go:100) sets `linePrefix: "//"`, `linePrefix2: "#"`. `TestSplit_PHP/slashslash line comment` (split_test.go:319) and `hash line comment` (split_test.go:323) cover both branches. Existing `TestSplit_GoSimple`, `TestSplit_PythonHash`, etc. verify the unaffected single-prefix path is intact — `mage test` green.
+
+5. **Ruby `=begin`/`=end` block-comment edge cases (column 0 vs indented vs mid-line).** REFUTED with documented YAGNI.
+   - In real Ruby, `=begin`/`=end` MUST be at column 0; indented or mid-line `=begin` is a syntax error. rak's split implementation uses `strings.Contains(line, g.blockOpen)` (split.go:166) — matches the marker ANYWHERE on the line, regardless of column or indentation.
+   - Constructed counterexample: input `   =begin\nfoo\n   =end\n` (3-space indent) would be classified as 3 Comment lines by rak, but real Ruby would reject it as a syntax error. **This is an explicit Policy α / F28 YAGNI trade-off** — same family as `TestSplit_StringContainsMarker_KnownLimitation` (split_test.go:62) which documents that `s := "/*"` is mis-classified. The grammarTable comment (split.go:113-114) explicitly calls out "known limitation: string literals containing these markers will be mis-classified, consistent with F28 YAGNI for v0.1.0".
+   - Not a counterexample because the trade-off is intentional, declared, and consistent with the existing pattern. Renderer tests fixture verified at split_test.go:239-241 (block comment span = 3 Comment lines including `=begin`/`=end` lines).
+
+6. **Swift nested block comments — flat scanner behavior on `/* outer /* inner */ */`.** REFUTED with documented YAGNI.
+   - Real Swift permits `/* /* */ */` nesting. rak's flat open/close scanner (split.go:188-204) does NOT track nesting depth. Trace for `/* outer /* inner */ */` on a single line: openIdx=0 → enter block, idx=2; next iteration finds openIdx=9 (`/*` of inner), closeIdx=18 (`*/` after inner). Since openIdx<closeIdx, sets `inBlockComment=true`, idx=11; next iteration openIdx=-1, closeIdx=18 (the trailing `*/`) → sets `inBlockComment=false`, idx=20; loop exits. Final state: block CLOSED. The single line is classified as Comment via Policy α (line contains blockOpen). No counterexample to the documented behavior.
+   - For the multi-line case `/* outer\n  /* inner */ \n*/`: line 1 opens, line 2 contains both an open and close — classified Comment, but updates inBlockComment based on last-marker-wins (`*/` is last → inBlockComment=false), so line 3 (`*/`) starts NOT in block but contains blockClose → Comment via Policy α. End state: 3 Comment lines. Real Swift would treat the whole thing as one block comment (3 lines also Comment). End-state matches. **No observable user-facing difference** for typical Swift fixtures.
+   - The grammarTable comment (split.go:94-97) explicitly documents this as acceptable for v0.1.0 (Policy α, YAGNI). Not a counterexample.
+
+7. **Java/Kotlin/Swift block-comment shared rules — independent detection + classification.** REFUTED.
+   - All three grammar entries (split.go:92, 93, 97) carry `linePrefix: "//", blockOpen: "/*", blockClose: "*/"` — identical for the three languages. Detection (lang.go) routes by extension only (`.java` → LangJava, `.kt`/`.kts` → LangKotlin, `.swift` → LangSwift), so the lang VALUE is always correct per file. The split rules are then looked up via `grammarTable[lang]` — identical grammar means identical Split output for identical input across the three languages. This is correct.
+   - Tests `TestSplit_Java/block comment` (split_test.go:282), `TestSplit_Kotlin/block comment` (split_test.go:366), `TestSplit_Swift/block comment` (split_test.go:404) exercise the same kind of fixture for each, all expecting identical `LineCounts{Blank: 0, Comment: 3, Code: 1}`. All pass.
+
+8. **README "Languages detected" sentence accuracy + completeness.** REFUTED.
+   - Spawn appendix said "23 langs" — that framing is incorrect. The actual count is **22**: C, C++, CMakeLists.txt, CSS, Dockerfile, Go, HTML, Java, JavaScript, JSON, Kotlin, Makefile, Markdown, PHP, Python, Ruby, Rust, Shell, Swift, TOML, TypeScript, YAML. (Shell parenthetical "(sh/bash/zsh/fish)" lists detection variants but Shell counts as one logical entry.)
+   - Cross-check against lang.go const block: 22 distinct concrete languages (excluding LangUnknown which is the zero-value sentinel). README count matches code count exactly.
+   - Alphabetical ordering verified by inspection of README:112: C < C++ (treating ++ as nothing) < CMakeLists.txt < CSS < Dockerfile < Go < HTML < Java < JavaScript < JSON < Kotlin < Makefile < Markdown < PHP < Python < Ruby < Rust < Shell < Swift < TOML < TypeScript < YAML. The order is by display name (not constant name), which is consistent with how a reader would expect the sentence to flow. "JavaScript" before "JSON" because Ja < Js; "TOML" before "TypeScript" because TO < Ty. Correct.
+   - No typos found.
+
+9. **Lang constant alphabetical insertion — Builder's claim "alphabetical by constant name".** PARTIAL CONCERN, REFUTED on functional impact.
+   - Builder worklog (BUILDER_WORKLOG.md:146) claims const block is "alphabetical by constant name". Actual lang.go const block ordering: C, CPP, CMake, CSS, Docker, Go, HTML, Java, JS, JSON, Kotlin, Makefile, Markdown, PHP, Python, Ruby, Rust, Shell, Swift, TS, TOML, YAML.
+   - Strict alphabetical-by-constant-name would be: C, CMake (CM < CP), CPP, CSS, Docker, Go, HTML, Java, JS, JSON, Kotlin, Makefile, Markdown, PHP, Python, Ruby, Rust, Shell, Swift, TOML (TO < Tp), TS, YAML.
+   - Two cosmetic violations: `CPP` appears before `CMake` (CP > CM); `TS` appears before `TOML` (TS > TO).
+   - **Functional impact: zero.** Constant references are by name not position; map values reference these constants by name; renderers sort by string value at output time (`sortedKnownLangs` does `string(out[i]) < string(out[j])` per render/human.go:206). The const block ordering is purely a source-file readability concern.
+   - Not a counterexample. Surfaced as Unknown for cosmetic cleanup if the dev wants to fix it during a future polish pass.
+
+10. **Test coverage on new code.** REFUTED.
+    - Coverage report from `mage coverage`: total 87.9%, floor 70.0%, gate green. Specifically: lang.go Detect 100.0%, detectShebang 85.7%, detectContent 44.4% (pre-existing — Unit 9.9 didn't touch detectContent); split.go Split 94.9%, Add 100.0%.
+    - All new `Detect` paths exercised: extension-table for each new lang via `TestDetect_Java`/`PHP`/`Kotlin`/`Swift`/`Ruby`; specialFilenames for `Rakefile`/`Gemfile`; shebangsTable for `ruby`. All new comment-rule paths exercised in split_test.go: line-comment for each lang; block-comment for Java/Kotlin/Swift/PHP/Ruby (=begin); PHP dual `#` prefix.
+    - At least one boundary case per new comment rule covered. detectShebang at 85.7% is pre-existing (the `env -S` flag-skip branch in lang.go:211-216 is the most likely uncovered statement; not introduced by 9.9).
+    - Coverage gate not regressed: 87.9% post-9.9 vs 87.8% pre-9.9 — actually +0.1% from the new test surface.
+
+11. **Negative cases (`.unknown`, `.cs`, `.scala` → LangUnknown).** REFUTED.
+    - `.unknown` directly tested: `TestDetect_NewLanguages_UnknownNegative` (lang_test.go:284) asserts `LangUnknown`.
+    - `.cs` (C#) and `.scala` (Scala) — neither is in extensionTable (verified by Read of lines 68-102). Detect path: special-filename miss → extension miss → shebang sniff (no `#!` in test fixture content) → content heuristic on text → LangUnknown. The same code path is exercised by `TestDetect_UnknownExtension_NoShebang` (`.xyzzy`) and `TestDetect_NewLanguages_UnknownNegative` (`.unknown`).
+    - Not directly tested per-extension for `.cs` / `.scala`, but the equivalence class is covered. C# and Scala are intentionally NOT in v0.1.0 scope per the prompt's framing ("we deliberately didn't add C#"). No regression.
+
+12. **Hylla artifact reference staleness — fall-back to Read.** N/A (intended).
+    - Per project rule (CLAUDE.md § "Code Understanding Rules"): Hylla ingest is drop-end-only, so the new Unit 9.9 constants and tests are not yet in any Hylla snapshot. Direct `Read` is the correct evidence source for in-flight code. No Hylla query attempted; no fallback miss to flag (the staleness is by design, not a Hylla shortcoming).
+
+#### Additional self-attacks (QA-Falsification self-loop)
+
+A. **Map-key collision risk on existing keys.** REFUTED — Builder added 5 new specialFilenames keys (gemfile, rakefile) — neither collides with existing makefile/dockerfile/cmakelists.txt/gnumakefile. 9 new extensionTable keys — none collide with existing entries (verified by Read; `.kts` is unique despite the `.kt` proximity). 1 new shebangsTable key (`ruby`) — does not collide with bash/sh/zsh/fish/python/python2/python3/node/nodejs.
+
+B. **`grammar.linePrefix2` field-zero-value safety on existing langs.** REFUTED — Go zero value of `string` is `""`. split.go:177 guard `g.linePrefix2 != ""` skips the secondary check when zero-value. All non-PHP grammars have `linePrefix2` zero-value implicitly (only PHP sets it). Pre-existing tests unchanged + green confirms.
+
+C. **Order of linePrefix vs linePrefix2 check matters.** REFUTED — `linePrefix` checked at line 174 BEFORE `linePrefix2` at line 177. For PHP, `//` is checked first (more common). Both branches set `isComment=true` so order does not affect the outcome — only short-circuits the checks. Equivalent.
+
+D. **`.gemspec` extension priority over Ruby shebang.** REFUTED — extension lookup runs at step 2 (lang.go:154-159) before shebang at step 3. A file `foo.gemspec` containing `#!/usr/bin/env ruby` would be detected as LangRuby via .gemspec → LangRuby (extension table line 76). Both paths converge on the same answer. No conflict.
+
+E. **Ruby blockOpen/blockClose containment ambiguity.** REFUTED — `=end` does NOT contain `=begin` and vice versa. Order of search inside Split's update loop (split.go:188-204) finds the EARLIEST marker per iteration, then advances `idx` past it. Properly tracked.
+
+F. **Doc-comment-on-export-rule violations.** REFUTED — verified via Read: every new `Lang*` constant is grouped under the existing single doc comment block (lang.go:24-26) which is the established pattern in the file. Not a per-constant doc comment, but matches the file-local convention. golangci-lint passes (mage ci shows lint clean). No regression.
+
+G. **PHP `<?php` content marker shebang collision.** REFUTED — `<?php` is detected via extension only (`.php` / `.phtml`). detectContent (lang.go:228-247) does not check for `<?php` markers. PHP CLI scripts that use `#!/usr/bin/env php` would currently fall through to LangUnknown (no `php` shebang entry). **Minor gap, not a counterexample** — Unit 9.9 acceptance criteria did not require a PHP shebang.
+
+H. **Double-import / cyclic risk.** REFUTED — Unit 9.9 added zero new imports. lang.go uses bytes/path/filepath/strings + internal/fileset (pre-existing). split.go uses bufio/io/strings + internal/counting (pre-existing). No new module added; `mage ci` confirms no compilation issues.
+
+I. **Concurrency / goroutine surface.** REFUTED — Unit 9.9 introduced no goroutines, no shared mutable state, no synchronization primitives. The grammarTable / extensionTable / specialFilenames / shebangsTable maps are all package-level read-only after init (declared as map literals at package scope). Read concurrency is safe per Go memory model.
+
+J. **Raw `go` invocation creep.** REFUTED — verified via `git diff HEAD~1`: no new raw go invocations added. All builds via mage. `mage install` not invoked.
+
+K. **Out-of-scope file edits.** REFUTED — `git diff --stat HEAD~1`: only `internal/lang/lang.go`, `internal/lang/split.go`, `internal/lang/lang_test.go`, `internal/lang/split_test.go`, `README.md` (+ drop-dir mds). All within Unit 9.9's declared `paths`.
+
+### Conclusion
+
+PASS. All 12 attack surfaces from the spawn prompt + 11 supplementary self-attacks REFUTED with concrete code/test evidence. `mage ci` green at 87.9% coverage (17.9 points above the 70% floor). The only finding worth surfacing is a cosmetic one (Attack 9): the const block ordering has two minor alphabetical violations (CPP before CMake; TS before TOML) that do not affect behavior. README count matches code count (22 languages). All YAGNI trade-offs (Ruby `=begin` indented behavior, Swift nested blocks, PHP shebang absence) are documented in source comments or fall under the established F28 Policy α framework.
+
+### Unknowns
+
+- **Cosmetic const-block ordering** (Attack 9): the const block at `internal/lang/lang.go:27-51` is mostly alphabetical-by-constant-name but has two violations — `LangCPP` precedes `LangCMake` (alphabetically CMake < CPP) and `LangTS` precedes `LangTOML` (alphabetically TOML < TS). Zero functional impact (constants are referenced by name, not position; renderers sort by string-value at output). Builder worklog claims "alphabetical by constant name"; actual ordering is alphabetical-by-display-name in some places. Surfaceable to orch as a non-blocking cleanup item.
+- **PHP shebang absence** (Self-attack G): PHP CLI scripts using `#!/usr/bin/env php` fall through to LangUnknown. Not in Unit 9.9 acceptance criteria but worth noting as a v0.2 follow-up alongside the existing Ruby shebang work.
+- **`Gemfile.lock` not detected as Ruby** (Attack 2 partial): intentional but undocumented. Lockfiles aren't Ruby source. Not a counterexample.
+- **`env -S` flag-skip branch coverage** (Attack 3): correct by inspection but not directly fixture-tested for any lang. detectShebang at 85.7% coverage; the missing 14.3% likely includes this branch. Could be tightened with a single subcase in a future polish pass — not a blocker.
+
+### Hylla Feedback
+
+N/A — Unit 9.9 touched only `internal/lang/lang.go`, `internal/lang/split.go`, `internal/lang/lang_test.go`, `internal/lang/split_test.go`, and `main/README.md`. Per project rule (CLAUDE.md § "Code Understanding Rules"), Hylla ingest is drop-end-only; the new constants and grammar entries are not yet in any Hylla snapshot. Direct `Read` of the changed files is the correct evidence source for in-flight code, not a Hylla miss. No Hylla query attempted, no fallback to flag.
