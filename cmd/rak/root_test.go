@@ -1109,7 +1109,7 @@ func TestRootCmd_FilesField_SurvivesLabelDirectories(t *testing.T) {
 
 // TestRootCmd_Version verifies that the root cobra command, when given the
 // version string that fang.WithVersion wires in main.go, prints output
-// containing "v0.1.0" when invoked with --version. The test sets cmd.Version
+// containing "v0.1.2" when invoked with --version. The test sets cmd.Version
 // directly (mirroring what fang.WithVersion does to the cobra command) and
 // captures cobra's built-in version output via cmd.SetOut.
 func TestRootCmd_Version(t *testing.T) {
@@ -1117,7 +1117,7 @@ func TestRootCmd_Version(t *testing.T) {
 
 	var out bytes.Buffer
 	cmd := newRootCmd()
-	// Mirror what fang.WithVersion("v0.1.0") does to the cobra command:
+	// Mirror what fang.WithVersion("v0.1.2") does to the cobra command:
 	// cobra prints "<use> version <Version>" to OutOrStdout() when --version
 	// is passed and cmd.Version != "".
 	cmd.Version = version
@@ -1131,8 +1131,43 @@ func TestRootCmd_Version(t *testing.T) {
 	}
 
 	got := out.String()
-	if !strings.Contains(got, "v0.1.1") {
-		t.Errorf("--version output does not contain %q; got:\n%s", "v0.1.1", got)
+	if !strings.Contains(got, "v0.1.2") {
+		t.Errorf("--version output does not contain %q; got:\n%s", "v0.1.2", got)
+	}
+}
+
+// TestLabelDirectories_TrailingSlashRoot verifies that labelDirectories strips
+// trailing slashes from rootLabel before building directory paths, so that
+// `rak ../` (trailing slash on the positional arg) does not produce double-slash
+// paths like "..//sub" in rendered output. Exercises both the walk-root entry
+// (d.Path == ".") and a subdirectory entry.
+func TestLabelDirectories_TrailingSlashRoot(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{
+		"a.go":     {Data: []byte("package main\n")},
+		"sub/b.go": {Data: []byte("package sub\n")},
+	}
+
+	opts := listerOpts(&rootFlags{})
+	source := lister.NewWalkLister(fsys, ".", opts)
+
+	var out bytes.Buffer
+	// rootLabel has a trailing slash — the bug produced "..//sub" before the fix.
+	if err := runDirectory(context.Background(), &out, source, "../", false, nil, "lines", false, render.NewJSONRenderer(), 0); err != nil {
+		t.Fatalf("runDirectory: %v", err)
+	}
+
+	rendered := out.String()
+	if strings.Contains(rendered, "//") {
+		t.Errorf("trailing-slash rootLabel produced double-slash in output; got:\n%s", rendered)
+	}
+	// Sanity: the clean paths must still appear.
+	if !strings.Contains(rendered, `"../sub"`) && !strings.Contains(rendered, `"..\/sub"`) {
+		// JSON encodes the paths; check both forward-slash variants.
+		if !strings.Contains(rendered, "../sub") {
+			t.Errorf("expected '../sub' in output after trailing-slash normalization; got:\n%s", rendered)
+		}
 	}
 }
 

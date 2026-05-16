@@ -30,17 +30,34 @@ Conventional-commit subject lines: `type(scope): message`.
 
 ## Build targets
 
-Run `mage -l` for the full list. Common ones:
+Run `mage -l` for the full list:
 
-- `mage build` — compile.
+- `mage build` — compile check (`go build ./...`); does **not** produce a local binary.
 - `mage test` — `go test -race ./...`.
 - `mage format` — apply gofumpt.
 - `mage lint` — `go vet` + `golangci-lint`.
-- `mage ci` — pre-push gate (format-check + lint + test).
+- `mage ci` — pre-push gate (format-check + lint + test + coverage).
 - `mage coverage` — coverage on `internal/...` (70% floor enforced).
-- `mage install` — install rak to `$GOBIN` (the from-source install path).
+- `mage run -- <args>` — run rak from source for local testing. Args after `--` pass through to rak.
+- `mage install` — install the built binary to `$GOBIN` (the from-source install path for end users).
+- `mage addDep <module>` — add a Go module dependency.
 
 Never invoke raw `go test` / `go build` / `gofumpt` / `golangci-lint` directly — always go through mage so the build flags stay consistent.
+
+## Testing changes locally
+
+Use `mage run -- <args>` to test changes from source without installing:
+
+```sh
+mage run -- --version            # check version
+mage run -- ./internal           # smoke test on a path
+mage run -- --json . | jq '.'    # JSON output piped through jq
+mage run -- --help               # full help text
+```
+
+`mage build` only verifies the code compiles; it does not emit a binary in the working tree. If you want a permanent local binary on your `$PATH`, run `mage install` — that puts the built binary in `$GOBIN` (typically `~/go/bin/`).
+
+**Mage CLI quirk** — when `<args>` after `--` contains flag-style tokens (e.g. `--version`, `--help`), mage prints `Unknown target specified: "--"` and exits with code 2 *after* rak has already run successfully. The flag args still reach rak correctly; this is a mage CLI parsing artifact, not a rak bug. Non-flag args (paths) exit cleanly with code 0.
 
 ## Code style
 

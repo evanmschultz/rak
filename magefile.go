@@ -98,11 +98,23 @@ func AddDep(module string) error {
 	return nil
 }
 
-// Run executes `go run ./cmd/rak`. Positional args pass through after `--`,
-// e.g. `mage run -- --help`.
+// Run executes `go run ./cmd/rak`. Pass arguments to rak after `--`, e.g.:
+//
+//	mage run -- --help
+//	mage run -- ../
+//
+// Without `--`, no arguments are forwarded and rak reads stdin.
 func Run() error {
 	args := []string{"run", "./cmd/rak"}
-	args = append(args, os.Args[1:]...)
+	// Walk os.Args to find the literal "--" separator injected by mage.
+	// Everything after that token is forwarded verbatim to rak; everything
+	// before (including the mage target name) is dropped.
+	for i, a := range os.Args {
+		if a == "--" {
+			args = append(args, os.Args[i+1:]...)
+			break
+		}
+	}
 	if err := sh.RunV("go", args...); err != nil {
 		return fmt.Errorf("mage run: %w", err)
 	}
