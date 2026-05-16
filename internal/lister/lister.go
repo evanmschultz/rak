@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/evanmschultz/rak/internal/fileset"
 )
@@ -35,14 +36,15 @@ type FileLister interface {
 var ErrNoGitignoreInRepo = errors.New("rak: --no-gitignore has no effect when run inside a git repository. rak counts git-tracked files in this mode. To count untracked files, run rak outside the repository")
 
 // Detect resolves the concrete FileLister for root. It resolves root to an
-// absolute path, then probes whether root sits inside a git repository by
-// running "git rev-parse --is-inside-work-tree". The probe result drives the
-// selection:
+// absolute path, then probes whether root sits inside a git work tree by
+// running "git rev-parse --is-inside-work-tree" and inspecting stdout. The
+// probe result drives the selection:
 //
-//   - Exit 0 (in repo) + opts.DisableGitignore true  → (nil, ErrNoGitignoreInRepo).
-//   - Exit 0 (in repo) + opts.DisableGitignore false → newGitLister (Unit 4.2).
-//   - Non-zero exit (not in repo) or git binary absent → newWalkLister (Unit 4.3).
-//   - Unexpected OS-level command failure             → wrapped error.
+//   - Exit 0 + stdout "true"  + opts.DisableGitignore true  → (nil, ErrNoGitignoreInRepo).
+//   - Exit 0 + stdout "true"  + opts.DisableGitignore false → newGitLister (Unit 4.2).
+//   - Exit 0 + stdout "false" (bare repo or inside .git/)   → newWalkLister (Unit 4.3).
+//   - Non-zero exit (*exec.ExitError, e.g. not in any repo) → newWalkLister (Unit 4.3).
+//   - OS-level failure (could not spawn the command)        → wrapped error.
 //
 // Errors are wrapped with the "lister: detect: %w" prefix.
 func Detect(ctx context.Context, root string, opts fileset.WalkOptions) (FileLister, error) {
@@ -60,10 +62,17 @@ func Detect(ctx context.Context, root string, opts fileset.WalkOptions) (FileLis
 	cmd := exec.CommandContext(ctx, "git", "-c", "safe.directory=*", "rev-parse", "--is-inside-work-tree")
 	cmd.Dir = absRoot
 	cmd.Env = gitCleanEnv()
-	runErr := cmd.Run()
+	out, runErr := cmd.Output()
 
 	if runErr == nil {
-		// Exit 0: we are inside a git repository.
+		// Exit 0: git ran successfully. Check stdout to distinguish a real work
+		// tree ("true") from a bare repo or a path inside .git/ ("false").
+		// Both bare repos and paths inside .git/ return exit 0 but print "false".
+		if strings.TrimSpace(string(out)) != "true" {
+			// Not a work tree — fall back to the filesystem walker.
+			return newWalkLister(os.DirFS(absRoot), ".", opts), nil
+		}
+		// Inside a git work tree.
 		if opts.DisableGitignore {
 			return nil, fmt.Errorf("lister: detect: %w", ErrNoGitignoreInRepo)
 		}

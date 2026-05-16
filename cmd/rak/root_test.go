@@ -1131,8 +1131,8 @@ func TestRootCmd_Version(t *testing.T) {
 	}
 
 	got := out.String()
-	if !strings.Contains(got, "v0.1.0") {
-		t.Errorf("--version output does not contain %q; got:\n%s", "v0.1.0", got)
+	if !strings.Contains(got, "v0.1.1") {
+		t.Errorf("--version output does not contain %q; got:\n%s", "v0.1.1", got)
 	}
 }
 

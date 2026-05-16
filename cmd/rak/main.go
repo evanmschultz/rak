@@ -9,11 +9,11 @@ import (
 	"github.com/charmbracelet/fang"
 )
 
-// version is the canonical release identifier for v0.1.0. Build-time
+// version is the canonical release identifier for v0.1.1. Build-time
 // -ldflags injection via GoReleaser is deferred to v0.2; for now the
 // string is hardcoded here and referenced by fang.WithVersion so that
 // `rak --version` emits it directly.
-const version = "v0.1.0"
+const version = "v0.1.1"
 
 func main() {
 	if err := fang.Execute(
