@@ -337,3 +337,106 @@ PASS. All 10 attack surfaces from the spawn prompt + 7 supplementary self-attack
 - **Missed because:** Hylla's last ingest predates Drop 4 render work; the `toonDirectory`, `directoryJSON`, `humanRenderer.RenderTree`, and `summary.Directory` symbols are not in the current snapshot.
 - **Worked via:** Direct `Read` of `internal/render/toon.go`, `internal/render/json.go`, `internal/render/human.go`, `internal/summary/summary.go`, `cmd/rak/root.go`.
 - **Suggestion:** Re-ingest at Drop 9 close so Drop 4-9 render/summary symbols become searchable for v0.2 work. The `directoryJSON`, `toonDirectory`, `dirKV`, `countsKV`, and `filterUnknown` symbols would be valuable Hylla nodes for future render-layer work.
+
+## Unit 9.8 — Round 1
+
+**Verdict:** PASS (no counterexamples found).
+**Tier:** B — sole QA gate, no proof companion.
+**Working dir:** `/Users/evanschultz/Documents/Code/hylla/rak/main`.
+**Commit under review:** `940bbb1 feat(cmd): add examples to help output via cobra Example field`.
+
+### Premises
+
+- Unit 9.8 adds a cobra `Example:` field on the root command containing 8 examples in a specified order, each prefixed with a `#` comment line.
+- A new test `TestRootCmd_HelpContainsExamples` asserts that `--help` output contains the leading `# Default — emit TOON` comment and all 8 example command strings.
+- Pre-existing `Long:` text MUST remain unchanged.
+- `mage ci` must remain green; coverage must remain at-or-above the 70% floor.
+
+### Evidence
+
+- `git show 940bbb1 --stat`: only two production files touched — `cmd/rak/root.go` (+23) and `cmd/rak/root_test.go` (+45). Drop-dir mds also updated. No other Go files touched.
+- `git diff 739d4f5 940bbb1 -- cmd/rak/root.go`: pure addition of `Example:` field between `Long:` and `Args:` lines. **No change to `Long:` text** (lines 64-70 of root.go untouched).
+- `git diff 739d4f5 940bbb1 -- cmd/rak/root_test.go`: pure addition of `TestRootCmd_HelpContainsExamples` (45 lines), no edits to existing tests.
+- `mage ci`: pass. lint clean (0 issues), all 8 packages `ok`, coverage `87.8% (floor 70.0%, scope ./internal/...)`. No regression.
+- `mage test`: all packages `ok` (cached).
+- Context7 `/spf13/cobra` confirms cobra's help template writes to `cmd.OutOrStdout()` — `cmd.SetOut(&out)` in the test captures help output correctly.
+- `internal/render/json.go:107` confirms `treeJSON.TotalByLang` is tagged `json:"total_by_lang,omitempty"` — the example `rak --json . | jq '.total_by_lang'` references the actual JSON top-level key.
+- `cmd/rak/root.go:94` confirms `Args: cobra.MaximumNArgs(1)` — 0 args triggers stdin path at `root.go:240` (`counting.Count(c.InOrStdin())`), so `cat README.md | rak` example is accurate (no `-` or explicit stdin token needed).
+
+### Trace or cases — attack surface results
+
+1. **Example rendering integrity (fang/cobra renders `Example:` verbatim).** REFUTED.
+   - Per Context7 (`/spf13/cobra`), cobra's default help template emits the `Example:` field under an "Examples:" section verbatim. Fang wraps `cobra.Command.Execute` but leaves cobra's standard help template intact. The test asserts each of the 8 command literals are present in the captured output — `mage ci` green confirms.
+   - Verbatim rendering also confirmed by builder worklog's own report (BUILDER_WORKLOG.md:108-112).
+
+2. **Off-by-one in example count + order.** REFUTED.
+   - Read of `cmd/rak/root.go:71-93` enumerates exactly 8 example blocks in spec order: `rak .`, `rak --human .`, `rak --json . | jq '.total_by_lang'`, `rak --sort files .`, `rak --sort path --sort-asc .`, `rak --lang go,rust .`, `rak --max-files 1000 .`, `cat README.md | rak`. No duplicates, no missing, no reordering. Matches `main/drops/DROP_9_RELEASE_DOCS/PLAN.md` § "Unit 9.8" acceptance criteria 1-8 exactly.
+   - Test `wantCmds` slice (root_test.go:1167-1176) lists the same 8 strings in the same order.
+
+3. **Comment-vs-command coupling (each `#` precedes its command).** REFUTED.
+   - Visual inspection of root.go:71-93 confirms each `# <comment>` line is immediately followed by its `rak <args>` command on the next line, separated from the next pair by a blank line. Pairing is correct for all 8.
+
+4. **`TestRootCmd_HelpContainsExamples` substring brittleness.** REFUTED.
+   - Test asserts via `strings.Contains` on plain command literals (e.g. `"rak ."`, `"rak --human ."`, `"cat README.md | rak"`). These literals have no special characters that fang/cobra would line-wrap or re-indent inside (no long phrases that might break across lines at terminal widths; max length is `"rak --sort path --sort-asc ."` at 28 chars, well under any reasonable wrap point).
+   - Help output is captured via `bytes.Buffer` (non-TTY); fang's TTY styling/ANSI codes are not applied because `cmd.SetOut` to a buffer bypasses TTY detection.
+   - Comment assertion `"# Default — emit TOON"` uses the em-dash `—` (U+2014). The em-dash appears verbatim in both the source string (`root.go:71`) and the test (root_test.go:1162) — `strings.Contains` operates on raw bytes, so as long as both are UTF-8 the comparison is byte-equivalent. No locale dependency at the test boundary.
+
+5. **JSON pipe example correctness — `.total_by_lang` is real JSON key.** REFUTED.
+   - `internal/render/json.go:105-110` defines `treeJSON` with field `TotalByLang map[lang.Language]lang.LangCounts \`json:"total_by_lang,omitempty"\``.
+   - The example `rak --json . | jq '.total_by_lang'` therefore selects an actual top-level key in `rak --json` output. (When the map is empty after F33 filtering, the key is suppressed by `omitempty` and jq returns `null` — that's a degenerate but non-broken case.)
+
+6. **`Long:` regression.** REFUTED.
+   - `git diff 739d4f5 940bbb1 -- cmd/rak/root.go` shows only an `Example:` insertion between `Long:` and `Args:`. The `Long:` block at lines 64-70 is identical pre/post commit (zero deleted lines on the `Long:` content).
+
+7. **`Example:` indentation + fang re-indent interaction.** REFUTED.
+   - The raw string at root.go:71-93 uses a 2-space leading indent on every non-blank line. Cobra's default help template emits `Example:` content verbatim without re-indenting (per Context7 cobra docs on `SetHelpTemplate` — the default template uses `{{.Example}}` directly without manipulation).
+   - The test does not assert leading whitespace; it asserts substring `"rak ."`, `"# Default — emit TOON"`, etc. Even if fang stripped one space off each line, the literal substrings would still match.
+   - `mage ci` green confirms the test passes, so any observed fang/cobra indent transformation does not break the substring assertions.
+
+8. **Stdin example accuracy (`cat README.md | rak`).** REFUTED.
+   - `cmd/rak/root.go:94` declares `Args: cobra.MaximumNArgs(1)` (0 or 1 args allowed).
+   - `cmd/rak/root.go:228-247` `runRoot`: `len(args) == 1` triggers the directory walk; the `else` branch (0 args) falls through to `counting.Count(c.InOrStdin())` at line 240. No `-` token required; rak reads stdin by default when no path is given.
+   - Example `cat README.md | rak` is therefore accurate against the current root.go behavior.
+
+9. **Localization / em-dash encoding.** REFUTED.
+   - Em-dash `—` (U+2014, UTF-8 `\xE2\x80\x94`) appears in both `root.go:71` and the matching test assertion at `root_test.go:1162`. Go source files are UTF-8 by spec; raw-string literals preserve bytes verbatim; `strings.Contains` operates on raw bytes. The comparison is byte-identical regardless of terminal locale.
+   - Terminal/locale rendering is a user-display concern at runtime, not a test-correctness concern. The test asserts the em-dash byte sequence is present in `bytes.Buffer` output; that holds.
+
+10. **Trailing-newline / final-line rendering.** REFUTED.
+    - The raw string ends with `cat README.md | rak` and no trailing newline (the closing backtick follows immediately).
+    - Cobra's help template appends its own framing (blank line + next section header) after `{{.Example}}`, so the final line is followed by a separator that's part of the template's structure, not the field value.
+    - Even if cobra emitted no trailing newline, the test asserts `strings.Contains(got, "cat README.md | rak")` which succeeds whether or not a newline follows.
+
+11. **Help-output channel mismatch (stdout vs stderr).** REFUTED.
+    - Per Context7 cobra docs, the default help template writes to `cmd.OutOrStdout()` (not stderr). The test sets BOTH `cmd.SetOut(&out)` and `cmd.SetErr(&out)` to the same buffer — even if cobra/fang routed help to stderr, the buffer captures both. No channel-mismatch escape route.
+
+12. **Coverage regression below 70% floor.** REFUTED.
+    - `mage ci` post-9.8: `coverage: 87.8% (floor: 70.0%, scope: ./internal/...)`. Unit 9.8 added zero `./internal/...` code (only `cmd/rak/`), which is explicitly excluded from the coverage scope per decision 22 and the `-coverpkg=./internal/...` flag in `magefile.go:119`. Therefore Unit 9.8 cannot regress the coverage gate.
+
+13. **(Self-attack) Test could pass against an empty `Example:` if fang silently injected its own example content.** REFUTED.
+    - Fang (`/charmbracelet/fang`) is a styling/theming wrapper over cobra's `Execute`; it does NOT synthesize example content. The 8 example literals can only originate from the cobra command's own `Example:` field. The builder worklog's RED step (BUILDER_WORKLOG.md:101) confirms the test fails before the field is added.
+
+14. **(Self-attack) Test passes vacuously because `--help` errors before output is captured.** REFUTED.
+    - `cmd.SetArgs([]string{"--help"})` triggers cobra's built-in `-h, --help` handler. Cobra writes the help text and returns nil. The test asserts `if err := cmd.Execute(); err != nil { t.Fatalf(...) }` so a non-nil error would fail the test, not vacuously pass.
+
+15. **(Self-attack) Builder skipped the `# Default — emit TOON` em-dash and used a hyphen.** REFUTED.
+    - Re-read of `cmd/rak/root.go:71` confirms `# Default — emit TOON for LLM-first consumption` with the em-dash. Test assertion at `root_test.go:1162` uses the same em-dash. Byte-equivalent.
+
+16. **(Self-attack) Out-of-paths file edits.** REFUTED.
+    - `git show 940bbb1 --stat`: only `cmd/rak/root.go` and `cmd/rak/root_test.go` (+ drop-dir mds, which are workflow files). PLAN.md's declared paths for Unit 9.8 are exactly these two Go files. No scope creep.
+
+17. **(Self-attack) Concurrency / goroutine / mutex regressions.** REFUTED.
+    - Unit 9.8 adds a static string field on a `cobra.Command` literal and a test function. No goroutines spawned, no shared state, no synchronization primitives. The change has no concurrency surface to attack.
+
+### Conclusion
+
+PASS. All 12 attack surfaces from the spawn prompt + 5 supplementary self-attacks REFUTED with concrete code/diff/Context7 evidence. No counterexample constructed. `mage ci` green at 87.8% coverage.
+
+### Unknowns
+
+- **TTY-mode visual rendering of the `Example:` block under fang.** Fang applies ANSI styling to cobra output in TTY mode (per the Context7 `/charmbracelet/fang` summary: "fancy output ... theming"). The test runs in a non-TTY `bytes.Buffer`, so the unstyled command literals are asserted. The styled TTY rendering is a UX surface, not a correctness surface; not under test. Acceptable — the test exercises the load-bearing assertion (content present in help output) and `mage ci` runs the same non-TTY path. Recommend the dev visually inspect `rak --help` from a real terminal once during release-polish (Unit 9.7) and confirm the styling looks right.
+- **Long-line wrap behavior at narrow terminal widths.** Cobra's default template does NOT wrap `Example:` field content (it's emitted verbatim). Fang may wrap at terminal width in TTY mode. The longest example line is 28 chars; at default 80-col terminals there's no risk. At 24-col-and-below terminals fang might wrap; not a v0.1.0 blocker. Not under test.
+
+### Hylla Feedback
+
+N/A — Unit 9.8 touched only `cmd/rak/root.go` (cobra command field addition) and `cmd/rak/root_test.go` (one test function). The change required no Go symbol navigation or cross-package reference lookup; direct `Read` + `git diff` + `git show --stat` covered all evidence needs. Context7 was queried for cobra's help-template semantics (one query) since that's an external-library contract Hylla cannot answer. No Hylla queries attempted, no fallback misses to report.
