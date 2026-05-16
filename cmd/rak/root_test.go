@@ -1136,6 +1136,51 @@ func TestRootCmd_Version(t *testing.T) {
 	}
 }
 
+// TestRootCmd_HelpContainsExamples verifies that the root command's --help
+// output contains the cobra Example: field with all eight documented examples
+// plus their leading # comments. The test captures cobra's help output via
+// cmd.SetOut and asserts each example command string and the default-TOON
+// comment are present. It intentionally avoids asserting the section header
+// name (cobra calls it "Examples:" but fang may style it differently).
+func TestRootCmd_HelpContainsExamples(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--help"})
+
+	// cobra's --help handler returns nil; any error here is unexpected.
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cmd.Execute --help: %v", err)
+	}
+
+	got := out.String()
+
+	// Assert the leading # comment for the default example.
+	if !strings.Contains(got, "# Default — emit TOON") {
+		t.Errorf("--help output missing '# Default — emit TOON'; got:\n%s", got)
+	}
+
+	// Assert each of the eight example command lines is present verbatim.
+	wantCmds := []string{
+		"rak .",
+		"rak --human .",
+		"rak --json . | jq '.total_by_lang'",
+		"rak --sort files .",
+		"rak --sort path --sort-asc .",
+		"rak --lang go,rust .",
+		"rak --max-files 1000 .",
+		"cat README.md | rak",
+	}
+	for _, cmd := range wantCmds {
+		if !strings.Contains(got, cmd) {
+			t.Errorf("--help output missing example command %q; got:\n%s", cmd, got)
+		}
+	}
+}
+
 // TestRootCmd_TotalByLang_EndToEnd verifies that walkAndCount aggregates
 // TotalByLang correctly across multiple directories and that the JSON renderer
 // surfaces it under total_by_lang. The fixture has Go files in the root

@@ -90,6 +90,36 @@ N/A — task touched only `internal/render/*.go` files; Hylla is Go-indexed but 
 - **Existing snapshot impact:** None. `TestJSONRenderer_RenderTree_Snapshot` uses `Files=0` dirs — `omitempty` suppresses `files` key, output unchanged. `TestTOONRenderer_RenderTree` checks `".|"` substring — with `Files=0` the row is `.|0|5|...`, still contains `".|"`. `TestHumanRenderer_*` tests use `Files=0` dirs — `dirKV` emits `Files 0` row but no existing tests assert absence of `Files` in dir blocks.
 - **Mage targets run:** `mage test` (pass), `mage ci` (pass — 87.8% coverage, floor 70%, lint clean, format clean).
 
+## Unit 9.8 — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-15
+- **Files touched:**
+  - `cmd/rak/root.go` — added `Example:` field to the root `cobra.Command` struct literal with 8 examples in the specified order, each prefixed with a `# comment` line followed by the command indented 2 spaces. Raw backtick-quoted multi-line string.
+  - `cmd/rak/root_test.go` — added `TestRootCmd_HelpContainsExamples` immediately before `TestRootCmd_TotalByLang_EndToEnd`. Test constructs `newRootCmd()`, sets args to `--help`, captures stdout via `cmd.SetOut`, asserts `# Default — emit TOON` comment is present, then asserts all 8 example command strings are present verbatim.
+- **TDD cycle:**
+  - RED: added `TestRootCmd_HelpContainsExamples` before adding the `Example:` field; `mage test` failed on `cmd/rak` with the help output lacking any of the 8 example strings.
+  - GREEN: added `Example:` field to `cobra.Command` struct in `root.go`; `mage test` all packages pass.
+  - REFACTOR: no refactor needed — change is minimal and clean.
+- **Mage targets run:**
+  - `mage test` — pass (RED then GREEN cycle).
+  - `mage build` — pass.
+  - `mage ci` — pass green. gofumpt: 0 issues. lint: 0 issues. tests: all pass. coverage: 87.8% (floor 70%).
+- **fang/cobra rendering observations:**
+  - cobra renders the `Example:` field verbatim under an "Examples:" section header in `--help` output (confirmed by test assertions passing — all 8 command strings and the `# Default — emit TOON` comment appear in stdout captured via `cmd.SetOut`).
+  - cobra does NOT strip or re-indent the raw string content; the 2-space indent in the raw string is preserved as-is in help output.
+  - fang wraps cobra's `Execute` and styles fang-specific sections (errors, usage header) but leaves cobra's standard `HelpFunc` rendering intact — the `Example:` field flows through the standard cobra template.
+  - Section header: cobra's default template renders it as "Examples:" in the help output. Fang may apply ANSI styling to the header in TTY mode, but the literal command strings always appear unstyled in `cmd.SetOut` (non-TTY buffer). The test avoids asserting the header name for robustness.
+- **`Long:` text:** confirmed untouched. Lines 64-70 of `root.go` unchanged.
+- **Design decisions:**
+  - Indentation: 2-space prefix per spec ("cobra's standard rendering"). Kept consistent across all 8 examples.
+  - Test asserts `# Default — emit TOON` (the leading comment) + all 8 command lines. Does NOT assert "Examples:" header string — fang may style it differently in TTY mode, and the literal content is more meaningful.
+  - Single-quote inside raw backtick string (`jq '.total_by_lang'`) and pipe character (`|`) are legal in Go raw string literals. No escaping needed.
+
+## Hylla Feedback (unit 9.8)
+
+N/A — task touched only `cmd/rak/root.go` and `cmd/rak/root_test.go` (adding a string field and a test function). The change was fully contained in two files with no symbol navigation or cross-package reference lookup required. No Hylla queries were needed.
+
 ## Hylla Feedback (unit 9.6)
 
 - **Query:** `hylla_search_keyword` for `toonDirectory struct path bytes files`, `directoryJSON filterUnknown files omitempty`, `countsKV human renderer directory`, `summary Directory Files struct`.

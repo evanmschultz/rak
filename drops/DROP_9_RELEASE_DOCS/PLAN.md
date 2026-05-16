@@ -170,6 +170,30 @@ Orch wrote this inline (tier B/C mixed — no planner subagent per WORKFLOW.md �
 - **Blocked by:** 9.6 (files column must land first so example output + gifs reflect final shape)
 - **Tier C** (orch-direct + dev review).
 
+### Unit 9.8 — Help-menu examples + defaults note via cobra `Example:` field
+
+- **State:** done
+- **Paths:**
+  - `main/cmd/rak/root.go` (add `Example:` field to root cobra command)
+  - `main/cmd/rak/root_test.go` (test that `--help` output contains the Examples section + leading default-TOON line)
+- **Packages:** `github.com/evanmschultz/rak/cmd/rak`
+- **Acceptance:**
+  - Add `Example:` field to root `cobra.Command` with eight examples in this order, each prefixed with a `#` comment explaining the case (cobra renders the field verbatim; fang styles it):
+    1. `rak .` — `# Default — emit TOON for LLM-first consumption`
+    2. `rak --human .` — `# Render for humans (TTY-styled via laslig)`
+    3. `rak --json . | jq '.total_by_lang'` — `# Render as JSON for piping`
+    4. `rak --sort files .` — `# Sort directories by file count (desc default)`
+    5. `rak --sort path --sort-asc .` — `# Alphabetical directory order`
+    6. `rak --lang go,rust .` — `# Filter to specific detected languages`
+    7. `rak --max-files 1000 .` — `# Safety: abort if more than N files accepted`
+    8. `cat README.md | rak` — `# Count stdin instead of walking`
+  - `Example:` field is a raw multi-line string (backtick-quoted). Indent each example two spaces to match cobra's standard rendering. Comments first, command on the next line.
+  - Existing `Long:` text stays as-is (defaults note already present at lines ~64-67).
+  - Tests: extend `cmd/rak/root_test.go` with `TestRootCmd_HelpContainsExamples` — execute `--help`, assert output contains each of the eight example commands AND the leading `# Default — emit TOON` comment.
+  - `mage ci` green.
+- **Blocked by:** —
+- **Tier B** (builder + falsification-only QA).
+
 ## Notes
 
 ### F-pin for 9.0

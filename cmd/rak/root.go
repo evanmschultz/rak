@@ -68,6 +68,29 @@ func newRootCmd() *cobra.Command {
 			"With no positional argument rak reads stdin and reports totals " +
 			"for the stream. With a single path argument rak walks the " +
 			"directory and reports per-directory rollups plus a grand total.",
+		Example: `  # Default — emit TOON for LLM-first consumption
+  rak .
+
+  # Render for humans (TTY-styled via laslig)
+  rak --human .
+
+  # Render as JSON for piping
+  rak --json . | jq '.total_by_lang'
+
+  # Sort directories by file count (desc default)
+  rak --sort files .
+
+  # Alphabetical directory order
+  rak --sort path --sort-asc .
+
+  # Filter to specific detected languages
+  rak --lang go,rust .
+
+  # Safety: abort if more than N files accepted
+  rak --max-files 1000 .
+
+  # Count stdin instead of walking
+  cat README.md | rak`,
 		Args: cobra.MaximumNArgs(1),
 		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
 			if _, ok := validSortKeys[flags.sort]; !ok {
