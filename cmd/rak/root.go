@@ -514,17 +514,26 @@ func labelDirectories(dirs []summary.Directory, rootLabel string) []summary.Dire
 	if rootLabel == "" {
 		return dirs
 	}
-	// Strip trailing slashes so a user-supplied path like "../" or "./"
-	// does not produce double-slash directory paths in rendered output.
-	rootLabel = strings.TrimRight(rootLabel, "/")
+	// Normalize rootLabel with path.Clean so that inputs like "../", "./",
+	// "/", "//", or "///" are collapsed to their canonical form before use.
+	// path.Clean (forward-slash semantics, not filepath.Clean) is correct
+	// here because rak's path display is always forward-slash.
+	//   path.Clean("../")  → ".."    (trailing slash stripped)
+	//   path.Clean("/")    → "/"     (filesystem root preserved)
+	//   path.Clean("//")   → "/"     (multi-slash normalized)
+	//   path.Clean("foo/") → "foo"   (simple trailing slash stripped)
+	rootLabel = path.Clean(rootLabel)
 	out := make([]summary.Directory, len(dirs))
 	for i, d := range dirs {
 		if d.Path == "." {
 			out[i] = summary.Directory{Path: rootLabel, Counts: d.Counts, ByLang: d.ByLang, Files: d.Files}
 			continue
 		}
+		// Use path.Join rather than string concatenation so that rootLabel
+		// values like "/" do not produce double-slash paths: path.Join("/",
+		// "sub") → "/sub", whereas "/" + "/" + "sub" → "//sub".
 		out[i] = summary.Directory{
-			Path:   rootLabel + "/" + d.Path,
+			Path:   path.Join(rootLabel, d.Path),
 			Counts: d.Counts,
 			ByLang: d.ByLang,
 			Files:  d.Files,

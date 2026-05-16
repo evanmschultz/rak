@@ -27,7 +27,7 @@ mage -l        # list all build/test/lint targets
 
 ```text
 $ rak --version
-rak version v0.1.2
+rak version v0.1.3
 
 $ rak internal/counting
 directories[1|]{path|files|bytes|lines|words|chars}:

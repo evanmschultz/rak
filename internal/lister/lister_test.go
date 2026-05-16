@@ -122,6 +122,58 @@ func TestDetect_InsideGitDir(t *testing.T) {
 	}
 }
 
+// TestDetect_BareRepo_WithDisableGitignore verifies that Detect returns a
+// *WalkLister (not an error) when called with the root of a bare git
+// repository AND DisableGitignore is true. The ErrNoGitignoreInRepo sentinel
+// applies only when the walk root is inside a real work tree — bare repos fall
+// through to the WalkLister path regardless of DisableGitignore.
+func TestDetect_BareRepo_WithDisableGitignore(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not found")
+	}
+
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init", "--bare", "--template=", dir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Skipf("git init --bare failed (%v): %s", err, out)
+	}
+
+	ctx := t.Context()
+	got, err := lister.Detect(ctx, dir, fileset.WalkOptions{DisableGitignore: true})
+	if err != nil {
+		t.Fatalf("Detect returned unexpected error for bare repo with DisableGitignore: %v", err)
+	}
+	if _, ok := got.(*lister.WalkLister); !ok {
+		t.Errorf("Detect returned %T for bare repo with DisableGitignore, want *lister.WalkLister", got)
+	}
+}
+
+// TestDetect_InsideGitDir_WithDisableGitignore verifies that Detect returns a
+// *WalkLister (not an error) when called with the .git/ directory of a normal
+// repository AND DisableGitignore is true. Inside .git/, the walk root is not
+// a real work tree, so ErrNoGitignoreInRepo must not be returned even when
+// DisableGitignore is set.
+func TestDetect_InsideGitDir_WithDisableGitignore(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not found")
+	}
+
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init", "--template=", dir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Skipf("git init failed (%v): %s", err, out)
+	}
+
+	ctx := t.Context()
+	got, err := lister.Detect(ctx, filepath.Join(dir, ".git"), fileset.WalkOptions{DisableGitignore: true})
+	if err != nil {
+		t.Fatalf("Detect returned unexpected error for .git/ dir with DisableGitignore: %v", err)
+	}
+	if _, ok := got.(*lister.WalkLister); !ok {
+		t.Errorf("Detect returned %T for .git/ dir with DisableGitignore, want *lister.WalkLister", got)
+	}
+}
+
 // TestDetect_NoGitignoreInRepo_ReturnsSentinel verifies that Detect returns
 // ErrNoGitignoreInRepo (via errors.Is) when DisableGitignore is true and the
 // walk root is inside a git repository. Constructs a throwaway git repo in

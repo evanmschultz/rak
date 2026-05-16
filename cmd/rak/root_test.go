@@ -1109,7 +1109,7 @@ func TestRootCmd_FilesField_SurvivesLabelDirectories(t *testing.T) {
 
 // TestRootCmd_Version verifies that the root cobra command, when given the
 // version string that fang.WithVersion wires in main.go, prints output
-// containing "v0.1.2" when invoked with --version. The test sets cmd.Version
+// containing "v0.1.3" when invoked with --version. The test sets cmd.Version
 // directly (mirroring what fang.WithVersion does to the cobra command) and
 // captures cobra's built-in version output via cmd.SetOut.
 func TestRootCmd_Version(t *testing.T) {
@@ -1117,7 +1117,7 @@ func TestRootCmd_Version(t *testing.T) {
 
 	var out bytes.Buffer
 	cmd := newRootCmd()
-	// Mirror what fang.WithVersion("v0.1.2") does to the cobra command:
+	// Mirror what fang.WithVersion("v0.1.3") does to the cobra command:
 	// cobra prints "<use> version <Version>" to OutOrStdout() when --version
 	// is passed and cmd.Version != "".
 	cmd.Version = version
@@ -1131,8 +1131,8 @@ func TestRootCmd_Version(t *testing.T) {
 	}
 
 	got := out.String()
-	if !strings.Contains(got, "v0.1.2") {
-		t.Errorf("--version output does not contain %q; got:\n%s", "v0.1.2", got)
+	if !strings.Contains(got, "v0.1.3") {
+		t.Errorf("--version output does not contain %q; got:\n%s", "v0.1.3", got)
 	}
 }
 
@@ -1169,6 +1169,65 @@ func TestLabelDirectories_TrailingSlashRoot(t *testing.T) {
 			t.Errorf("expected '../sub' in output after trailing-slash normalization; got:\n%s", rendered)
 		}
 	}
+}
+
+// TestLabelDirectories_FilesystemRoot verifies that rootLabel "/" is handled
+// correctly by labelDirectories: the root entry becomes "/" and subdirectory
+// entries become "/sub" (not "//sub" from naive "/" + "/" + "sub"
+// concatenation). Also verifies that "//" is normalized to "/" by path.Clean
+// before use, so `rak //` and `rak /` produce identical output.
+func TestLabelDirectories_FilesystemRoot(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{
+		"a.go":     {Data: []byte("package main\n")},
+		"sub/b.go": {Data: []byte("package sub\n")},
+	}
+
+	opts := listerOpts(&rootFlags{})
+
+	t.Run("single_slash", func(t *testing.T) {
+		t.Parallel()
+		source := lister.NewWalkLister(fsys, ".", opts)
+
+		var out bytes.Buffer
+		if err := runDirectory(context.Background(), &out, source, "/", false, nil, "lines", false, render.NewJSONRenderer(), 0); err != nil {
+			t.Fatalf("runDirectory: %v", err)
+		}
+
+		rendered := out.String()
+		if strings.Contains(rendered, "//") {
+			t.Errorf("rootLabel='/' produced double-slash in output; got:\n%s", rendered)
+		}
+		if !strings.Contains(rendered, `"/sub"`) {
+			t.Errorf("expected '/sub' in output for rootLabel='/'; got:\n%s", rendered)
+		}
+		if !strings.Contains(rendered, `"/"`) {
+			t.Errorf("expected '/' (root entry) in output for rootLabel='/'; got:\n%s", rendered)
+		}
+	})
+
+	t.Run("double_slash_normalizes", func(t *testing.T) {
+		t.Parallel()
+		source := lister.NewWalkLister(fsys, ".", opts)
+
+		var out bytes.Buffer
+		if err := runDirectory(context.Background(), &out, source, "//", false, nil, "lines", false, render.NewJSONRenderer(), 0); err != nil {
+			t.Fatalf("runDirectory: %v", err)
+		}
+
+		rendered := out.String()
+		if strings.Contains(rendered, "//") {
+			t.Errorf("rootLabel='//' produced double-slash in output; got:\n%s", rendered)
+		}
+		// path.Clean normalizes "//" → "/" so output is same as rootLabel="/".
+		if !strings.Contains(rendered, `"/sub"`) {
+			t.Errorf("expected '/sub' in output for rootLabel='//'; got:\n%s", rendered)
+		}
+		if !strings.Contains(rendered, `"/"`) {
+			t.Errorf("expected '/' (root entry, normalized) in output for rootLabel='//'; got:\n%s", rendered)
+		}
+	})
 }
 
 // TestRootCmd_HelpContainsExamples verifies that the root command's --help
