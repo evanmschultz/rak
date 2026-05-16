@@ -4,33 +4,32 @@ This file lives in the **`main/` worktree** at `/Users/evanschultz/Documents/Cod
 
 ## Coordination Model — At a Glance
 
-Rak does **not** use Tillsyn. Three documents own the coordination model; they do not duplicate each other:
+Rak does **not** use Tillsyn. Two documents own the coordination model; they do not duplicate each other:
 
-- **`main/PLAN.md`** — overarching drop tree (10 level_1 container drops + state + `blocked_by` + per-drop dir link). Updated *after* a drop closes or *after* a planner restructures the tree. Not edited mid-build.
 - **`main/drops/WORKFLOW.md`** — canonical per-drop lifecycle (planner → plan-QA → discuss → revise → builder → build-QA → verify → close). Owns: drop directory shape, file lifecycles, phase order, the **Agent Spawn Contract** (preamble pasted into every subagent spawn), restart recovery.
 - **`main/CLAUDE.md`** (this file) — orchestrator role boundaries, agent bindings, evidence sources, Go quality rules, mage discipline, commit format, safety. Does not own per-phase mechanics — those live in WORKFLOW.md.
 
 Per-drop work artifacts live under `main/drops/DROP_N_<NAME>/`. The directory is stamped from `main/drops/_TEMPLATE/` at Phase 1 start and persists through close.
 
-- **Read `main/PLAN.md` + `main/drops/WORKFLOW.md` at session start and after every compaction.** CLAUDE.md auto-loads; the other two do not — read them deliberately on the first turn after cold-start or compaction before substantive orchestration.
+- **Read `main/drops/WORKFLOW.md` at session start and after every compaction.** CLAUDE.md auto-loads; WORKFLOW.md does not — read it deliberately on the first turn after cold-start or compaction before substantive orchestration.
 - **Use Tillsyn-style trackers for nothing.** Do NOT use Claude Code's built-in `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` / `TaskStop` / `TaskOutput` — they evaporate on compaction/restart. Decompose finer procedural granularity into atomic units inside the active drop's `PLAN.md` instead.
 - **No markdown files outside `main/drops/` for work tracking.** Per-drop dirs are the worklog substrate.
 
 ## Drops
 
-A **drop** is a unit of work — one entry in PLAN.md, one directory under `main/drops/`. Drops are declared in PLAN.md and refined in their own dir.
+A **drop** is a unit of work — one directory under `main/drops/`. Each drop is stamped from `main/drops/_TEMPLATE/`, refined inline in its own `PLAN.md`, and closed once all units inside it pass build-QA.
 
 - Atomic granularity: a drop is "atomic" when one builder subagent can finish a single unit cleanly, the unit's acceptance criteria are yes/no-verifiable by a QA subagent, and its `paths` / `packages` footprint is clear. If a drop is too large, **add more units inside its `PLAN.md`** rather than stretching one unit.
 - Ordering: parent-child nesting (a drop cannot close while any of its units is incomplete) + `blocked_by` for sibling and cross-unit ordering. No `depends_on` field.
-- State: per-drop `state` lives in the drop dir's `PLAN.md` header (`planning` / `building` / `done` / `blocked`); per-unit `state` lives in the Planner section's unit row inside that file (`todo` / `in_progress` / `done` / `blocked`); container-level `state` lives in `main/PLAN.md`'s drop tree table.
+- State: per-drop `state` lives in the drop dir's `PLAN.md` header (`planning` / `building` / `done` / `blocked`); per-unit `state` lives in the Planner section's unit row inside that file (`todo` / `in_progress` / `done` / `blocked`).
 
-Full lifecycle in `main/drops/WORKFLOW.md`. Drop tree in `main/PLAN.md`.
+Full lifecycle in `main/drops/WORKFLOW.md`.
 
 ## Orchestrator-as-Hub
 
 The parent Claude Code session launched by the dev from this directory is always **the orchestrator**. Every other role (builder, qa-proof, qa-falsification, planning, research) is a subagent spawned via the `Agent` tool.
 
-**CRITICAL: The orchestrator NEVER writes Go code.** The parent session must not use `Edit`, `Write`, or any other tool to modify `.go` source, test, or `magefile.go` files. Every code change — every single one — goes through a `go-builder-agent` subagent. Orchestrator reads code for planning/research; edits markdown only (this file, `PLAN.md`, drop dir mds, `README.md`, agent `.md` files).
+**CRITICAL: The orchestrator NEVER writes Go code.** The parent session must not use `Edit`, `Write`, or any other tool to modify `.go` source, test, or `magefile.go` files. Every code change — every single one — goes through a `go-builder-agent` subagent. Orchestrator reads code for planning/research; edits markdown only (this file, drop dir mds, `README.md`, agent `.md` files).
 
 ### Agent Bindings
 
@@ -99,7 +98,7 @@ Plan-QA and build-QA both run as parallel proof + falsification spawns. Plan-QA 
 
 ## Orchestrator Role Boundaries
 
-- **Orchestrator** (this parent Claude Code session) — plans, routes, delegates, cleans up. **Never edits Go code or `magefile.go`.** May edit markdown docs (this file, `PLAN.md`, drop dir mds, `README.md`, agent `.md` files).
+- **Orchestrator** (this parent Claude Code session) — plans, routes, delegates, cleans up. **Never edits Go code or `magefile.go`.** May edit markdown docs (this file, drop dir mds, `README.md`, agent `.md` files).
 - **Builder subagent** (`go-builder-agent`) — the ONLY role that edits Go code. Spawned via the `Agent` tool with the spawn contract preamble + builder appendix.
 - **QA subagents** (`go-qa-proof-agent`, `go-qa-falsification-agent`) — gated to QA roles. Read, verify, write to their own `*_QA_*.md` file, return verdict to orch, die. Never edit code.
 - **Planner subagent** (`go-planning-agent`) — fills the drop's `PLAN.md` Planner section (Phase 1) and revises it across plan-QA rounds (Phase 3). Never edits code.
@@ -119,7 +118,7 @@ Small, Go-idiomatic layout. Every internal package is an implementation detail �
 - `internal/lang/` — `Language` (`type Language string`) + `Detect(*fileset.File)` + blank/comment/code split. Lands in Drop 5. Depends on `internal/fileset`.
 - `internal/render/` — `Renderer` interface; explicit `NewTOONRenderer` (default, LLM-first), `NewHumanRenderer` (laslig-backed), `NewJSONRenderer` constructors. Depends on `internal/summary` (post-Drop-7).
 - `internal/summary/` — `Summary` struct (totals, per-dir, per-type rollups) + sort keyed by `--sort`. Lands in Drop 7. Zero internal deps.
-- (deferred to v0.2) `internal/tokens/` — was planned for tiktoken token counting. Cut from v0.1.0 per `main/PLAN.md` decision 30.
+- (deferred to v0.2) `internal/tokens/` — was planned for tiktoken token counting. Cut from v0.1.0 per the 2026-05-14 scope refit.
 - `magefile.go` at repo root — mage build automation.
 
 ### Import DAG
@@ -170,7 +169,7 @@ Non-test Go: ~2,250 LOC. Test Go: ~3,100 LOC. Total v0.1.0: ~5,350 LOC. (Origina
 
 ### Go-Idiomatic Naming Rules
 
-1. **Package names:** lowercase, single-word, singular noun. No underscores, no mixedCase, no plurals. (`counting`, `fileset`, `lang`, `ignore`, `render`, `summary`.) (`tokens` was cut to v0.2 per `main/PLAN.md` decision 30.)
+1. **Package names:** lowercase, single-word, singular noun. No underscores, no mixedCase, no plurals. (`counting`, `fileset`, `lang`, `ignore`, `render`, `summary`.) (`tokens` was deferred to v0.2.)
 2. **Exported:** `MixedCase`. Unexported: `mixedCase`.
 3. **Acronyms:** fully capitalized when leading or standalone (`JSONEncoder`, `parseHTTP`, `URL`); lowercase when internal (`id`, `url`).
 4. **Getters:** omit `Get` — `f.Size()`, not `f.GetSize()`. Direct field access for plain data.
@@ -198,8 +197,8 @@ Production deps:
 
 Deferred to v0.2 (NOT in v0.1.0; called out so the orchestrator doesn't accidentally re-pull them):
 
-- `github.com/tiktoken-go/tokenizer` — token counting; deferred per `main/PLAN.md` decision 30.
-- `golang.org/x/sync/errgroup` — parallel walk concurrency; deferred per decision 30.
+- `github.com/tiktoken-go/tokenizer` — token counting; deferred to v0.2.
+- `golang.org/x/sync/errgroup` — parallel walk concurrency; deferred to v0.2.
 
 Dev tooling (installed locally, invoked via mage):
 
@@ -208,7 +207,7 @@ Dev tooling (installed locally, invoked via mage):
 
 ## Build Verification
 
-Per-unit verification (during build-QA, Phase 5 of WORKFLOW.md): builder runs `mage build` + `mage test` for the touched packages. Drop-end verification (after all units pass build-QA, Phase 6 of WORKFLOW.md): `mage ci` from `main/`, then `git push`, then `gh run watch --exit-status` until green.
+Per-unit verification (during build-QA, Phase 5 of WORKFLOW.md): builder runs `mage build` + `mage test` for the touched packages. Drop-end verification (after all units pass build-QA, Phase 6 of WORKFLOW.md): `mage ci` from `main/`, then push the work branch and open a PR via `gh pr create`. Wait for CI green; merge via `gh pr merge --squash`.
 
 1. All relevant mage targets pass (discover via `mage -l`).
 2. **NEVER run raw `go test`, `go build`, `go run`, `go vet`, `gofumpt`, `golangci-lint`** — always `mage <target>`. If a mage target has a bug, fix the target — don't bypass. No exceptions, orchestrator or subagent.
@@ -227,10 +226,9 @@ Mage targets (land in Drop 1.4–1.5, stable from there):
 | `mage ci` | `gofumpt -l .` (must be empty) && `mage lint` && `mage test` | pre-push gate |
 | `mage install` | `go install ./cmd/rak` | **dev-only**, never from an agent |
 | `mage run` | `go run ./cmd/rak` (positional args pass after `--`) | smoke check |
-| `mage coverage` | `go test -race -coverpkg=./internal/... -coverprofile=coverage.out ./... && go tool cover -func=coverage.out` | report-only until Drop 9.3 flips it into a gate |
-| `mage planCheck` | diff `main/PLAN.md` container titles + states against `main/drops/*/` directory names + each drop dir's `PLAN.md` header state | guards parity between PLAN.md and the drops dir |
+| `mage coverage` | `go test -race -coverpkg=./internal/... -coverprofile=coverage.out ./... && go tool cover -func=coverage.out` | 70% floor gate on `./internal/...` (excludes `cmd/rak` CLI wiring) |
 
-Run `mage ci` before every push. `mage coverage` is report-only from Drop 1.5 on so every drop can see its current number; the 70% floor (scope `-coverpkg=./internal/...`, excludes `cmd/rak` CLI wiring) flips on in Drop 9.3.
+Run `mage ci` before every push. `mage coverage` enforces the 70% floor on the `./internal/...` scope.
 
 ## Go Development Rules
 
@@ -271,12 +269,11 @@ Run `mage ci` before every push. `mage coverage` is report-only from Drop 1.5 on
 
 ### After Touching Go Code
 
-- `mage ci` before handoff at drop-end (Phase 6 of WORKFLOW.md). After pushing: `gh run watch --exit-status` until green.
+- `mage ci` before handoff at drop-end (Phase 6 of WORKFLOW.md). Push the work branch, open a PR via `gh pr create`, wait for CI green; merge via `gh pr merge --squash`.
 
 ### Dependencies
 
-- Default path: `mage addDep <module>` (lands in Drop 2.0). The target shells `go get <module>` from `main/` with default environment (no `GOPROXY=direct`, `GOSUMDB=off`, or checksum bypass). **It deliberately does not run `go mod tidy`** — `tidy` prunes deps that have no importer yet, which breaks the "add dep, then write code that imports it" flow. Run `go mod tidy` separately after the importing code lands (or let `mage ci` surface any leftover inconsistency).
-- **Historical bootstrap carve-out (Drop 1.4 only).** Before Drop 2.0 existed, the first-ever dep add (mage itself) used a direct `go get` + `go mod tidy` from `main/`. From Drop 2 onward the `mage addDep` target is the sole path.
+- Default path: `mage addDep <module>`. The target shells `go get <module>` from `main/` with default environment (no `GOPROXY=direct`, `GOSUMDB=off`, or checksum bypass). **It deliberately does not run `go mod tidy`** — `tidy` prunes deps that have no importer yet, which breaks the "add dep, then write code that imports it" flow. Run `go mod tidy` separately after the importing code lands (or let `mage ci` surface any leftover inconsistency).
 
 ### Reference Lookups
 
@@ -337,7 +334,6 @@ Filesystem + git, no Tillsyn calls. Full procedure in `main/drops/WORKFLOW.md` �
 
 1. `git status` — uncommitted work.
 2. `git log --oneline -20` — recent commits.
-3. Read `main/PLAN.md` — container states.
-4. List `main/drops/*/PLAN.md` headers — per-drop phase state.
-5. Per active drop: presence of `PLAN_QA_*.md` = mid-plan-QA loop; absence + `BUILDER_WORKLOG.md` exists = mid-build; drop's `PLAN.md` header `state: done` = drop closed.
-6. Per active unit: scan latest `## Unit N.M — Round K` heading in `BUILDER_WORKLOG.md` + both `BUILDER_QA_*.md` to figure out next step.
+3. List `main/drops/*/PLAN.md` headers — per-drop phase state.
+4. Per active drop: presence of `PLAN_QA_*.md` = mid-plan-QA loop; absence + `BUILDER_WORKLOG.md` exists = mid-build; drop's `PLAN.md` header `state: done` = drop closed.
+5. Per active unit: scan latest `## Unit N.M — Round K` heading in `BUILDER_WORKLOG.md` + both `BUILDER_QA_*.md` to figure out next step.
