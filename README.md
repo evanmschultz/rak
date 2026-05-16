@@ -14,6 +14,15 @@ After install, `rak` is on your `$GOBIN` (typically `~/go/bin/rak`).
 
 Optional: shell completions via `rak completion <bash|zsh|fish|powershell>` (cobra default).
 
+### From source
+
+```sh
+git clone https://github.com/evanmschultz/rak
+cd rak
+mage install   # builds and installs to $GOBIN
+mage -l        # list all build/test/lint targets
+```
+
 ## Quick examples
 
 ```text
@@ -111,16 +120,18 @@ Mutually exclusive: `--human`, `--json`, `--toon` (cobra rejects more than one).
 
 C, C++, CMakeLists.txt, CSS, Dockerfile, Go, HTML, Java, JavaScript, JSON, Kotlin, Makefile, Markdown, PHP, Python, Ruby, Rust, Shell (sh/bash/zsh/fish), Swift, TOML, TypeScript, YAML. Detection priority: special filename → extension → shebang → content heuristic. Files whose language can't be detected appear in counts but are excluded from `--lang` filtering and the `total_by_lang` block.
 
-## Scope decisions (v0.1.0)
+## Roadmap
 
-rak is deliberately small for v0.1.0. See [PLAN.md](./PLAN.md) decisions 30, 32, 33, 34 for the full reasoning. Cut to v0.2:
+rak v0.1.0 is deliberately small. Planned for v0.2:
 
-- Token counting (`--tokens`, tiktoken).
-- Spinner / progress indication.
-- Parallel walk.
-- `--follow` symlinks.
-- GoReleaser binary releases (v0.1.0 ships via `go install` only).
-- `--include-untracked` (opt-out from git-tracked-default).
+- **Full polyglot language detection** — v0.1.0 covers 22 languages; v0.2 aims for full polyglot coverage.
+- **Token counting** (`--tokens`, tiktoken).
+- **Spinner / progress indication.**
+- **Parallel walk.**
+- **`--follow` symlinks.**
+- **GoReleaser binary releases** (v0.1.0 ships via `go install` only).
+- **`--include-untracked`** (opt-out from git-tracked-default).
+- **`--no-lockfiles`** denylist flag.
 
 ## License
 
