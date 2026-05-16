@@ -2,8 +2,8 @@
 
 // Package main hosts the rak build automation targets driven by mage.
 //
-// Discover targets with mage -l. The ten canonical targets mirror the table
-// in main/CLAUDE.md § "Build Verification"; any drift between that table and
+// Discover targets with mage -l. The canonical targets mirror the table in
+// main/CLAUDE.md § "Build Verification"; any drift between that table and
 // this file is a bug. Never invoke raw go build, go test, go vet, gofumpt, or
 // golangci-lint — always route through the mage target. If a target is
 // broken, fix it here; do not bypass.
@@ -173,13 +173,4 @@ func parseCoverageTotal(output string) (float64, error) {
 		return pct, nil
 	}
 	return 0, fmt.Errorf("no total: line found in go tool cover output")
-}
-
-// PlanCheck will diff main/PLAN.md container titles + states against
-// main/drops/*/ directory names and each drop dir's PLAN.md header state,
-// failing if drift is detected. Stubbed in Drop 1; real parity logic lands
-// later.
-func PlanCheck() error {
-	// TODO(planCheck): real parity check — stub passes in Drop 1
-	return nil
 }

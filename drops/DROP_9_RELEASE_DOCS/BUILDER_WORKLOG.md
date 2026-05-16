@@ -154,3 +154,20 @@ N/A — task touched only `cmd/rak/root.go` and `cmd/rak/root_test.go` (adding a
 ## Hylla Feedback (unit 9.9)
 
 N/A — task touched only `internal/lang/lang.go`, `internal/lang/split.go`, `internal/lang/lang_test.go`, `internal/lang/split_test.go`, and `main/README.md`. All changes were additions to existing maps and test tables; no cross-package symbol navigation required. No Hylla queries were needed.
+
+## Unit 9.10 — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-15
+- **Files touched:**
+  - `main/magefile.go` — removed the `PlanCheck()` function (lines 178–185 pre-removal: doc comment + stub body `return nil`). Updated the file-level package doc comment to remove the stale "ten" target count ("The ten canonical targets" → "The canonical targets"). No helper functions removed (PlanCheck had none — its body was a TODO comment + `return nil`). No imports removed (PlanCheck used none; all six existing imports are still used by remaining functions).
+- **Helpers removed:** None. PlanCheck's body was a pure stub: no function calls, no helpers.
+- **Imports dropped:** None. Verified: `fmt`, `os`, `strconv`, `strings`, `mg`, `sh` all remain in use by surviving functions.
+- **`mage ci` chain confirmed unaffected:** `CI()` uses `mg.SerialDeps(gofumptClean, Lint, Test, Coverage)` — `PlanCheck` was never in the serial deps chain.
+- **Mage targets run:**
+  - `mage -l` — confirmed `planCheck` no longer listed. Nine targets remain: addDep, build, ci, coverage, format, install, lint, run, test.
+  - `mage ci` — pass green. gofumpt: clean. lint: 0 issues. tests: all pass. coverage: 87.9% (floor 70%).
+
+## Hylla Feedback (unit 9.10)
+
+N/A — task touched only `main/magefile.go` (a non-Go-source build automation file). No symbol navigation or cross-package reference lookup was required. No Hylla queries were needed.

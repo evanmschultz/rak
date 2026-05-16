@@ -227,6 +227,21 @@ Orch wrote this inline (tier B/C mixed — no planner subagent per WORKFLOW.md �
 - **Blocked by:** —
 - **Tier B** (builder + falsification-only QA).
 
+### Unit 9.10 — Remove obsolete `mage planCheck` target
+
+- **State:** done
+- **Paths:**
+  - `main/magefile.go` — remove the `PlanCheck` function (and any private helpers it solely uses)
+- **Packages:** — (mage targets only)
+- **Acceptance:**
+  - `PlanCheck` function and any helper functions used only by it are removed from `main/magefile.go`.
+  - Doc comments + file header references to `planCheck` (if any) updated or removed.
+  - `mage -l` no longer lists `planCheck`.
+  - `mage ci` continues green (planCheck was not in the `mage ci` chain, so removal should not affect it).
+  - **Rationale:** the target diffed `main/PLAN.md` against `main/drops/*/` directory names; `main/PLAN.md` is being deleted as part of v0.1.0 release cleanup so the target has nothing to check against. Future drops (v0.2+) can re-introduce a similar consistency check rooted on the drops tree alone if needed.
+- **Blocked by:** —
+- **Tier B** (builder + falsification-only QA).
+
 ## Notes
 
 ### F-pin for 9.0
