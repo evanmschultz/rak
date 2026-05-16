@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/evanmschultz/rak/internal/fileset"
@@ -312,8 +313,8 @@ func TestDetect_BrokenSymlink(t *testing.T) {
 	}
 	// The error must be wrapped with the "lister: detect:" prefix so callers
 	// get consistent error messages regardless of the underlying OS error.
-	if msg := err.Error(); len(msg) < len("lister: detect:") {
-		t.Errorf("error message too short; want 'lister: detect:...' prefix, got %q", msg)
+	if msg := err.Error(); !strings.HasPrefix(msg, "lister: detect:") {
+		t.Errorf("error message does not start with %q: %s", "lister: detect:", msg)
 	}
 }
 
