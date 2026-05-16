@@ -3,6 +3,7 @@ package lister_test
 import (
 	"errors"
 	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/evanmschultz/rak/internal/fileset"
@@ -61,6 +62,63 @@ func TestDetect_OutsideRepo(t *testing.T) {
 
 	if _, ok := got.(*lister.WalkLister); !ok {
 		t.Errorf("Detect returned %T, want *lister.WalkLister", got)
+	}
+}
+
+// TestDetect_BareRepo verifies that Detect returns a *WalkLister (not a
+// *GitLister and not an error) when called with the root of a bare git
+// repository. A bare repo causes "git rev-parse --is-inside-work-tree" to
+// print "false" with exit 0 — the fix checks stdout rather than exit code only.
+func TestDetect_BareRepo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not found")
+	}
+
+	tmp := t.TempDir()
+	initCmd := exec.Command("git", "init", "--bare", "--template=", tmp)
+	if out, err := initCmd.CombinedOutput(); err != nil {
+		t.Skipf("git init --bare failed (%v): %s", err, out)
+	}
+
+	ctx := t.Context()
+	got, err := lister.Detect(ctx, tmp, fileset.WalkOptions{})
+	if err != nil {
+		t.Fatalf("Detect returned unexpected error for bare repo: %v", err)
+	}
+	if got == nil {
+		t.Fatal("Detect returned nil lister for bare repo, want non-nil")
+	}
+	if _, ok := got.(*lister.WalkLister); !ok {
+		t.Errorf("Detect returned %T for bare repo, want *lister.WalkLister", got)
+	}
+}
+
+// TestDetect_InsideGitDir verifies that Detect returns a *WalkLister when
+// called with the .git/ directory of a normal (non-bare) git repository.
+// Inside .git/, "git rev-parse --is-inside-work-tree" prints "false" with
+// exit 0 — the fix checks stdout rather than exit code only.
+func TestDetect_InsideGitDir(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not found")
+	}
+
+	tmp := t.TempDir()
+	initCmd := exec.Command("git", "init", "--template=", tmp)
+	if out, err := initCmd.CombinedOutput(); err != nil {
+		t.Skipf("git init failed (%v): %s", err, out)
+	}
+
+	gitDir := filepath.Join(tmp, ".git")
+	ctx := t.Context()
+	got, err := lister.Detect(ctx, gitDir, fileset.WalkOptions{})
+	if err != nil {
+		t.Fatalf("Detect returned unexpected error for .git/ dir: %v", err)
+	}
+	if got == nil {
+		t.Fatal("Detect returned nil lister for .git/ dir, want non-nil")
+	}
+	if _, ok := got.(*lister.WalkLister); !ok {
+		t.Errorf("Detect returned %T for .git/ dir, want *lister.WalkLister", got)
 	}
 }
 
