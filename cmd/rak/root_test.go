@@ -208,7 +208,15 @@ func runTreeFS(t *testing.T, fsys fs.FS, flags *rootFlags) (treeResult, []byte) 
 	if sortKey == "" {
 		sortKey = "lines"
 	}
-	if err := runDirectory(context.Background(), &out, source, "", flags.binary, flags.langs, sortKey, flags.sortAsc, renderer, flags.maxFiles); err != nil {
+	if err := runDirectory(context.Background(), &out, source, runDirectoryOpts{
+		rootLabel: "",
+		binary:    flags.binary,
+		langs:     flags.langs,
+		sortKey:   sortKey,
+		sortAsc:   flags.sortAsc,
+		maxFiles:  flags.maxFiles,
+		renderer:  renderer,
+	}); err != nil {
 		t.Fatalf("runDirectory: %v", err)
 	}
 	raw := out.Bytes()
@@ -674,7 +682,10 @@ func TestRootCmd_PerLangRollup(t *testing.T) {
 	renderer := render.NewJSONRenderer()
 
 	var out bytes.Buffer
-	if err := runDirectory(context.Background(), &out, source, "", false, nil, "lines", false, renderer, 0); err != nil {
+	if err := runDirectory(context.Background(), &out, source, runDirectoryOpts{
+		sortKey:  "lines",
+		renderer: renderer,
+	}); err != nil {
 		t.Fatalf("runDirectory: %v", err)
 	}
 
@@ -903,7 +914,11 @@ func TestRootCmd_SortFiles_NonDegenerate(t *testing.T) {
 	src := lister.NewWalkLister(fsys, ".", opts)
 
 	var out bytes.Buffer
-	if err := runDirectory(context.Background(), &out, src, "myroot", false, nil, "files", false, render.NewJSONRenderer(), 0); err != nil {
+	if err := runDirectory(context.Background(), &out, src, runDirectoryOpts{
+		rootLabel: "myroot",
+		sortKey:   "files",
+		renderer:  render.NewJSONRenderer(),
+	}); err != nil {
 		t.Fatalf("runDirectory: %v", err)
 	}
 
@@ -1016,7 +1031,11 @@ func TestRootCmd_MaxFiles_AtLimit_Aborts(t *testing.T) {
 
 	var out bytes.Buffer
 	// maxFiles = 3; 5 files present → walk aborts after accepting the 3rd.
-	err := runDirectory(context.Background(), &out, source, "", false, nil, "lines", false, render.NewJSONRenderer(), 3)
+	err := runDirectory(context.Background(), &out, source, runDirectoryOpts{
+		sortKey:  "lines",
+		maxFiles: 3,
+		renderer: render.NewJSONRenderer(),
+	})
 	if err == nil {
 		t.Fatalf("--max-files 3: expected error wrapping ErrMaxFilesExceeded, got nil")
 	}
@@ -1074,7 +1093,11 @@ func TestRootCmd_FilesField_SurvivesLabelDirectories(t *testing.T) {
 
 	var out bytes.Buffer
 	// Use a non-empty rootLabel to exercise labelDirectories reconstruction.
-	if err := runDirectory(context.Background(), &out, source, "myroot", false, nil, "lines", false, render.NewJSONRenderer(), 0); err != nil {
+	if err := runDirectory(context.Background(), &out, source, runDirectoryOpts{
+		rootLabel: "myroot",
+		sortKey:   "lines",
+		renderer:  render.NewJSONRenderer(),
+	}); err != nil {
 		t.Fatalf("runDirectory: %v", err)
 	}
 
@@ -1154,7 +1177,11 @@ func TestLabelDirectories_TrailingSlashRoot(t *testing.T) {
 
 	var out bytes.Buffer
 	// rootLabel has a trailing slash — the bug produced "..//sub" before the fix.
-	if err := runDirectory(context.Background(), &out, source, "../", false, nil, "lines", false, render.NewJSONRenderer(), 0); err != nil {
+	if err := runDirectory(context.Background(), &out, source, runDirectoryOpts{
+		rootLabel: "../",
+		sortKey:   "lines",
+		renderer:  render.NewJSONRenderer(),
+	}); err != nil {
 		t.Fatalf("runDirectory: %v", err)
 	}
 
@@ -1191,7 +1218,11 @@ func TestLabelDirectories_FilesystemRoot(t *testing.T) {
 		source := lister.NewWalkLister(fsys, ".", opts)
 
 		var out bytes.Buffer
-		if err := runDirectory(context.Background(), &out, source, "/", false, nil, "lines", false, render.NewJSONRenderer(), 0); err != nil {
+		if err := runDirectory(context.Background(), &out, source, runDirectoryOpts{
+			rootLabel: "/",
+			sortKey:   "lines",
+			renderer:  render.NewJSONRenderer(),
+		}); err != nil {
 			t.Fatalf("runDirectory: %v", err)
 		}
 
@@ -1212,7 +1243,11 @@ func TestLabelDirectories_FilesystemRoot(t *testing.T) {
 		source := lister.NewWalkLister(fsys, ".", opts)
 
 		var out bytes.Buffer
-		if err := runDirectory(context.Background(), &out, source, "//", false, nil, "lines", false, render.NewJSONRenderer(), 0); err != nil {
+		if err := runDirectory(context.Background(), &out, source, runDirectoryOpts{
+			rootLabel: "//",
+			sortKey:   "lines",
+			renderer:  render.NewJSONRenderer(),
+		}); err != nil {
 			t.Fatalf("runDirectory: %v", err)
 		}
 
@@ -1300,7 +1335,10 @@ func TestRootCmd_TotalByLang_EndToEnd(t *testing.T) {
 	renderer := render.NewJSONRenderer()
 
 	var out bytes.Buffer
-	if err := runDirectory(context.Background(), &out, source, "", false, nil, "lines", false, renderer, 0); err != nil {
+	if err := runDirectory(context.Background(), &out, source, runDirectoryOpts{
+		sortKey:  "lines",
+		renderer: renderer,
+	}); err != nil {
 		t.Fatalf("runDirectory: %v", err)
 	}
 

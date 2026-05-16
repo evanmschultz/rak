@@ -234,7 +234,15 @@ func runRoot(c *cobra.Command, args []string, flags *rootFlags) error {
 			// wrapping needed here (F19 contract).
 			return err
 		}
-		return runDirectory(ctx, c.OutOrStdout(), source, args[0], flags.binary, flags.langs, flags.sort, flags.sortAsc, renderer, flags.maxFiles)
+		return runDirectory(ctx, c.OutOrStdout(), source, runDirectoryOpts{
+			rootLabel: args[0],
+			binary:    flags.binary,
+			langs:     flags.langs,
+			sortKey:   flags.sort,
+			sortAsc:   flags.sortAsc,
+			maxFiles:  flags.maxFiles,
+			renderer:  renderer,
+		})
 	}
 
 	counts, err := counting.Count(c.InOrStdin())
@@ -248,31 +256,35 @@ func runRoot(c *cobra.Command, args []string, flags *rootFlags) error {
 	return nil
 }
 
+// runDirectoryOpts bundles the per-call options for runDirectory so callers
+// do not have to pass the seven trailing parameters positionally. Field order
+// mirrors the original parameter order for caller-side clarity.
+type runDirectoryOpts struct {
+	rootLabel string
+	binary    bool
+	langs     []string
+	sortKey   string
+	sortAsc   bool
+	maxFiles  int
+	renderer  render.Renderer
+}
+
 // runDirectory performs the len(args)==1 walk case. source is the FileLister
-// whose List method yields files to count. rootLabel is the user-facing root
-// path string that appears in the rendered "dir: <path>" titles; in
-// production this is args[0], in tests it is whatever label makes the
-// assertion readable. binary controls whether binary files are counted or
-// skipped (F23). langs is the raw --lang filter values from rootFlags; an
-// empty slice means no filtering (count all languages). sortKey is the raw
-// --sort flag value (e.g. "lines", "files", "bytes", "path"); sortAsc is the
-// raw --sort-asc flag value. maxFiles is the --max-files limit (0 = no
-// limit); walkAndCount aborts with a wrapped ErrMaxFilesExceeded when the
-// accepted file count reaches this value. The call order is (F39 / Decision
-// 3.3): labelDirectories → SortDirs → RenderTree.
+// whose List method yields files to count. opts bundles the remaining options:
+// rootLabel is the user-facing root path string that appears in the rendered
+// "dir: <path>" titles; binary controls whether binary files are counted or
+// skipped (F23); langs is the raw --lang filter values from rootFlags; sortKey
+// is the raw --sort flag value; sortAsc is the raw --sort-asc flag value;
+// maxFiles is the --max-files limit (0 = no limit); renderer is the output
+// format to use. The call order is (F39 / Decision 3.3):
+// labelDirectories → SortDirs → RenderTree.
 func runDirectory(
 	ctx context.Context,
 	w io.Writer,
 	source lister.FileLister,
-	rootLabel string,
-	binary bool,
-	langs []string,
-	sortKey string,
-	sortAsc bool,
-	renderer render.Renderer,
-	maxFiles int,
+	opts runDirectoryOpts,
 ) error {
-	dirs, total, totalByLang, aggErrs, err := walkAndCount(ctx, source, binary, langs, maxFiles)
+	dirs, total, totalByLang, aggErrs, err := walkAndCount(ctx, source, opts.binary, opts.langs, opts.maxFiles)
 	if err != nil {
 		return err
 	}
@@ -282,18 +294,18 @@ func runDirectory(
 	// reads naturally (for example "dir: ./testdata/tree" rather than
 	// "dir: ."). Empty rootLabel keeps the io/fs convention intact for
 	// callers (tests) that prefer it.
-	labeled := labelDirectories(dirs, rootLabel)
+	labeled := labelDirectories(dirs, opts.rootLabel)
 
 	// Apply user-controlled sort AFTER labelDirectories so SortDirs
 	// operates on the final user-facing paths (Decision 3.3, F39).
-	summary.SortDirs(labeled, summary.SortKey(sortKey), sortAsc)
+	summary.SortDirs(labeled, summary.SortKey(opts.sortKey), opts.sortAsc)
 
 	s := summary.Summary{
 		Dirs:        labeled,
 		Total:       total,
 		TotalByLang: totalByLang,
 	}
-	if err := renderer.RenderTree(w, s, aggErrs); err != nil {
+	if err := opts.renderer.RenderTree(w, s, aggErrs); err != nil {
 		return fmt.Errorf("render tree: %w", err)
 	}
 	return nil
