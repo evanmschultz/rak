@@ -65,7 +65,7 @@ Orch wrote this inline (tier B/C mixed — no planner subagent per WORKFLOW.md �
 
 ### Unit 9.1 — README rewrite
 
-- **State:** todo
+- **State:** done
 - **Paths:** `main/README.md`
 - **Packages:** — (markdown only)
 - **Acceptance:**
