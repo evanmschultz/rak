@@ -53,6 +53,25 @@ func Detect(ctx context.Context, root string, opts fileset.WalkOptions) (FileLis
 		return nil, fmt.Errorf("lister: detect: %w", err)
 	}
 
+	// Resolve symlinks so absRoot matches what the OS and git see, and so the
+	// file-vs-directory stat below operates on the real target rather than the
+	// symlink itself. A broken symlink returns an error here.
+	resolved, err := filepath.EvalSymlinks(absRoot)
+	if err != nil {
+		return nil, fmt.Errorf("lister: detect: %w", err)
+	}
+	absRoot = resolved
+
+	// Single-file fast-path: if the resolved path is a regular file, return a
+	// SingleFileLister immediately — before any git operations (git cannot
+	// chdir into a file path). Non-regular non-directory entries (sockets,
+	// devices, named pipes) fall through to the git probe, which will error
+	// naturally if cmd.Dir is not a directory.
+	info, statErr := os.Stat(absRoot)
+	if statErr == nil && info.Mode().IsRegular() {
+		return newSingleFileLister(absRoot), nil
+	}
+
 	// Fast-path: if git is not installed, skip the probe and fall back to the
 	// filesystem walker immediately.
 	if _, lookErr := exec.LookPath("git"); lookErr != nil {

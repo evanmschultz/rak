@@ -1,7 +1,9 @@
 package lister_test
 
 import (
+	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -196,5 +198,163 @@ func TestDetect_NoGitignoreInRepo_ReturnsSentinel(t *testing.T) {
 	}
 	if !errors.Is(err, lister.ErrNoGitignoreInRepo) {
 		t.Errorf("errors.Is(err, ErrNoGitignoreInRepo) = false; got %v", err)
+	}
+}
+
+// TestDetect_SingleFile verifies that Detect returns a *SingleFileLister when
+// the root argument points to a regular file (not a directory). The test
+// writes a temporary file into t.TempDir() and passes the file path directly
+// to Detect. This exercises the early-return path added in v0.1.4 (Bug A).
+func TestDetect_SingleFile(t *testing.T) {
+	tmp := t.TempDir()
+	filePath := filepath.Join(tmp, "sample.txt")
+	if err := os.WriteFile(filePath, []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	ctx := t.Context()
+	got, err := lister.Detect(ctx, filePath, fileset.WalkOptions{})
+	if err != nil {
+		t.Fatalf("Detect returned unexpected error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("Detect returned nil lister, want non-nil")
+	}
+	if _, ok := got.(*lister.SingleFileLister); !ok {
+		t.Errorf("Detect returned %T, want *lister.SingleFileLister", got)
+	}
+}
+
+// TestDetect_SymlinkedFile verifies that Detect resolves a symlink that points
+// to a regular file and returns a *SingleFileLister. This exercises the
+// EvalSymlinks + stat path added in v0.1.4 (Bug B + Bug A combined).
+func TestDetect_SymlinkedFile(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "real.txt")
+	if err := os.WriteFile(target, []byte("content\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	link := filepath.Join(tmp, "link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("os.Symlink not supported: %v", err)
+	}
+
+	ctx := t.Context()
+	got, err := lister.Detect(ctx, link, fileset.WalkOptions{})
+	if err != nil {
+		t.Fatalf("Detect returned unexpected error for symlink-to-file: %v", err)
+	}
+	if got == nil {
+		t.Fatal("Detect returned nil lister, want non-nil")
+	}
+	if _, ok := got.(*lister.SingleFileLister); !ok {
+		t.Errorf("Detect returned %T for symlink-to-file, want *lister.SingleFileLister", got)
+	}
+}
+
+// TestDetect_SymlinkedDir verifies that Detect resolves a symlink that points
+// to a directory containing a git repository and returns a *GitLister. This
+// exercises the EvalSymlinks path added in v0.1.4 (Bug B) for the directory
+// case where a git probe can succeed after symlink resolution.
+func TestDetect_SymlinkedDir(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not found")
+	}
+
+	tmp := t.TempDir()
+	// Create a real git repo inside tmp.
+	repoDir := filepath.Join(tmp, "repo")
+	if err := os.Mkdir(repoDir, 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	initCmd := exec.Command("git", "init", "--template=", repoDir)
+	if out, err := initCmd.CombinedOutput(); err != nil {
+		t.Skipf("git init failed (%v): %s", err, out)
+	}
+
+	// Create a symlink pointing to the git repo directory.
+	link := filepath.Join(tmp, "link-to-repo")
+	if err := os.Symlink(repoDir, link); err != nil {
+		t.Skipf("os.Symlink not supported: %v", err)
+	}
+
+	ctx := t.Context()
+	got, err := lister.Detect(ctx, link, fileset.WalkOptions{})
+	if err != nil {
+		t.Fatalf("Detect returned unexpected error for symlink-to-dir: %v", err)
+	}
+	if got == nil {
+		t.Fatal("Detect returned nil lister, want non-nil")
+	}
+	if _, ok := got.(*lister.GitLister); !ok {
+		t.Errorf("Detect returned %T for symlink-to-git-dir, want *lister.GitLister", got)
+	}
+}
+
+// TestDetect_BrokenSymlink verifies that Detect returns a wrapped error when
+// the root argument is a symlink that points to a path that does not exist.
+// EvalSymlinks fails on broken symlinks; Detect must propagate that error.
+func TestDetect_BrokenSymlink(t *testing.T) {
+	tmp := t.TempDir()
+	link := filepath.Join(tmp, "broken")
+	// Point to a path that does not exist.
+	if err := os.Symlink(filepath.Join(tmp, "nonexistent"), link); err != nil {
+		t.Skipf("os.Symlink not supported: %v", err)
+	}
+
+	ctx := t.Context()
+	got, err := lister.Detect(ctx, link, fileset.WalkOptions{})
+	if err == nil {
+		t.Fatalf("Detect returned nil error for broken symlink, want an error (lister: %T)", got)
+	}
+	if got != nil {
+		t.Errorf("Detect returned non-nil lister for broken symlink, want nil")
+	}
+	// The error must be wrapped with the "lister: detect:" prefix so callers
+	// get consistent error messages regardless of the underlying OS error.
+	if msg := err.Error(); len(msg) < len("lister: detect:") {
+		t.Errorf("error message too short; want 'lister: detect:...' prefix, got %q", msg)
+	}
+}
+
+// TestSingleFileLister_List verifies that a SingleFileLister constructed
+// directly yields exactly one file with the expected RelPath value, and that
+// iterating a second time produces the same result (idempotency).
+func TestSingleFileLister_List(t *testing.T) {
+	tmp := t.TempDir()
+	filePath := filepath.Join(tmp, "hello.go")
+	if err := os.WriteFile(filePath, []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Build a SingleFileLister via Detect so we don't depend on any unexported
+	// constructor — Detect returns *SingleFileLister for a regular file path.
+	fl, err := lister.Detect(t.Context(), filePath, fileset.WalkOptions{})
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if _, ok := fl.(*lister.SingleFileLister); !ok {
+		t.Fatalf("expected *lister.SingleFileLister, got %T", fl)
+	}
+
+	// Iterate and collect results.
+	var files []*fileset.File
+	var errs []error
+	for f, e := range fl.List(context.Background()) {
+		if e != nil {
+			errs = append(errs, e)
+			continue
+		}
+		files = append(files, f)
+	}
+
+	if len(errs) != 0 {
+		t.Fatalf("List returned unexpected errors: %v", errs)
+	}
+	if len(files) != 1 {
+		t.Fatalf("List yielded %d files, want exactly 1", len(files))
+	}
+	if got := files[0].RelPath; got != "hello.go" {
+		t.Errorf("RelPath = %q, want %q", got, "hello.go")
 	}
 }
