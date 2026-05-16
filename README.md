@@ -27,7 +27,7 @@ mage -l        # list all build/test/lint targets
 
 ```text
 $ rak --version
-rak version v0.1.3
+rak version v0.1.4
 
 $ rak internal/counting
 directories[1|]{path|files|bytes|lines|words|chars}:
@@ -80,6 +80,7 @@ rak --include '*.go' .       # only files matching the glob
 rak --exclude '*_test.go' .  # exclude files matching the glob
 cat README.md | rak          # wc-parity counts on stdin
 cat data.json | rak --json   # JSON output on stdin
+rak CLAUDE.md                # count a single file (wc-style)
 ```
 
 **About `--sort`:** the value is a **key** — one of `lines`, `files`, `bytes`, `path` — not a path. Numeric keys (`lines`/`files`/`bytes`) sort descending by default; `path` sorts ascending. Pass `--sort-asc` to flip the default direction. The positional argument (e.g. `.` or `./internal`) is the walk root — separate from the sort key.

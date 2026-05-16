@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -1132,7 +1134,7 @@ func TestRootCmd_FilesField_SurvivesLabelDirectories(t *testing.T) {
 
 // TestRootCmd_Version verifies that the root cobra command, when given the
 // version string that fang.WithVersion wires in main.go, prints output
-// containing "v0.1.3" when invoked with --version. The test sets cmd.Version
+// containing "v0.1.4" when invoked with --version. The test sets cmd.Version
 // directly (mirroring what fang.WithVersion does to the cobra command) and
 // captures cobra's built-in version output via cmd.SetOut.
 func TestRootCmd_Version(t *testing.T) {
@@ -1140,7 +1142,7 @@ func TestRootCmd_Version(t *testing.T) {
 
 	var out bytes.Buffer
 	cmd := newRootCmd()
-	// Mirror what fang.WithVersion("v0.1.3") does to the cobra command:
+	// Mirror what fang.WithVersion("v0.1.4") does to the cobra command:
 	// cobra prints "<use> version <Version>" to OutOrStdout() when --version
 	// is passed and cmd.Version != "".
 	cmd.Version = version
@@ -1154,8 +1156,8 @@ func TestRootCmd_Version(t *testing.T) {
 	}
 
 	got := out.String()
-	if !strings.Contains(got, "v0.1.3") {
-		t.Errorf("--version output does not contain %q; got:\n%s", "v0.1.3", got)
+	if !strings.Contains(got, "v0.1.4") {
+		t.Errorf("--version output does not contain %q; got:\n%s", "v0.1.4", got)
 	}
 }
 
@@ -1399,5 +1401,46 @@ func TestRootCmd_TotalByLang_EndToEnd(t *testing.T) {
 	}
 	if hasPy && sumPyBytes != pyTotal.Counts.Bytes {
 		t.Errorf("total_by_lang[python].Bytes (%d) != sum of per-dir python bytes (%d)", pyTotal.Counts.Bytes, sumPyBytes)
+	}
+}
+
+// TestRootCmd_SingleFile is an end-to-end test for the v0.1.4 Bug A fix. It
+// invokes rak with a single file path (not a directory) and asserts that TOON
+// output is produced with the filename as the directory label and non-zero
+// counts. The test writes a temp file to disk and drives cobra via newRootCmd
+// so that lister.Detect's real file-detection path is exercised.
+func TestRootCmd_SingleFile(t *testing.T) {
+	t.Parallel()
+
+	// Write a small Go file to a temp dir.
+	tmp := t.TempDir()
+	filePath := filepath.Join(tmp, "hello.go")
+	content := []byte("package main\n\nfunc main() {}\n")
+	if err := os.WriteFile(filePath, content, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{filePath})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cmd.Execute(%q): %v\noutput:\n%s", filePath, err, out.String())
+	}
+
+	got := out.String()
+	// The TOON output must contain the filename as part of the directory label.
+	if !strings.Contains(got, "hello.go") {
+		t.Errorf("output does not contain filename %q; got:\n%s", "hello.go", got)
+	}
+	// The byte count must be non-zero (content is 29 bytes).
+	if !strings.Contains(got, "bytes:") {
+		t.Errorf("output missing 'bytes:' field; got:\n%s", got)
+	}
+	// Sanity: lines must appear too.
+	if !strings.Contains(got, "lines:") {
+		t.Errorf("output missing 'lines:' field; got:\n%s", got)
 	}
 }

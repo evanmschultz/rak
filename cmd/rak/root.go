@@ -257,8 +257,7 @@ func runRoot(c *cobra.Command, args []string, flags *rootFlags) error {
 }
 
 // runDirectoryOpts bundles the per-call options for runDirectory so callers
-// do not have to pass the seven trailing parameters positionally. Field order
-// mirrors the original parameter order for caller-side clarity.
+// do not have to pass seven trailing parameters positionally.
 type runDirectoryOpts struct {
 	rootLabel string
 	binary    bool
