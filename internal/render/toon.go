@@ -74,21 +74,24 @@ type toonTotalLangRow struct {
 	Lines   int64  `toon:"lines"`
 }
 
-// toonTree is the top-level envelope for RenderTree. The directories field is
-// a tabular TOON array; the total field is a nested toonCounts block carrying
-// the grand total (spike-confirmed: toon-go emits struct-in-struct as an
-// indented nested block — F20 nested-total contract satisfied); total_by_lang
-// is a tabular TOON array of per-language grand-total rows sorted alphabetically
-// by language string, omitted when empty (F33 — LangUnknown entries never
-// appear); by_lang is a tabular TOON array of per-directory/per-language rows,
-// omitted when empty; errors is omitted entirely (via omitempty) when the
-// caller passes a nil or empty errs slice — spike-confirmed: toon-go omitempty
-// drops zero/empty fields from output (C7).
+// toonTree is the top-level envelope for RenderTree. Emission order (governed
+// by field declaration order, which toon.Marshal respects) is:
+//  1. directories — tabular TOON array of per-directory rollups.
+//  2. by_lang — tabular TOON array of per-directory/per-language rows, omitted
+//     when empty.
+//  3. total_by_lang — tabular TOON array of per-language grand-total rows
+//     sorted alphabetically by language string, omitted when empty (F33 —
+//     LangUnknown entries never appear).
+//  4. total — nested toonCounts block for the grand total (spike-confirmed:
+//     toon-go emits struct-in-struct as an indented nested block — F20
+//     nested-total contract satisfied).
+//  5. errors — omitted entirely (via omitempty) when the caller passes a nil
+//     or empty errs slice (C7).
 type toonTree struct {
 	Directories []toonDirectory    `toon:"directories"`
-	Total       toonCounts         `toon:"total"`
-	TotalByLang []toonTotalLangRow `toon:"total_by_lang,omitempty"`
 	ByLang      []toonLangRow      `toon:"by_lang,omitempty"`
+	TotalByLang []toonTotalLangRow `toon:"total_by_lang,omitempty"`
+	Total       toonCounts         `toon:"total"`
 	Errors      []string           `toon:"errors,omitempty"`
 }
 

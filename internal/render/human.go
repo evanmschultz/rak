@@ -95,17 +95,18 @@ func (h humanRenderer) RenderTree(w io.Writer, s summary.Summary, errs []error) 
 			}
 		}
 	}
-	if err := printer.KV(countsKV("total", s.Total)); err != nil {
-		return fmt.Errorf("render total as human kv block: %w", err)
-	}
-	// Emit per-language grand totals after the total block when non-empty
-	// (F33: LangUnknown suppressed via sortedKnownLangs).
+	// Emit per-language grand totals before the grand total block (F33:
+	// LangUnknown suppressed via sortedKnownLangs). total comes last so the
+	// most-summary value is the final block in the output.
 	knownTotalLangs := sortedKnownLangs(s.TotalByLang)
 	for _, l := range knownTotalLangs {
 		lc := s.TotalByLang[l]
 		if err := printer.KV(totalLangKV(string(l), lc)); err != nil {
 			return fmt.Errorf("render total lang %q as human kv block: %w", l, err)
 		}
+	}
+	if err := printer.KV(countsKV("total", s.Total)); err != nil {
+		return fmt.Errorf("render total as human kv block: %w", err)
 	}
 	if len(errs) > 0 {
 		detail := make([]string, 0, len(errs))

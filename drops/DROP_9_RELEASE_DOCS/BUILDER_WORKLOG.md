@@ -54,3 +54,21 @@
 ## Hylla Feedback
 
 None — Hylla answered everything needed. The unit only touched `cmd/rak` package-level wiring; Hylla confirmed no additional callers or symbol usage was relevant. No misses encountered.
+
+## Pre-9.4 — Renderer Output Ordering Fix — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-15
+- **Files touched:**
+  - `internal/render/toon.go` — reordered `toonTree` struct fields from `Directories, Total, TotalByLang, ByLang, Errors` to `Directories, ByLang, TotalByLang, Total, Errors`. Rewrote doc comment to enumerate emission order explicitly.
+  - `internal/render/json.go` — reordered `treeJSON` struct fields from `Directories, Total, TotalByLang, Errors` to `Directories, TotalByLang, Total, Errors`. Rewrote doc comment to enumerate emission order.
+  - `internal/render/human.go` — moved `total lang:` emission loop BEFORE the `printer.KV(countsKV("total", s.Total))` call so grand total appears last.
+  - `internal/render/render_test.go` — inverted the `TestRenderer_TotalByLang_Human` ordering assertion: now asserts `total lang:` blocks precede `total` block (using `strings.LastIndex` for grand total, `strings.Index` for first `total lang:` occurrence).
+- **TDD cycle:** ran `mage test` after each file change; all tests green.
+- **Scope:** only `internal/render/*.go` touched. No `cmd/rak/`, `internal/summary/`, or other packages modified.
+- **`mage ci` result:** pass green — 87.8% coverage (floor 70%), lint clean, format clean.
+- **`directoryJSON` conversion safety:** confirmed that `directoryJSON(filterUnknown(d))` operates on `directoryJSON` ↔ `summary.Directory` bare-struct conversion; `treeJSON` field reorder does not affect it.
+
+## Hylla Feedback (pre-9.4 round)
+
+N/A — task touched only `internal/render/*.go` files; Hylla is Go-indexed but the specific work here was a struct-field reorder fully visible from direct file reads + LSP. No Hylla queries were needed.

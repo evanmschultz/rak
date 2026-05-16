@@ -92,14 +92,20 @@ func filterUnknown(d summary.Directory) summary.Directory {
 	}
 }
 
-// treeJSON is the top-level envelope for RenderTree. TotalByLang is omitted
-// (via omitempty) when nil or empty (after LangUnknown filtering — F33).
-// Errors is omitted entirely (via omitempty) when the caller passes a nil /
-// empty slice so the common no-errors case emits a clean object.
+// treeJSON is the top-level envelope for RenderTree. Emission order (governed
+// by field declaration order, which encoding/json respects) is:
+//  1. directories — array of per-directory rollups (each carries its own
+//     by_lang sub-object when non-empty).
+//  2. total_by_lang — per-language grand-total map, omitted (via omitempty)
+//     when nil or empty after LangUnknown filtering (F33).
+//  3. total — grand-total counts object. Emitted last among the data fields
+//     so the most-summary value appears at the end of the object.
+//  4. errors — omitted entirely (via omitempty) when the caller passes a nil /
+//     empty slice so the common no-errors case emits a clean object.
 type treeJSON struct {
 	Directories []directoryJSON                   `json:"directories"`
-	Total       counting.Counts                   `json:"total"`
 	TotalByLang map[lang.Language]lang.LangCounts `json:"total_by_lang,omitempty"`
+	Total       counting.Counts                   `json:"total"`
 	Errors      []string                          `json:"errors,omitempty"`
 }
 

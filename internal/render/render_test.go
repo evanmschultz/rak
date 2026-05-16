@@ -795,11 +795,14 @@ func TestRenderer_TotalByLang_Human(t *testing.T) {
 	if !strings.Contains(got, "total lang: markdown") {
 		t.Errorf("human TotalByLang: output missing 'total lang: markdown'; got:\n%s", got)
 	}
-	// The total block must precede any total lang blocks.
-	idxTotal := strings.Index(got, "total")
+	// total lang: blocks must precede the grand total block (total is last).
+	// Use the LAST occurrence of "total" to find the grand-total block (it is
+	// the final block in the output after reordering), and the FIRST occurrence
+	// of "total lang:" for the first per-language row.
 	idxTotalLang := strings.Index(got, "total lang:")
-	if idxTotalLang >= 0 && idxTotal >= idxTotalLang {
-		t.Errorf("human TotalByLang: 'total' block must precede 'total lang:' blocks; got:\n%s", got)
+	idxTotal := strings.LastIndex(got, "total")
+	if idxTotalLang >= 0 && idxTotal >= 0 && idxTotal <= idxTotalLang {
+		t.Errorf("human TotalByLang: 'total lang:' blocks must precede 'total' block; got:\n%s", got)
 	}
 }
 
