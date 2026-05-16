@@ -562,3 +562,88 @@ PASS. All 12 attack surfaces from the spawn prompt + 11 supplementary self-attac
 ### Hylla Feedback
 
 N/A — Unit 9.9 touched only `internal/lang/lang.go`, `internal/lang/split.go`, `internal/lang/lang_test.go`, `internal/lang/split_test.go`, and `main/README.md`. Per project rule (CLAUDE.md § "Code Understanding Rules"), Hylla ingest is drop-end-only; the new constants and grammar entries are not yet in any Hylla snapshot. Direct `Read` of the changed files is the correct evidence source for in-flight code, not a Hylla miss. No Hylla query attempted, no fallback to flag.
+
+## Unit 9.10 — Round 1
+
+**Verdict:** PASS (no counterexamples found).
+**Tier:** B — sole QA gate, no proof companion.
+**Working dir:** `/Users/evanschultz/Documents/Code/hylla/rak/main`.
+**Commit under review:** `c2dc0e1 chore(mage): remove obsolete plancheck target`.
+
+### Premises
+
+- Unit 9.10 removes the `PlanCheck` function from `main/magefile.go` and any helpers/imports used solely by it.
+- `mage -l` after removal must list nine targets (addDep, build, ci, coverage, format, install, lint, run, test) and NOT `planCheck`.
+- `mage ci` must continue green; `PlanCheck` was never in the `CI` serial-deps chain.
+- Scope per unit's declared `paths`: `main/magefile.go` only. Drop's `PLAN.md` state flip + `BUILDER_WORKLOG.md` entry are workflow housekeeping, not scope creep.
+- Per planner spawn prompt: `main/CLAUDE.md` mage-targets row and `main/PLAN.md` historical Drop-1 reference are INTENDED to be handled in a separate orch cleanup batch — surface as Unknown, not failure.
+
+### Evidence
+
+- `git show c2dc0e1 --stat`: three files changed — `drops/DROP_9_RELEASE_DOCS/BUILDER_WORKLOG.md` (+17), `drops/DROP_9_RELEASE_DOCS/PLAN.md` (+15), `magefile.go` (+2 −11). Scope matches.
+- `git show c2dc0e1 -- magefile.go`: removes 8-line `PlanCheck` function block (doc comment + body) and rewrites file-level package doc from "The ten canonical targets" → "The canonical targets". Net 11 deletions, 2 insertions. No other code touched.
+- Full read of `main/magefile.go` post-removal (177 lines): imports `fmt`, `os`, `strconv`, `strings`, `mg`, `sh` all referenced — `fmt.Errorf` (every target), `os.Args` (Run), `strconv.ParseFloat` (parseCoverageTotal), `strings.Fields`/`HasPrefix`/`TrimSpace`/`TrimSuffix`/`Split` (gofumptClean + parseCoverageTotal), `mg.SerialDeps` (CI), `sh.RunV`/`sh.Output` (every shelling target).
+- `mage -l` from `main/`: nine targets listed alphabetically — addDep, build, ci, coverage, format, install, lint, run, test. `planCheck` absent.
+- `mage ci` from `main/`: pass green. gofumpt clean, lint 0 issues, all 8 packages `ok` with `-race`, coverage 87.9% (floor 70.0%, scope `./internal/...`).
+- `mage coverage` from `main/`: total 87.9%. 17.9 pts above floor. No regression.
+- `.github/workflows/ci.yml` (42 lines): runs `mage ci` as sole step. No `mage planCheck` invocation. Removal cannot break CI.
+- `git grep planCheck` (full tracked tree): living references only in `CLAUDE.md:231` (mage-targets table row) and `PLAN.md:106` (historical Drop-1 row "with the standard 9 targets (...coverage/planCheck)"). All other hits are historical drop artifacts (DROP_1/, DROP_2/, DROP_9/'s own worklog + plan).
+
+### Trace or cases — attack surface results
+
+1. **Helper-fn orphan check.** REFUTED.
+   - Pre-removal `PlanCheck` body (per commit diff): `// TODO(planCheck): real parity check — stub passes in Drop 1\nreturn nil`. Zero function calls, zero helpers.
+   - Read of magefile.go post-removal confirms no unreferenced unexported funcs remain. The only unexported func is `gofumptClean`, called by `CI` via `mg.SerialDeps`; `parseCoverageTotal`, called by `Coverage`. Both live.
+
+2. **Import orphan check.** REFUTED.
+   - Diff shows no import-block edits.
+   - Surviving import usage verified line-by-line: `fmt` used 12+ times (every error wrap, Println in Coverage), `os` used in Run (`os.Args[1:]`), `strconv` used in parseCoverageTotal (`strconv.ParseFloat`), `strings` used in gofumptClean + parseCoverageTotal (`strings.TrimSpace`, `strings.HasPrefix`, `strings.Fields`, `strings.TrimSuffix`, `strings.Split`), `github.com/magefile/mage/mg` used in CI (`mg.SerialDeps`), `github.com/magefile/mage/sh` used in every shelling target (`sh.RunV`, `sh.Output`). No orphans.
+
+3. **`mage ci` chain regression.** REFUTED.
+   - magefile.go:65 — `CI()` body: `mg.SerialDeps(gofumptClean, Lint, Test, Coverage)`. `PlanCheck` not referenced.
+   - Live `mage ci` from working dir: pass green. Coverage gate fires within chain and passes (87.9% ≥ 70.0%).
+
+4. **Implicit dependency from CI workflow.** REFUTED.
+   - `.github/workflows/ci.yml` step list: Checkout / Set up Go / Install mage / Install gofumpt / Install golangci-lint / `mage ci`. Single mage invocation; no `planCheck`. Workflow unaffected.
+
+5. **Documentation drift in living root MDs.** Unknown — per planner spawn prompt explicitly INTENDED for orch cleanup, NOT a Unit 9.10 failure.
+   - `main/CLAUDE.md:231` still lists `mage planCheck` row in mage-targets table.
+   - `main/PLAN.md:106` still references `planCheck` in the Drop-1 historical recap ("the standard 9 targets (build/test/format/lint/ci/install/run/coverage/planCheck)").
+   - Surfaced to orch as U2 below. Unit 9.10's declared `paths` are `main/magefile.go` only; CLAUDE.md and PLAN.md edits are out of unit scope.
+
+6. **`mage -l` correctness.** REFUTED.
+   - Live `mage -l` output enumerated above: addDep, build, ci, coverage, format, install, lint, run, test (9 targets). `planCheck` absent. Matches acceptance criterion.
+
+7. **Scope creep.** REFUTED.
+   - `git show c2dc0e1 --stat` enumerates exactly three files: `magefile.go` (unit's declared path), drop's `BUILDER_WORKLOG.md` (workflow-mandated worklog append), drop's `PLAN.md` (state flip `todo` → `done`). No production code outside `magefile.go` touched. No test files touched. No README. No CLAUDE.md.
+
+8. **Builder worklog quality.** REFUTED.
+   - Worklog entry (`## Unit 9.10 — Round 1`) documents builder identity, start date, files touched with line-range context, explicit "helpers removed: none" callout, explicit "imports dropped: none" callout, `mage ci` chain unaffected note, mage targets run with outcomes (`mage -l` confirms target list; `mage ci` pass green with coverage figure). Meets WORKFLOW.md worklog contract.
+
+9. **`mage coverage` floor still met.** REFUTED.
+   - Live `mage coverage` from working dir: total 87.9% on `-coverpkg=./internal/...` scope. Floor 70.0%. 17.9 pts margin. Unit 9.3 floor untouched.
+
+### Additional self-attack surfaces examined
+
+A. **Reverse caller scan for `PlanCheck` outside magefile.go.** REFUTED. `git grep planCheck` returns only the doc-table row in `main/CLAUDE.md`, the historical Drop-1 prose in `main/PLAN.md`, and historical drop-dir artifacts under `drops/DROP_1_*`, `drops/DROP_2_*`, `drops/DROP_9_*`. Zero Go-source callers, zero shell-script callers, zero workflow-yml callers, zero pre-commit hook callers.
+
+B. **Magefile `//go:build mage` constraint integrity.** REFUTED. Build tag unchanged. Mage driver still compiles the file. Confirmed implicitly by `mage -l` and `mage ci` succeeding.
+
+C. **Internal magefile-package doc-comment drift.** REFUTED. Pre-removal package doc said "The ten canonical targets"; post-removal says "The canonical targets" — no count drift introduced (the file's own rule: "any drift between that table and this file is a bug"). Removing the count entirely avoids re-asserting a number that would drift again if a future target is added.
+
+D. **Package-level state side-effects from `PlanCheck` removal.** REFUTED. PlanCheck was a stub returning nil; no `init()` registration, no package-level var mutation, no pkg-level goroutine. Removal cannot affect program state.
+
+E. **`mage` target name collision after removal.** REFUTED. Live `mage -l` confirms uniqueness of remaining nine target names. Mage detects collisions at parse time and would refuse to list; the clean enumeration proves no collision exists.
+
+### Counterexamples
+
+None CONFIRMED. All nine prompt-listed attack surfaces plus five self-attack surfaces (A–E) either REFUTED with evidence or routed to Unknowns (Attack 5, per planner explicit carve-out).
+
+### Unknowns
+
+- **U1 — `main/CLAUDE.md:231` still lists `mage planCheck` row.** Out of Unit 9.10's declared `paths` scope. Planner spawn prompt explicitly classifies as orch cleanup batch ("INTENDED — orch will slim CLAUDE.md in the cleanup batch. Surface as Unknown, not failure."). Routed to orch.
+- **U2 — `main/PLAN.md:106` historical Drop-1 prose references `planCheck`.** Same classification — out of unit scope, planner-acknowledged for orch cleanup pass. Routed to orch. Worth noting that this is a historical record of Drop 1 ("DONE — historical record" header at line 100), so leaving the historical text untouched is also defensible; orch decides whether to retro-edit or annotate.
+
+### Hylla Feedback
+
+N/A — Unit 9.10 touched only `main/magefile.go`, a non-Go-package build automation file with `//go:build mage` constraint. Hylla indexes the project's Go source under `cmd/` and `internal/`; the magefile sits outside that scope. Evidence-gathering used `Read` (file contents), `Bash` (live `mage` + `git` invocation), and `git grep` (cross-tree text search) — all appropriate for build-automation + tree-wide reference auditing. No Hylla query attempted, no fallback to flag.
