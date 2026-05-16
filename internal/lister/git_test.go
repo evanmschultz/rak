@@ -247,7 +247,7 @@ func TestGitLister_ContextCancel(t *testing.T) {
 	if gotErr == nil {
 		t.Skip("context cancellation did not propagate (git output buffered before cancel); acceptable on fast machines")
 	}
-	if gotErr != context.Canceled {
+	if !errors.Is(gotErr, context.Canceled) {
 		t.Errorf("List yielded err = %v, want context.Canceled", gotErr)
 	}
 }
