@@ -6,6 +6,7 @@ package counting
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"unicode"
 )
@@ -43,7 +44,7 @@ func Count(r io.Reader) (Counts, error) {
 		//   - the rune itself, which we use for whitespace/newline logic
 		//   - the byte width of that rune in UTF-8, which we use for byte counts
 		ch, size, err := reader.ReadRune()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return counts, nil
 		}
 		if err != nil {

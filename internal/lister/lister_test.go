@@ -40,9 +40,6 @@ func TestDetect_InsideRepo(t *testing.T) {
 
 // TestDetect_OutsideRepo verifies that Detect returns a *WalkLister when
 // called with a root that is not inside a git repository.
-//
-// TODO unit 4.3: enable WalkLister type assertion (currently inert until
-// WalkLister is defined in walk.go).
 func TestDetect_OutsideRepo(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git binary not found")

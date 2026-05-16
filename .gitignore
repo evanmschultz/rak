@@ -19,6 +19,8 @@
 *.swo
 .idea/
 .vscode/
+Thumbs.db
+desktop.ini
 
 # Local agent / tool state
 /.claude/
