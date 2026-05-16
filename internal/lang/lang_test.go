@@ -166,3 +166,128 @@ func TestDetect_PeekError_ReturnsUnknown(t *testing.T) {
 		t.Errorf("Detect on missing file = %q; want %q (LangUnknown)", got, LangUnknown)
 	}
 }
+
+// TestDetect_Ruby verifies extension (.rb, .rake, .gemspec), special-filename
+// (Rakefile, Gemfile), and shebang detection for Ruby.
+func TestDetect_Ruby(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		path    string
+		content []byte
+		want    Language
+	}{
+		{"rb extension", "foo.rb", []byte("puts 'hi'"), LangRuby},
+		{"rake extension", "foo.rake", []byte("task :default"), LangRuby},
+		{"gemspec extension", "my.gemspec", []byte("Gem::Specification.new"), LangRuby},
+		{"Rakefile filename", "Rakefile", []byte("task :build"), LangRuby},
+		{"Gemfile filename", "Gemfile", []byte("source 'https://rubygems.org'"), LangRuby},
+		{"nested Rakefile", "sub/Rakefile", []byte("task :test"), LangRuby},
+		{"shebang env ruby", "script", []byte("#!/usr/bin/env ruby\nputs 'hi'\n"), LangRuby},
+		{"shebang usr bin ruby", "script2", []byte("#!/usr/bin/ruby\nputs 'hi'\n"), LangRuby},
+		{"shebang bin ruby", "script3", []byte("#!/bin/ruby\nputs 'hi'\n"), LangRuby},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fsys := fstest.MapFS{tc.path: &fstest.MapFile{Data: tc.content}}
+			f := newTestFile(fsys, tc.path)
+			got := Detect(f)
+			if got != tc.want {
+				t.Errorf("Detect(%q) = %q; want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDetect_Java verifies extension-based detection for Java (.java).
+func TestDetect_Java(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{"Hello.java": &fstest.MapFile{Data: []byte("public class Hello {}")}}
+	f := newTestFile(fsys, "Hello.java")
+	got := Detect(f)
+	if got != LangJava {
+		t.Errorf("Detect(%q) = %q; want %q", "Hello.java", got, LangJava)
+	}
+}
+
+// TestDetect_PHP verifies extension-based detection for PHP (.php, .phtml).
+func TestDetect_PHP(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		path string
+		want Language
+	}{
+		{"index.php", LangPHP},
+		{"template.phtml", LangPHP},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.path, func(t *testing.T) {
+			t.Parallel()
+			fsys := fstest.MapFS{tc.path: &fstest.MapFile{Data: []byte("<?php echo 'hi'; ?>")}}
+			f := newTestFile(fsys, tc.path)
+			got := Detect(f)
+			if got != tc.want {
+				t.Errorf("Detect(%q) = %q; want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDetect_Kotlin verifies extension-based detection for Kotlin (.kt, .kts).
+func TestDetect_Kotlin(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		path string
+		want Language
+	}{
+		{"Main.kt", LangKotlin},
+		{"build.gradle.kts", LangKotlin},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.path, func(t *testing.T) {
+			t.Parallel()
+			fsys := fstest.MapFS{tc.path: &fstest.MapFile{Data: []byte("fun main() {}")}}
+			f := newTestFile(fsys, tc.path)
+			got := Detect(f)
+			if got != tc.want {
+				t.Errorf("Detect(%q) = %q; want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDetect_Swift verifies extension-based detection for Swift (.swift).
+func TestDetect_Swift(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{"main.swift": &fstest.MapFile{Data: []byte("import Foundation")}}
+	f := newTestFile(fsys, "main.swift")
+	got := Detect(f)
+	if got != LangSwift {
+		t.Errorf("Detect(%q) = %q; want %q", "main.swift", got, LangSwift)
+	}
+}
+
+// TestDetect_NewLanguages_UnknownNegative verifies that an unrecognized
+// extension still returns LangUnknown (regression guard for the new entries).
+func TestDetect_NewLanguages_UnknownNegative(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{"foo.unknown": &fstest.MapFile{Data: []byte("no shebang\n")}}
+	f := newTestFile(fsys, "foo.unknown")
+	got := Detect(f)
+	if got != LangUnknown {
+		t.Errorf("Detect(%q) = %q; want LangUnknown", "foo.unknown", got)
+	}
+}

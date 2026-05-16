@@ -215,3 +215,208 @@ func TestSplit_LangUnknown_AllCode(t *testing.T) {
 		t.Errorf("got %+v; want %+v (LangUnknown = no grammar = all Code)", got, want)
 	}
 }
+
+// TestSplit_Ruby verifies that Ruby uses "#" for line comments and
+// "=begin"/"=end" for block comments (Policy α applies).
+func TestSplit_Ruby(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		input string
+		want  LineCounts
+	}{
+		{
+			name:  "hash line comment",
+			input: "# comment\nputs 'hi'\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			// Policy α: =begin (blockOpen) marks line 1 as Comment and sets
+			// inBlockComment=true. Line 2 ("This is a block comment.") is inside
+			// the block → Comment. Line 3 (=end) is inside block at start →
+			// Comment; closes block. Line 4 (puts 'code') → Code.
+			name:  "block comment =begin/=end",
+			input: "=begin\nThis is a block comment.\n=end\nputs 'code'\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+		{
+			name:  "blank and code only",
+			input: "puts 'a'\n\nputs 'b'\n",
+			want:  LineCounts{Blank: 1, Comment: 0, Code: 2},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := Split(strings.NewReader(tc.input), LangRuby)
+			if err != nil {
+				t.Fatalf("Split: unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %+v; want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSplit_Java verifies that Java uses "//" for line comments and
+// "/* */" for block comments, consistent with C-family Policy α.
+func TestSplit_Java(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		input string
+		want  LineCounts
+	}{
+		{
+			name:  "line comment",
+			input: "// comment\nint x = 1;\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "block comment",
+			input: "/* open\n * middle\n */\nint y = 2;\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+		{
+			name:  "inline block comment (Policy α)",
+			input: "int z = /* value */ 3;\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 0},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := Split(strings.NewReader(tc.input), LangJava)
+			if err != nil {
+				t.Fatalf("Split: unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %+v; want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSplit_PHP verifies that PHP uses both "//" and "#" as line-comment
+// prefixes and "/* */" for block comments.
+func TestSplit_PHP(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		input string
+		want  LineCounts
+	}{
+		{
+			name:  "slashslash line comment",
+			input: "// comment\n$x = 1;\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "hash line comment",
+			input: "# comment\n$y = 2;\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "block comment",
+			input: "/* open\n * middle\n */\n$z = 3;\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := Split(strings.NewReader(tc.input), LangPHP)
+			if err != nil {
+				t.Fatalf("Split: unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %+v; want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSplit_Kotlin verifies that Kotlin uses "//" for line comments and
+// "/* */" for block comments.
+func TestSplit_Kotlin(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		input string
+		want  LineCounts
+	}{
+		{
+			name:  "line comment",
+			input: "// comment\nfun main() {}\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "block comment",
+			input: "/* open\n * doc\n */\nval x = 1\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := Split(strings.NewReader(tc.input), LangKotlin)
+			if err != nil {
+				t.Fatalf("Split: unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %+v; want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSplit_Swift verifies that Swift uses "//" for line comments and
+// "/* */" for block comments. Nested block comments are not tracked (Policy α,
+// YAGNI v0.1.0): the flat open/close scan is acceptable.
+func TestSplit_Swift(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		input string
+		want  LineCounts
+	}{
+		{
+			name:  "line comment",
+			input: "// comment\nlet x = 1\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "block comment",
+			input: "/* open\n * doc\n */\nvar y = 2\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := Split(strings.NewReader(tc.input), LangSwift)
+			if err != nil {
+				t.Fatalf("Split: unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %+v; want %+v", got, tc.want)
+			}
+		})
+	}
+}

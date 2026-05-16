@@ -51,9 +51,13 @@ func (lc *LangCounts) Add(other LangCounts) {
 // grammar holds the comment markers for a single language. Empty strings mean
 // the language does not support that comment form.
 type grammar struct {
-	// linePrefix is the single-line comment prefix, e.g. "//" or "#".
+	// linePrefix is the primary single-line comment prefix, e.g. "//" or "#".
 	// Empty means no line-comment form.
 	linePrefix string
+	// linePrefix2 is an optional secondary single-line comment prefix. Used for
+	// languages with two valid line-comment starters (e.g. PHP accepts both "//"
+	// and "#"). Empty means no secondary form.
+	linePrefix2 string
 	// blockOpen is the block-comment open marker, e.g. "/*" or "<!--".
 	// Empty means no block-comment form.
 	blockOpen string
@@ -78,13 +82,22 @@ type grammar struct {
 // Code. This matches cloc behavior.
 var grammarTable = map[Language]grammar{
 	// C-family and JVM-adjacent languages: "//" line + "/* */" block.
-	LangGo:   {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
-	LangRust: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
-	LangC:    {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
-	LangCPP:  {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
-	LangJS:   {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
-	LangTS:   {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
-	LangCSS:  {linePrefix: "", blockOpen: "/*", blockClose: "*/"},
+	LangGo:     {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+	LangRust:   {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+	LangC:      {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+	LangCPP:    {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+	LangJS:     {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+	LangTS:     {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+	LangCSS:    {linePrefix: "", blockOpen: "/*", blockClose: "*/"},
+	LangJava:   {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+	LangKotlin: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+	// Swift permits nested block comments; rak's flat-detection is acceptable
+	// for v0.1.0 — nested "/* /* */ */" will be classified correctly at the
+	// outer open/close but inner nesting is not tracked (Policy α, YAGNI).
+	LangSwift: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+	// PHP accepts both "//" and "#" as line-comment prefixes. linePrefix2 holds
+	// the secondary form so both are detected by Split.
+	LangPHP: {linePrefix: "//", linePrefix2: "#", blockOpen: "/*", blockClose: "*/"},
 
 	// Hash-comment languages: "#" line only, no block-comment form.
 	// Python: triple-quoted docstrings are strings, not comments (C7).
@@ -95,6 +108,11 @@ var grammarTable = map[Language]grammar{
 	LangMakefile: {linePrefix: "#"},
 	LangDocker:   {linePrefix: "#"},
 	LangCMake:    {linePrefix: "#", blockOpen: "#[[", blockClose: "]]"},
+	// Ruby uses "#" for line comments. Block comments via =begin/=end are
+	// supported: Policy α classifies any line containing "=begin" or "=end"
+	// as Comment (known limitation: string literals containing these markers
+	// will be mis-classified, consistent with F28 YAGNI for v0.1.0).
+	LangRuby: {linePrefix: "#", blockOpen: "=begin", blockClose: "=end"},
 
 	// HTML/XML-family: "<!-- -->" block, no line-comment form.
 	LangHTML:     {blockOpen: "<!--", blockClose: "-->"},
@@ -152,8 +170,11 @@ func Split(r io.Reader, lang Language) (LineCounts, error) {
 			isComment = true
 		}
 
-		// (c) Line-comment prefix at trimmed start.
+		// (c) Line-comment prefix at trimmed start (primary and optional secondary).
 		if !isComment && g.linePrefix != "" && strings.HasPrefix(trimmed, g.linePrefix) {
+			isComment = true
+		}
+		if !isComment && g.linePrefix2 != "" && strings.HasPrefix(trimmed, g.linePrefix2) {
 			isComment = true
 		}
 

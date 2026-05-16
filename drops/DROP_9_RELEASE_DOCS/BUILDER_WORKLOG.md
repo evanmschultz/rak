@@ -126,3 +126,31 @@ N/A — task touched only `cmd/rak/root.go` and `cmd/rak/root_test.go` (adding a
 - **Missed because:** Hylla's last ingest predates Drop 4 render work; the `toonDirectory`, `directoryJSON`, `humanRenderer.RenderTree`, and `summary.Directory` symbols were not returned from any of these queries.
 - **Worked via:** Direct `Read` of `internal/render/toon.go`, `internal/render/json.go`, `internal/render/human.go`, `internal/summary/summary.go`.
 - **Suggestion:** Re-ingest after this commit so Drop 4–9 render/summary symbols become searchable. The `directoryJSON` and `toonDirectory` structs would be valuable Hylla nodes for future render-layer work.
+
+## Unit 9.9 — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-15
+- **Files touched:**
+  - `internal/lang/lang.go` — 5 new `Language` constants (LangJava, LangKotlin, LangPHP, LangRuby, LangSwift) inserted alphabetically into the const block; 2 new entries in `specialFilenames` (gemfile, rakefile → LangRuby); 9 new entries in `extensionTable` (.gemspec, .java, .kt, .kts, .php, .phtml, .rake, .rb, .swift); 1 new entry in `shebangsTable` (ruby → LangRuby). Took the opportunity to alpha-sort all three maps for consistency.
+  - `internal/lang/split.go` — added `linePrefix2 string` field to `grammar` struct for secondary line-comment prefix (PHP needs both `//` and `#`); updated `Split` to check `linePrefix2` after `linePrefix`; added 5 new entries to `grammarTable`: LangJava, LangKotlin, LangSwift (all C-family `//` + `/* */`), LangPHP (`//` primary, `#` secondary, `/* */` block), LangRuby (`#` line, `=begin`/`=end` block).
+  - `internal/lang/lang_test.go` — added 6 new test functions: `TestDetect_Ruby` (9 subtests: 3 extensions, 2 filenames, 2 nested paths, 3 shebangs), `TestDetect_Java`, `TestDetect_PHP` (2 subtests), `TestDetect_Kotlin` (2 subtests), `TestDetect_Swift`, `TestDetect_NewLanguages_UnknownNegative`.
+  - `internal/lang/split_test.go` — added 5 new test functions: `TestSplit_Ruby` (3 subtests: hash comment, =begin/=end block, blank+code), `TestSplit_Java` (3 subtests), `TestSplit_PHP` (3 subtests: `//`, `#`, `/* */`), `TestSplit_Kotlin` (2 subtests), `TestSplit_Swift` (2 subtests).
+  - `main/README.md` — updated "Languages detected" sentence with new alphabetical order: C, C++, CMakeLists.txt, CSS, Dockerfile, Go, HTML, Java, JavaScript, JSON, Kotlin, Makefile, Markdown, PHP, Python, Ruby, Rust, Shell (sh/bash/zsh/fish), Swift, TOML, TypeScript, YAML.
+- **TDD cycle:**
+  - Wrote production code in `lang.go` and `split.go` first, then added tests. On first `mage test`, Ruby `=begin`/`=end` block-comment test failed: expected Comment=2 Code=2, but Policy α correctly produces Comment=3 Code=1 (=begin line itself is marked Comment via blockOpen match). Fixed test expectation, documented in the subtest comment. All tests GREEN thereafter.
+- **Design decisions:**
+  1. **`grammar.linePrefix2`** — PHP requires two valid line-comment starters (`//` and `#`). Rather than special-casing in `Split` or duplicating PHP as two entries, added `linePrefix2 string` to `grammar`. This is the minimal, non-speculative extension — only PHP uses it today. The struct zero-value (empty string) means all existing languages are unaffected.
+  2. **Ruby `=begin`/`=end`** — included as `blockOpen`/`blockClose`. Policy α applies: any line containing `=begin` or `=end` anywhere is classified Comment. Known limitation (string literals containing these markers mis-classified) is consistent with F28 YAGNI. The vast majority of Ruby code uses `#` line comments; `=begin`/`=end` block support adds correctness without complexity.
+  3. **Swift nested block comments** — Swift permits `/* /* */ */` nesting; rak's flat open/close scanner does not track nesting depth. Acceptable for v0.1.0 (Policy α, YAGNI). Documented in grammarTable comment.
+  4. **Const block alphabetical order** — existing order was by insertion (Go, Rust, Python, JS, TS, Shell, Markdown, TOML, YAML, JSON, C, CPP, HTML, CSS, Makefile, Docker, CMake). Reordered to alphabetical by constant name (C, CPP, CMake, CSS, Docker, Go, HTML, Java, JS, JSON, Kotlin, Makefile, Markdown, PHP, Python, Ruby, Rust, Shell, Swift, TS, TOML, YAML). Existing code using these constants is unaffected (all by name, not position).
+  5. **Extension/shebang maps sorted** — took the same alpha-sort pass on `extensionTable`, `specialFilenames`, and `shebangsTable` for readability. Functional behavior unchanged.
+- **Mage targets run:**
+  - `mage build` — pass.
+  - `mage test` — pass (first run: 1 failure in Ruby block-comment test; fixed expectation; second run: all pass).
+  - `mage lint` — 0 issues.
+  - `mage ci` — pass green. gofumpt: clean. lint: 0 issues. tests: all pass. coverage: 87.9% (floor 70%).
+
+## Hylla Feedback (unit 9.9)
+
+N/A — task touched only `internal/lang/lang.go`, `internal/lang/split.go`, `internal/lang/lang_test.go`, `internal/lang/split_test.go`, and `main/README.md`. All changes were additions to existing maps and test tables; no cross-package symbol navigation required. No Hylla queries were needed.

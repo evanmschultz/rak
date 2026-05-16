@@ -26,23 +26,28 @@ type Language string
 // detection rule matches the file.
 const (
 	LangUnknown  Language = ""
-	LangGo       Language = "go"
-	LangRust     Language = "rust"
-	LangPython   Language = "python"
-	LangJS       Language = "javascript"
-	LangTS       Language = "typescript"
-	LangShell    Language = "shell"
-	LangMarkdown Language = "markdown"
-	LangTOML     Language = "toml"
-	LangYAML     Language = "yaml"
-	LangJSON     Language = "json"
 	LangC        Language = "c"
 	LangCPP      Language = "cpp"
-	LangHTML     Language = "html"
-	LangCSS      Language = "css"
-	LangMakefile Language = "makefile"
-	LangDocker   Language = "docker"
 	LangCMake    Language = "cmake"
+	LangCSS      Language = "css"
+	LangDocker   Language = "docker"
+	LangGo       Language = "go"
+	LangHTML     Language = "html"
+	LangJava     Language = "java"
+	LangJS       Language = "javascript"
+	LangJSON     Language = "json"
+	LangKotlin   Language = "kotlin"
+	LangMakefile Language = "makefile"
+	LangMarkdown Language = "markdown"
+	LangPHP      Language = "php"
+	LangPython   Language = "python"
+	LangRuby     Language = "ruby"
+	LangRust     Language = "rust"
+	LangShell    Language = "shell"
+	LangSwift    Language = "swift"
+	LangTS       Language = "typescript"
+	LangTOML     Language = "toml"
+	LangYAML     Language = "yaml"
 )
 
 // specialFilenames maps exact lowercased basenames to languages. Lookup is
@@ -50,39 +55,50 @@ const (
 // no extension) are detected correctly regardless of containing directory.
 // Keys must already be lowercase; Detect normalizes the basename before lookup.
 var specialFilenames = map[string]Language{
-	"makefile":       LangMakefile,
-	"gnumakefile":    LangMakefile,
-	"dockerfile":     LangDocker,
 	"cmakelists.txt": LangCMake,
+	"dockerfile":     LangDocker,
+	"gemfile":        LangRuby,
+	"gnumakefile":    LangMakefile,
+	"makefile":       LangMakefile,
+	"rakefile":       LangRuby,
 }
 
 // extensionTable maps lowercased file extensions (with the leading dot, e.g.
 // ".go") to languages. Keys match filepath.Ext output directly (F27 / P5).
 var extensionTable = map[string]Language{
-	".go":   LangGo,
-	".rs":   LangRust,
-	".py":   LangPython,
-	".js":   LangJS,
-	".ts":   LangTS,
-	".sh":   LangShell,
-	".bash": LangShell,
-	".zsh":  LangShell,
-	".fish": LangShell,
-	".md":   LangMarkdown,
-	".toml": LangTOML,
-	".yaml": LangYAML,
-	".yml":  LangYAML,
-	".json": LangJSON,
-	".c":    LangC,
-	".h":    LangC,
-	".cpp":  LangCPP,
-	".cc":   LangCPP,
-	".cxx":  LangCPP,
-	".hpp":  LangCPP,
-	".html": LangHTML,
-	".htm":  LangHTML,
-	".css":  LangCSS,
-	".xml":  LangHTML,
+	".bash":    LangShell,
+	".c":       LangC,
+	".cc":      LangCPP,
+	".cpp":     LangCPP,
+	".css":     LangCSS,
+	".cxx":     LangCPP,
+	".fish":    LangShell,
+	".gemspec": LangRuby,
+	".go":      LangGo,
+	".h":       LangC,
+	".hpp":     LangCPP,
+	".htm":     LangHTML,
+	".html":    LangHTML,
+	".java":    LangJava,
+	".js":      LangJS,
+	".json":    LangJSON,
+	".kt":      LangKotlin,
+	".kts":     LangKotlin,
+	".md":      LangMarkdown,
+	".php":     LangPHP,
+	".phtml":   LangPHP,
+	".py":      LangPython,
+	".rake":    LangRuby,
+	".rb":      LangRuby,
+	".rs":      LangRust,
+	".sh":      LangShell,
+	".swift":   LangSwift,
+	".toml":    LangTOML,
+	".ts":      LangTS,
+	".xml":     LangHTML,
+	".yaml":    LangYAML,
+	".yml":     LangYAML,
+	".zsh":     LangShell,
 }
 
 // shebangsTable maps interpreter basenames to languages. For
@@ -91,14 +107,15 @@ var extensionTable = map[string]Language{
 // case explicitly before consulting this table.
 var shebangsTable = map[string]Language{
 	"bash":    LangShell,
-	"sh":      LangShell,
-	"zsh":     LangShell,
 	"fish":    LangShell,
-	"python":  LangPython,
-	"python3": LangPython,
-	"python2": LangPython,
 	"node":    LangJS,
 	"nodejs":  LangJS,
+	"python":  LangPython,
+	"python2": LangPython,
+	"python3": LangPython,
+	"ruby":    LangRuby,
+	"sh":      LangShell,
+	"zsh":     LangShell,
 }
 
 // Detect classifies f's language using a four-step priority pipeline (F27):
