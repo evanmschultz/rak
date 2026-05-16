@@ -98,21 +98,38 @@ func AddDep(module string) error {
 	return nil
 }
 
-// Run executes `go run ./cmd/rak`. Pass arguments to rak after `--`, e.g.:
+// Run executes `go run ./cmd/rak`. Two invocation patterns are supported:
+//
+// Preferred — use the `--` separator to pass flag-prefixed arguments:
 //
 //	mage run -- --help
+//	mage run -- --version
 //	mage run -- ../
 //
-// Without `--`, no arguments are forwarded and rak reads stdin.
+// Fallback — set RAK_ARGS when the mage CLI rejects flag-prefixed args after `--`:
+//
+//	RAK_ARGS="--version" mage run
+//	RAK_ARGS="--human ." mage run
+//
+// Without `--` and without RAK_ARGS, no arguments are forwarded and rak
+// reads stdin.
 func Run() error {
 	args := []string{"run", "./cmd/rak"}
-	// Walk os.Args to find the literal "--" separator injected by mage.
-	// Everything after that token is forwarded verbatim to rak; everything
-	// before (including the mage target name) is dropped.
+	// Prefer `--` separator in os.Args (e.g. `mage run -- <args>`).
+	sepFound := false
 	for i, a := range os.Args {
 		if a == "--" {
 			args = append(args, os.Args[i+1:]...)
+			sepFound = true
 			break
+		}
+	}
+	// Fall back to RAK_ARGS env var (e.g. `RAK_ARGS="--version" mage run`).
+	// This path avoids the mage CLI exit-2 that occurs when flag-prefixed
+	// args are passed after `--` in some mage versions.
+	if !sepFound {
+		if extra := os.Getenv("RAK_ARGS"); extra != "" {
+			args = append(args, strings.Fields(extra)...)
 		}
 	}
 	if err := sh.RunV("go", args...); err != nil {
