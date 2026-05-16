@@ -77,7 +77,7 @@ Orch wrote this inline (tier B/C mixed — no planner subagent per WORKFLOW.md �
 
 ### Unit 9.2 — `--version` via fang.WithVersion
 
-- **State:** todo
+- **State:** done
 - **Paths:** `main/cmd/rak/main.go`, `main/cmd/rak/root_test.go`
 - **Packages:** `github.com/evanmschultz/rak/cmd/rak`
 - **Acceptance:**

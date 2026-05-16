@@ -1107,6 +1107,35 @@ func TestRootCmd_FilesField_SurvivesLabelDirectories(t *testing.T) {
 	}
 }
 
+// TestRootCmd_Version verifies that the root cobra command, when given the
+// version string that fang.WithVersion wires in main.go, prints output
+// containing "v0.1.0" when invoked with --version. The test sets cmd.Version
+// directly (mirroring what fang.WithVersion does to the cobra command) and
+// captures cobra's built-in version output via cmd.SetOut.
+func TestRootCmd_Version(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	// Mirror what fang.WithVersion("v0.1.0") does to the cobra command:
+	// cobra prints "<use> version <Version>" to OutOrStdout() when --version
+	// is passed and cmd.Version != "".
+	cmd.Version = version
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--version"})
+
+	// cobra's built-in --version handler returns nil (no os.Exit); safe to call.
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cmd.Execute --version: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "v0.1.0") {
+		t.Errorf("--version output does not contain %q; got:\n%s", "v0.1.0", got)
+	}
+}
+
 // TestRootCmd_TotalByLang_EndToEnd verifies that walkAndCount aggregates
 // TotalByLang correctly across multiple directories and that the JSON renderer
 // surfaces it under total_by_lang. The fixture has Go files in the root
