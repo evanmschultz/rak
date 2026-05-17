@@ -123,15 +123,21 @@ C, C++, CMakeLists.txt, CSS, Dockerfile, Go, HTML (also `.xml`), Java, JavaScrip
 
 ## Roadmap
 
-rak v0.1.x is deliberately small. Planned for v0.2:
+### v0.2 (in development)
 
-- **Broader polyglot language detection** — v0.1.x covers 22 languages; v0.2 expands toward templating, config, and data-format coverage.
-- **Token counting** (`--tokens`, tiktoken).
-- **Spinner / progress indication.**
-- **Parallel walk.**
+- **Broader polyglot language detection** — v0.1.x covers 22 languages; v0.2 adds ~30 more (programming, templating, config, data, build files).
+- **`--files-from <FILE>`** for pipe composition (e.g. `git ls-files '*.go' | rak --files-from -`).
+- **Lockfile exclusion by default** with `--include-lockfiles` opt-in — `go.sum`, `package-lock.json`, etc. hidden from counts by default so you see code your team wrote, not machine-generated dep manifests.
 - **GoReleaser binary releases** (v0.1.0 ships via `go install` only).
-- **`--include-untracked`** (opt-out from git-tracked-default).
-- **`--no-lockfiles`** denylist flag.
+
+### v0.3 (planned)
+
+- **Token counting** (`--tokens` via tiktoken `o200k_base`) — see how many LLM tokens your repo would cost.
+- **Parallel walk** (`--workers`) — 2–5× speedup on large repos.
+- **`--follow` symlink traversal** — opt-in symlink-following for monorepo cross-package symlinks.
+- **Cross-platform CI matrix** (Windows + macOS + Linux).
+- **Spinner / progress indication.**
+- **`--include-untracked`** (opt-in to count untracked files inside a git repo).
 
 ## License
 
