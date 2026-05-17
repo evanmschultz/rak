@@ -17,6 +17,7 @@ Add token counting — the **highest-value v0.2.0 feature** for rak's "wc++ for 
 - **Library**: `github.com/tiktoken-go/tokenizer`. Add via `mage addDep`.
 - **Default encoder**: `cl100k_base` (GPT-3.5 / GPT-4 family). Document the Claude-approximation caveat in README + `--help`.
 - **New flag**: `--tokens` opts into token counting (counting is slow vs byte-counting, so off by default; if dev later wants always-on, re-evaluate).
+- **New flag**: `--tokens-encoding` selects the tokenizer vocabulary: `cl100k` (default, GPT-3.5/4) or `o200k` (GPT-4o; closer Claude approximation). Validated in `PersistentPreRunE`. No-op without `--tokens`.
 - **New column** in TOON `directories` tabular block: `tokens` after `chars`.
 - **New JSON field**: `directoryJSON.Tokens int64` with `json:",omitempty"` so older consumers don't choke.
 - **New `--human` row**: `Tokens` line in each per-directory block + overall total.
@@ -27,7 +28,7 @@ Add token counting — the **highest-value v0.2.0 feature** for rak's "wc++ for 
 
 1. VHS demo: `main/docs/tapes/tokens.tape` + generated `main/docs/tokens.gif`. Embed near the README narrative section that introduces `--tokens`.
 2. README example: add `rak --tokens .` to "Common invocations" + a dedicated "Token counting" narrative section.
-3. Cobra `Example:` entry in `cmd/rak/root.go` so `rak --help` surfaces the invocation pattern.
+3. Cobra `Example:` entries in `cmd/rak/root.go` so `rak --help` surfaces both `rak --tokens .` and `rak --tokens --tokens-encoding o200k .`.
 
 ## Planner
 
@@ -39,48 +40,69 @@ Add token counting — the **highest-value v0.2.0 feature** for rak's "wc++ for 
 **Blocked by:** —
 
 **Scope.** Run `mage addDep github.com/tiktoken-go/tokenizer` to add the dep. Create
-`internal/tokens/tokens.go` exporting a `Codec` interface and a package-level `Get()` function
-that returns the shared `cl100k_base` encoder, cached via `sync.Once`.
+`internal/tokens/tokens.go` exporting a `Get(encoding string) (counting.TokenCounter, error)`
+function backed by two per-encoding singletons (`cl100k_base` and `o200k`), each initialized
+via its own `sync.Once`.
 
 **Design decisions (do not relitigate):**
 
-- `Codec` interface lives in `internal/tokens`, not in `internal/counting`, to avoid circular
-  import confusion. `internal/counting` defines its own minimal `TokenCounter` interface
-  (see B.2); `internal/tokens.Codec` satisfies it at the call site.
-- Package-level singleton: `var codec tokenizer.Codec` initialized once via `sync.Once`.
-  `Get() (tokenizer.Codec, error)` returns `(singleton, nil)` after init or the init error if
-  the first `tokenizer.Get(tokenizer.Cl100kBase)` call failed.
+- No rak-local `Codec` interface. `internal/tokens.Get(encoding string)` returns
+  `counting.TokenCounter` directly. `internal/tokens` imports `internal/counting` (a downward
+  import into a leaf — no cycle). Callers (`cmd/rak`) import both packages but hold the result
+  typed as `counting.TokenCounter`.
+- Dual-encoding singletons: two `sync.Once` + `tokenizer.Codec` pairs, one for `cl100k_base`
+  and one for `o200k`. `Get(encoding string) (counting.TokenCounter, error)` switches on the
+  encoding string to select the correct pair. Supported encoding strings: `"cl100k"` and
+  `"o200k"`. Any other value returns `fmt.Errorf("unsupported encoding: %q", encoding)`.
+- `Get` returns an error rather than panicking on unsupported encoding. The flag's PreRunE
+  validation (B.5) ensures only valid strings reach `Get`, so runtime errors here are
+  programmer errors — still, return the error rather than panic.
 - No `io.Reader` API exists in the library — callers must pass a `string`. The buffer-to-string
   read is the caller's responsibility (done in `internal/counting`, B.2).
 
 **Key API facts (Context7 /tiktoken-go/tokenizer):**
 
-- `tokenizer.Get(tokenizer.Cl100kBase) (tokenizer.Codec, error)` — returns shared encoder.
+- `tokenizer.Get(tokenizer.Cl100kBase) (tokenizer.Codec, error)` — returns shared encoder for
+  cl100k. `tokenizer.Get(tokenizer.O200kBase)` — returns shared encoder for o200k.
 - `codec.Count(text string) (int, error)` — returns token count without allocating the full
   token ID slice; cheaper than `Encode` for count-only use.
 - No streaming / `io.Reader` API. Entire file content must be read into a buffer first.
 - `tokenizer.Cl100kBase` is the constant for the GPT-3.5/4 encoding (approximation for Claude).
+- `tokenizer.O200kBase` is the constant for the GPT-4o encoding (closer Claude approximation).
+- At build time, builder confirms `tiktoken-go/tokenizer` last commit + open-issue count and
+  records the finding in `BUILDER_WORKLOG.md`. Also records first-call `tokenizer.Get` latency
+  measurement (expected: embedded BPE asset load; subsequent calls are cached).
 
 **Acceptance:**
 
 - `mage build` passes (entire module compiles including `internal/tokens`).
-- `mage test-pkg internal/tokens` (or `go test -race ./internal/tokens/...` via mage target)
-  passes with: `TestGet_ReturnsSingleton` (two calls return identical pointer), `TestGet_Empty`
-  (empty string → 0 tokens, no error), `TestGet_KnownFixture` (fixed ASCII string with a
-  pinned expected token count to detect library behavior change — e.g. `"hello world"` →
-  2 tokens in cl100k_base), `TestGet_Multibyte` (UTF-8 emoji string does not error).
-- The `internal/tokens` package has zero imports from other `internal/` packages (leaf node).
+- `mage test-pkg internal/tokens` passes with:
+  - `TestGet_ReturnsSingleton` (two `Get("cl100k")` calls return the same underlying pointer).
+  - `TestGet_Empty` (empty string, cl100k → 0 tokens, no error).
+  - `TestGet_KnownFixture_Cl100k` (fixed ASCII string, pinned expected token count —
+    e.g. `"hello world"` → 2 tokens in cl100k_base; record expected count in test comment).
+  - `TestGet_KnownFixture_O200k` (same or similar fixture, pinned count for o200k; counts may
+    differ from cl100k — record both).
+  - `TestGet_Multibyte` (UTF-8 emoji string, cl100k and o200k both do not error).
+  - `TestGet_UnsupportedEncoding` (`Get("gpt2")` returns non-nil error containing "unsupported").
+  - `TestGet_ConcurrentCount` (100 goroutines × 1000 iterations each calling
+    `Get("cl100k")` then `counter.Count("hello")` — must pass under `-race` flag). If the
+    test fails under race detector, B.1 wraps the `Count` call with a mutex before delivery.
+- The `internal/tokens` package imports `internal/counting` (for `counting.TokenCounter`) and
+  no other `internal/` package.
 
 **RiskNotes:**
 
 - `tokenizer.Get` goroutine safety for `Count`: BPE encoders are read-only after init; the
-  returned `Codec` is assumed goroutine-safe for concurrent `Count` calls. This assumption is
-  acceptable for v0.2.0 (single-goroutine walk). Parallel walk (Drop 8.1) should re-verify.
+  returned `Codec` is assumed goroutine-safe for concurrent `Count` calls. This is verified
+  in B.1 by `TestGet_ConcurrentCount` (100 goroutines × 1000 iters under `-race`). If the
+  test fails, B.1 wraps `Count` with a mutex rather than deferring the finding to Drop 8.1.
 - `tokenizer.Get` may do file I/O on first call (loading the BPE merge table from an embedded
-  asset). Subsequent calls via our singleton bypass this. First-call latency is acceptable.
-- Known fixture token counts (`TestGet_KnownFixture`) are regression anchors: if
-  tiktoken-go updates its BPE tables, these tests will alert. Record the expected count in a
-  comment so future maintainers can update intentionally.
+  asset). Subsequent calls via our singletons bypass this. Builder measures first-call latency
+  and records it in `BUILDER_WORKLOG.md`.
+- Known fixture token counts (`TestGet_KnownFixture_Cl100k`, `TestGet_KnownFixture_O200k`) are
+  regression anchors: if tiktoken-go updates its BPE tables, these tests will alert. Record the
+  expected count in a comment so future maintainers can update intentionally.
 
 ---
 
@@ -103,32 +125,43 @@ function to `internal/counting`. The existing `Count(io.Reader)` function is unc
 - `Tokens` carries `json:",omitempty"` via a struct tag so zero-value (non-`--tokens` runs)
   does not add a `"Tokens":0` key to JSON output. This preserves snapshot test compatibility
   for existing tests that pin `--json` output.
-- `TokenCounter` interface is defined in `internal/counting` to keep the package dep-free
-  from `internal/tokens`:
+- `TokenCounter` interface is defined in `internal/counting` (zero internal deps). The
+  returned value from `internal/tokens.Get()` satisfies this interface at the call site.
+  `internal/counting` itself does NOT import `internal/tokens` — dependency flows downward
+  only (tokens → counting). Interface definition:
   ```
   type TokenCounter interface {
       Count(text string) (int, error)
   }
   ```
-  `internal/tokens.Codec` satisfies this interface automatically (duck typing).
 - `CountWithTokens` reads the reader to completion via `io.ReadAll`, then calls
-  `tc.Count(string(buf))`. It also runs the same byte/line/word/char logic from `Count`.
+  `tc.Count(string(buf))`. The `io.ReadAll + string(buf)` pattern allocates the entire file
+  content twice (once as `[]byte`, once as `string`). Document this 2× peak-memory behavior
+  in the function's godoc comment as a known v0.2.0 characteristic; v0.2.1+ may chunk if a
+  user reports issues. It also runs the same byte/line/word/char logic from `Count`.
   Implementation may either call `Count` on the same bytes (reusing a `bytes.Reader`) or
   inline both paths in one pass. Either is acceptable; the builder chooses based on
   implementation simplicity.
 - `Count`'s existing comment "Field declaration order ... is load-bearing" should be updated
   to reflect the `Tokens` addition and the `omitempty` tag.
+- **Constraint: the builder MUST NOT modify the existing `Count` function body.** Any
+  refactoring that changes `Count`'s behavior (even byte-for-byte-equivalent rewrites) is
+  out of scope for B.2. All existing `Count` tests must pass byte-for-byte.
 
 **Acceptance:**
 
 - `mage build` passes.
-- `mage test-pkg internal/counting` passes with: all existing tests still pass; new tests for
-  `CountWithTokens`: `TestCountWithTokens_Empty` (0 tokens), `TestCountWithTokens_KnownText`
-  (pinned fixture), `TestCountWithTokens_Multibyte` (UTF-8 emoji). A `stubCounter` type
-  implementing `TokenCounter` is used in tests to avoid importing `internal/tokens` (keeps
-  counting tests dep-free).
-- `counting.Count` behavior is unchanged — returns `Tokens: 0` in all cases (the zero value
-  due to `omitempty` keeps JSON output clean for non-`--tokens` runs).
+- `mage test-pkg internal/counting` passes with: all existing tests still pass (zero modification
+  to existing `Count` behavior); new tests for `CountWithTokens`:
+  - `TestCountWithTokens_Empty` (0 tokens, no error).
+  - `TestCountWithTokens_KnownText` (pinned fixture with known token count).
+  - `TestCountWithTokens_Multibyte` (UTF-8 emoji string — no error, count ≥ 1).
+  - `TestCount_InvalidUTF8` (Latin-1 byte sequence passed as an `io.Reader` — must not panic;
+    either returns a count or a non-panic error from the tokenizer; document the behavior in
+    a test comment).
+  - A `stubCounter` type implementing `TokenCounter` is used in all new tests to avoid
+    importing `internal/tokens` (keeps counting tests dep-free).
+- `counting.Count` behavior is byte-for-byte unchanged — returns `Tokens: 0` in all cases.
 - JSON encoding of a `Counts{Bytes:5}` value produces `{"Bytes":5,"Lines":0,"Words":0,"Chars":0}`
   (Tokens omitted because zero) — existing JSON snapshot tests continue to pass without
   modification.
@@ -233,14 +266,27 @@ one package — one unit is appropriate given the mechanical nature of the addit
 **Acceptance:**
 
 - `mage build` passes.
+- **toon-go zero-column behavior must be verified BEFORE any other renderer change.** Builder
+  runs `mage run -- --help` then a quick manual `mage run -- .` (no flags) to observe whether
+  toon-go emits a zero-value `tokens` column. Finding is recorded in `BUILDER_WORKLOG.md` as
+  the first entry in this unit. If toon-go emits zero columns unconditionally, all TOON
+  snapshot tests plus ALL 7 existing VHS tapes must be re-recorded before this unit can close:
+  `default-toon.tape`, `human.tape`, `json.tape`, `lang-filter.tape`, `sort-files.tape`,
+  `max-files.tape`, `version.tape`.
 - `mage test-pkg internal/render` passes with all existing and new tests.
 - TOON output with `Tokens=1234` includes `tokens | 1234` column in `directories` array and
   `total.tokens | 1234` in the nested total block.
 - Human output with `Tokens=1234` includes a `Tokens: 1234` KV pair.
-- JSON output with `Tokens=1234` includes `"Tokens":1234` in the nested `"counts"` object.
+- JSON output with `Tokens=1234` includes `"tokens":1234` inside the nested `"counts":{}` object,
+  NOT as a sibling of `"path"`. Verify via `internal/render/json.go` `directoryJSON` struct
+  shape: `Tokens` must be a field of `counting.Counts` (embedded in `directoryJSON.Counts`),
+  never a top-level field directly on `directoryJSON`. Adding a top-level `Tokens` field to
+  `summary.Directory` would silently break existing JSON snapshot tests — this is explicitly
+  prohibited; the B.2 `Counts` field-extension approach is the only sanctioned path.
 - All three renderers suppress the Tokens field/column when `Tokens=0` (or, for TOON, emit it
   at zero if toon-go doesn't support omitempty — consistency with toon-go behavior is
   the acceptance bar, not a specific value).
+- Builder records the toon-go `omitempty` finding in `BUILDER_WORKLOG.md` before proceeding.
 
 ---
 
@@ -251,63 +297,104 @@ one package — one unit is appropriate given the mechanical nature of the addit
 **Packages:** `cmd/rak`
 **Blocked by:** B.3, B.4
 
-**Scope.** Wire `--tokens` flag, update `validSortKeys`, update `addCounts`, plumb token
-counting through `walkAndCount` and `countFile`, handle stdin path, update cobra `Example:`.
+**Scope.** Wire `--tokens` and `--tokens-encoding` flags, update `validSortKeys`, update
+`addCounts`, plumb token counting through `walkAndCount` and `countFile`, handle stdin path,
+update cobra `Example:`.
 
 **Changes in `root.go`:**
 
-1. Add `tokens bool` field to `rootFlags`.
+1. Add `tokens bool` and `tokensEncoding string` fields to `rootFlags`.
 2. Register `--tokens` flag:
    ```
    cmd.Flags().BoolVar(&flags.tokens, "tokens", false,
-       "count tokens using cl100k_base (GPT-3.5/4 approximation; slower than byte counting)")
+       "count tokens (approximation; cl100k is GPT-3.5/4 vocabulary, o200k is GPT-4o vocabulary,
+       both approximate Claude tokenization; slower than byte counting)")
    ```
-3. Add `"tokens"` to `validSortKeys` map.
-4. Pass `flags.tokens` into `runDirectoryOpts` (new field `countTokens bool`).
-5. Pass `flags.tokens` into the stdin path: when `flags.tokens` is true, call
-   `counting.CountWithTokens(c.InOrStdin(), tc)` instead of `counting.Count(c.InOrStdin())`.
-   Requires obtaining the `tokens.Codec` singleton via `tokens.Get()`.
-6. Update `addCounts` to sum `Tokens` field:
+3. Register `--tokens-encoding` flag:
    ```
-   return counting.Counts{
-       Bytes:  a.Bytes + b.Bytes,
-       Lines:  a.Lines + b.Lines,
-       Words:  a.Words + b.Words,
-       Chars:  a.Chars + b.Chars,
-       Tokens: a.Tokens + b.Tokens,
-   }
+   cmd.Flags().StringVar(&flags.tokensEncoding, "tokens-encoding", "cl100k",
+       "tokenizer encoding for --tokens: cl100k (default, GPT-3.5/4) or o200k (GPT-4o)")
    ```
-7. Update `walkAndCount` signature or internal plumbing: when `countTokens` is true, call
-   `counting.CountWithTokens(rc, tc)` inside `countFile` (or pass the codec into `countFile`).
-   Since `countFile` is a local function, updating its signature to accept an optional
-   `tokens.Codec` (nil = no token counting) is the cleanest approach.
-8. Update cobra `Example:` to add:
-   ```
-   # Count tokens (cl100k_base; Claude approximation)
-   rak --tokens .
-   ```
-9. Update `PersistentPreRunE` sort-key validation error message to include "tokens" in the
-   valid-key list.
+4. Add `--tokens-encoding` validation to `PersistentPreRunE` (alongside existing sort-key
+   validation): if `flags.tokens` is true and `flags.tokensEncoding` is not in
+   `{"cl100k", "o200k"}`, return `fmt.Errorf("--tokens-encoding %q is not valid; use cl100k
+   or o200k", flags.tokensEncoding)`.
+5. Add `--sort tokens` requires `--tokens` check to `PersistentPreRunE`: if `flags.sort ==
+   "tokens"` and `!flags.tokens`, return `fmt.Errorf("--sort tokens requires --tokens")`.
+6. Add `"tokens"` to `validSortKeys` map.
+7. Pass `flags.tokens` and `flags.tokensEncoding` into `runDirectoryOpts` (new fields
+   `countTokens bool`, `tokensEncoding string`).
+8. Call `tokens.Get(flags.tokensEncoding)` exactly once in `runRoot`, immediately after
+   `resolveRenderer`, when `flags.tokens` is true. Wrap error:
+   `fmt.Errorf("init token counter: %w", err)`. Store result as `runDirectoryOpts.tokenCounter`
+   (`counting.TokenCounter`; nil when `--tokens` is false).
+9. Pass `flags.tokens` into the stdin path: when `flags.tokens` is true and `tokenCounter`
+   is non-nil, call `counting.CountWithTokens(c.InOrStdin(), tokenCounter)` instead of
+   `counting.Count(c.InOrStdin())`.
+10. Update `addCounts` to sum `Tokens` field:
+    ```
+    return counting.Counts{
+        Bytes:  a.Bytes + b.Bytes,
+        Lines:  a.Lines + b.Lines,
+        Words:  a.Words + b.Words,
+        Chars:  a.Chars + b.Chars,
+        Tokens: a.Tokens + b.Tokens,
+    }
+    ```
+11. Update `walkAndCount` / `countFile`: `countFile` accepts an optional `counting.TokenCounter`
+    (nil = no token counting) so the `internal/counting` interface drives the boundary. When
+    non-nil, call `counting.CountWithTokens(rc, tokenCounter)`; otherwise call `counting.Count(rc)`.
+12. Update cobra `Example:` to add:
+    ```
+    # Count tokens (cl100k_base; Claude/GPT-3.5/4 approximation)
+    rak --tokens .
+
+    # Count tokens using GPT-4o vocabulary (o200k; closer Claude approximation)
+    rak --tokens --tokens-encoding o200k .
+    ```
+13. Update `PersistentPreRunE` sort-key validation error message to include "tokens" in the
+    valid-key list.
 
 **Design decisions (do not relitigate):**
 
-- `tokens.Get()` is called once in `runRoot`/`runDirectory` when `flags.tokens` is true;
-  the returned `Codec` is passed down rather than re-called per file.
+- `tokens.Get(flags.tokensEncoding)` is called once in `runRoot` when `flags.tokens` is true;
+  the returned `counting.TokenCounter` is stored on `runDirectoryOpts.tokenCounter` and
+  shared across the whole walk. No per-file re-init.
 - `countFile` accepts an optional `counting.TokenCounter` (nil = no token counting) so the
   `internal/counting` package interface drives the boundary — `cmd/rak` imports both
   `internal/tokens` (for `tokens.Get()`) and `internal/counting` (for `CountWithTokens`
-  and the `TokenCounter` interface), and passes the concrete `tokens.Codec` as the interface.
-- No goroutine safety concern in v0.2.0 (single-threaded walk).
+  and the `TokenCounter` interface).
+- `--tokens-encoding` PreRunE validation runs only when `--tokens` is true; the flag is a
+  no-op without `--tokens` and must not error in that case.
+- No goroutine safety concern in v0.2.0 (single-threaded walk; B.1 verified concurrency
+  safety regardless).
+- Cross-stream sequencing: B.5 lands first in `cmd/rak/root.go`. Stream C's `--workers`/
+  `--follow` flag-registration block rebases against B.5. Stream D's `--files-from` rebases
+  against C. Each subsequent stream's flag-registration block is appended below the prior;
+  PreRunE checks chained in declaration order.
 
 **Acceptance:**
 
 - `mage build` passes.
-- `mage test-pkg cmd/rak` passes with: all existing tests; new tests for `--tokens` flag
-  parsing; new integration test asserting that `rak --tokens <fixture>` produces non-zero
-  token counts in the output; test that `rak --sort tokens .` does not error.
-- `rak --help` shows the `--tokens` flag with the approximation caveat in its usage line.
-- `rak --sort tokens .` sorts by token count descending.
-- `rak --sort tokens --sort-asc .` sorts ascending.
+- `mage test-pkg cmd/rak` passes with: all existing tests; and:
+  - `TestFlags_Tokens_Parse` — `--tokens` flag parsed to `rootFlags.tokens == true`.
+  - `TestFlags_TokensEncoding_Default` — omitting `--tokens-encoding` yields `"cl100k"`.
+  - `TestFlags_TokensEncoding_O200k` — `--tokens-encoding o200k` yields `"o200k"`.
+  - `TestFlags_TokensEncoding_Invalid` — `--tokens-encoding gpt2` with `--tokens` returns
+    error containing `"--tokens-encoding"` from `PersistentPreRunE`.
+  - `TestFlags_TokensEncodingWithoutTokens` — `--tokens-encoding o200k` alone (no `--tokens`)
+    does not error (the encoding flag is a no-op without `--tokens`).
+  - `TestFlags_SortTokensRequiresTokens` — `rak --sort tokens .` without `--tokens` returns
+    error `--sort tokens requires --tokens` from `PersistentPreRunE`.
+  - New integration test: `rak --tokens <fixture>` produces non-zero token counts in output.
+- `rak --help` shows the `--tokens` flag with the approximation caveat including both
+  vocabulary descriptions: "cl100k is GPT-3.5/4 vocabulary, o200k is GPT-4o vocabulary,
+  both approximate Claude tokenization."
+- `rak --help` shows the `--tokens-encoding` flag listing valid values.
+- Verified via `mage run -- --help | grep -- '--tokens'` and
+  `mage run -- --help | grep -- '--tokens-encoding'` in worklog.
+- `rak --tokens --sort tokens .` sorts by token count descending.
+- `rak --tokens --sort tokens --sort-asc .` sorts ascending.
 - `rak --tokens <stdin_fixture>` (pipe path) includes Tokens in the rendered output.
 - `rak --sort badkey .` error message mentions "tokens" as a valid key.
 - `addCounts` correctly accumulates Tokens (verified by integration test showing total equals
@@ -335,23 +422,56 @@ documentation and recording artifacts.
 **README (`README.md`):**
 - Add `rak --tokens .` to the "Common invocations" table or list.
 - Add a "Token counting" narrative section (after the existing counting section): explain
-  `--tokens`, note the `cl100k_base` encoder, document the **Claude-approximation caveat**
-  verbatim: "Token counts use the `cl100k_base` (GPT-3.5/4) vocabulary. This is an
-  approximation for Claude — counts will differ from Claude's actual billing token count
-  but serve as a useful ballpark."
+  `--tokens` and `--tokens-encoding`, note both encoders, document the **Claude-approximation
+  caveat** verbatim: "Token counts use the `cl100k_base` (GPT-3.5/4) vocabulary by default.
+  Use `--tokens-encoding o200k` for the GPT-4o vocabulary (a closer approximation for Claude).
+  These are approximations — counts will differ from Claude's actual billing token count but
+  serve as a useful ballpark."
 - Embed `docs/tokens.gif` near the narrative section.
 
 **Acceptance:**
 
 - `docs/tokens.tape` exists and is syntactically valid (runnable with `vhs docs/tapes/tokens.tape`).
 - `docs/tokens.gif` exists and is a valid GIF file (non-zero size).
-- `README.md` contains the "Token counting" section with the Claude-approximation caveat.
+- `README.md` contains the "Token counting" section with the Claude-approximation caveat
+  covering both `cl100k` and `o200k` encodings.
 - `README.md` "Common invocations" includes `rak --tokens .`.
-- `rak --help` (via cobra `Example:` set in B.5) shows `rak --tokens .` — this criterion
-  is a carry-over verification, not a new change in this unit.
+- `rak --help` (via cobra `Example:` set in B.5) shows both `rak --tokens .` and
+  `rak --tokens --tokens-encoding o200k .`. Verified via
+  `mage run -- --help | grep -- '--tokens'` in worklog — not just assumed from B.5 passing.
+- **If B.4 determined that toon-go emits zero-value columns unconditionally**, ALL 7 existing
+  VHS tapes must be re-recorded in this unit before close (the toon column shape has changed):
+  `default-toon.tape`, `human.tape`, `json.tape`, `lang-filter.tape`, `sort-files.tape`,
+  `max-files.tape`, `version.tape`. Builder checks the `BUILDER_WORKLOG.md` toon-go finding
+  from B.4 before deciding whether re-recording is required.
 
 ## Notes
 
-**Cross-stream coordination**: Streams B, C, D all add new flags to `cmd/rak/root.go`. The planner should make the cmd/rak flag-wiring unit explicit and self-contained so the orchestrator can serialize it against C and D at build time. Internal-package work (`internal/tokens/`, `internal/counting`, `internal/summary`, `internal/render/*`) is parallel-safe with the other streams.
+**Cross-stream root.go sequencing**: Streams B, C, D all add new flags to `cmd/rak/root.go`.
+Ordering: B.5 (token flags) lands first. Stream C's `--workers`/`--follow` flag-registration
+block rebases against B.5. Stream D's `--files-from` flag-registration block rebases against
+C. Each subsequent stream's flag-registration block is appended below the prior; PreRunE
+checks are chained in declaration order. Internal-package work (`internal/tokens/`,
+`internal/counting`, `internal/summary`, `internal/render/*`) is parallel-safe with the other
+streams.
 
-**Performance note**: tokenization is meaningfully slower than byte/line counting. Cache the encoder across files (`tokenizer.Get(encoding)` returns a shared instance); do not re-instantiate per file. Tests must cover empty file, ASCII, multibyte (UTF-8 emoji), and a known-token-count fixture to detect regression if tiktoken-go updates change behavior.
+**Performance note**: tokenization is meaningfully slower than byte/line counting. Cache the
+encoder across files (`tokenizer.Get(encoding)` returns a shared instance via our singletons);
+do not re-instantiate per file. Tests must cover empty file, ASCII, multibyte (UTF-8 emoji),
+known-token-count fixtures (one per encoding), and invalid UTF-8 (Latin-1 byte sequences) to
+detect panics or regressions if tiktoken-go updates change behavior.
+
+**Dual encoder**: `--tokens-encoding` defaults to `cl100k` (GPT-3.5/4 vocabulary). `o200k`
+(GPT-4o vocabulary) is an opt-in for users who want a closer Claude approximation. Both are
+approximations. PreRunE rejects any other value. The flag is a no-op without `--tokens`.
+
+**toon-go zero-column finding**: If B.4's builder confirms toon-go emits zero-value int64
+columns for all numeric fields regardless of value, then the toon output shape changes for
+ALL non-`--tokens` runs (a `tokens | 0` column appears). In that case ALL 7 existing VHS
+tapes must be re-recorded in B.6 and all existing TOON snapshot tests in `internal/render`
+must be updated in B.4. This is the highest-risk finding in the drop — builder prioritizes
+the verification in B.4 Round 1 before any other B.4 work.
+
+**`TestGet_KnownFixture` pinned counts**: record the expected integer in a test comment with
+the date verified. If tiktoken-go updates its BPE tables, the test will fail with the old
+count — update intentionally, not silently.
