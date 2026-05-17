@@ -307,8 +307,11 @@ README "Languages detected": append the 11 new names alphabetically (CSV, dotenv
 **Packages:** `github.com/evanmschultz/rak/internal/lang`
 
 **Scope:**
-Add 6 new `Language` constants (all new, not yet in tree). Vagrantfile and Brewfile
-re-use `LangRuby` (same pattern as Gemfile/Rakefile already in tree).
+Add 5 new `Language` constants (all new, not yet in tree). Vagrantfile and Brewfile
+re-use `LangRuby` (same pattern as Gemfile/Rakefile already in tree). Procfile is
+intentionally NOT given a Language constant — files named `Procfile` count as bytes/lines/words
+but appear as undetected (no `--lang procfile` filter, no entry in `total_by_lang`). YAGNI:
+nobody asked to filter by Procfile specifically.
 
 New constants:
 - `LangBazel Language = "bazel"` — `BUILD`, `BUILD.bazel`, `WORKSPACE` special filenames + `.bzl` extension
@@ -316,9 +319,10 @@ New constants:
 - `LangJust Language = "just"` — `Justfile`, `justfile` special filenames
 - `LangEarth Language = "earth"` — `Earthfile` special filename (Earthly build tool)
 - `LangCaddy Language = "caddy"` — `Caddyfile` special filename
-- `LangProcfile Language = "procfile"` — `Procfile` special filename
 
-No new Language constant for Vagrantfile/Brewfile — they map to `LangRuby` (same as Gemfile). Add to `specialFilenames`:
+No new Language constant for Vagrantfile/Brewfile/Procfile. Vagrantfile/Brewfile map to `LangRuby` (same as Gemfile). Procfile is undetected.
+
+Add to `specialFilenames`:
 - `"build"` → `LangBazel`
 - `"build.bazel"` → `LangBazel`
 - `"workspace"` → `LangBazel`
@@ -326,7 +330,6 @@ No new Language constant for Vagrantfile/Brewfile — they map to `LangRuby` (sa
 - `"justfile"` → `LangJust`
 - `"earthfile"` → `LangEarth`
 - `"caddyfile"` → `LangCaddy`
-- `"procfile"` → `LangProcfile`
 - `"vagrantfile"` → `LangRuby`
 - `"brewfile"` → `LangRuby`
 
@@ -338,12 +341,13 @@ Add grammar entries to `grammarTable`:
 - `LangJust`: `linePrefix: "#"` (Justfile uses `#` comments)
 - `LangEarth`: `linePrefix: "#"` (Earthly syntax uses `#` comments)
 - `LangCaddy`: `linePrefix: "#"` (Caddyfile uses `#` comments)
-- `LangProcfile`: absent from grammarTable (no comment syntax; all non-blank = Code)
 
 Tests: add `TestDetect_BuildTaskFiles` table-driven test covering all new special
 filenames (e.g. `BUILD`, `BUILD.bazel`, `WORKSPACE`, `Jenkinsfile`, `Justfile`,
-`justfile`, `Earthfile`, `Caddyfile`, `Procfile`, `Vagrantfile`, `Brewfile`) and the
-`.bzl` extension. Add `TestSplit_BuildFiles` covering Bazel `#` comment, Groovy `//`
+`justfile`, `Earthfile`, `Caddyfile`, `Vagrantfile`, `Brewfile`) and the
+`.bzl` extension. Also include a `Procfile` row asserting it returns `LangUnknown`
+(or whatever the default-no-detection constant is) to lock in the YAGNI cut decision.
+Add `TestSplit_BuildFiles` covering Bazel `#` comment, Groovy `//`
 comment and `/* */` block comment.
 
 Also add a `--lang bazel` smoke to `TestDetect_BuildTaskFiles` (inside
@@ -354,8 +358,9 @@ touch `cmd/rak/integration_test.go` or any `cmd/rak` path. No A.5 Paths or Packa
 expansion needed.
 
 README "Languages detected": append Bazel, Caddyfile, Earthfile, Groovy (Jenkinsfile),
-Justfile, Procfile — in alphabetical order. Vagrantfile and Brewfile map to Ruby (already
+Justfile — in alphabetical order. Vagrantfile and Brewfile map to Ruby (already
 listed); note in the README description that these filenames are detected as Ruby.
+Do NOT list Procfile — it is intentionally undetected per the YAGNI cut.
 
 **Acceptance:**
 1. `mage test` passes.
@@ -365,12 +370,11 @@ listed); note in the README description that these filenames are detected as Rub
 5. `Detect` on `Justfile` and `justfile` both return `LangJust`.
 6. `Detect` on `Vagrantfile` returns `LangRuby`.
 7. `Detect` on `Brewfile` returns `LangRuby`.
-8. `Detect` on `Procfile` returns `LangProcfile`.
+8. `Detect` on `Procfile` returns the undetected/default Language (e.g. `LangUnknown`) — NOT a Procfile-specific constant.
 9. `Split` with `LangGroovy` on `// comment` + `/* block */` input counts correct Comment lines.
 10. `Split` with `LangBazel` on `# comment` counts 1 Comment line.
-11. `Split` with `LangProcfile` on `web: bundle exec rails server` counts 1 Code line.
-12. README lists the 6 new language names (Bazel, Caddyfile, Earthfile, Groovy, Justfile, Procfile).
-13. `mage ci` passes from `main/`.
+11. README lists the 5 new language names (Bazel, Caddyfile, Earthfile, Groovy, Justfile). Procfile is intentionally absent.
+12. `mage ci` passes from `main/`.
 
 **Blocked by:** A.4
 
@@ -398,11 +402,11 @@ listed); note in the README description that these filenames are detected as Rub
 
 **HCL triple-comment forms**: HCL accepts `#`, `//`, and `/* */`. The grammar struct accommodates this via `linePrefix="#"`, `linePrefix2="//"`, `blockOpen="/*"`, `blockClose="*/"`.
 
-**Vagrantfile / Brewfile / Gemfile / Rakefile symmetry**: Vagrantfile and Brewfile map to `LangRuby` (same as existing Gemfile/Rakefile pattern). No new Language constant for any of these — they are Ruby DSLs, and the existing `LangRuby` constant is correct. Procfile is different: it is its own deployment-config micro-format (key: command pairs), not a Ruby DSL, and has no comment syntax. Procfile gets its own `LangProcfile` constant for `--lang procfile` filtering. This asymmetry is intentional.
+**Vagrantfile / Brewfile / Gemfile / Rakefile symmetry**: Vagrantfile and Brewfile map to `LangRuby` (same as existing Gemfile/Rakefile pattern). No new Language constant — they are Ruby DSLs, and the existing `LangRuby` constant is correct. Procfile is intentionally undetected per the YAGNI cut (2026-05-16): nobody asked to filter by Procfile specifically, and Procfile lines are not Ruby. Files named `Procfile` count as bytes/lines/words but appear as `LangUnknown` (no `--lang procfile` filter, no entry in `total_by_lang`). If a user asks for Procfile detection later, ship in v0.2.1+.
 
 **Groovy constant naming**: `LangGroovy` is used (not `LangJenkinsfile`) because Groovy is the actual language. If standalone `.groovy` files are added in a future drop, this constant is already correct.
 
-**Procfile**: No standard comment syntax. Language constant `LangProcfile` is created for `--lang procfile` filtering, but `grammarTable` has no entry — all non-blank lines classify as Code. Same applies to `LangCSV`, `LangTSV`, `LangJSONL`: no comment syntax in their specs; all non-blank lines are Code by default when absent from `grammarTable`.
+**Grammar-less data formats**: `LangCSV`, `LangTSV`, `LangJSONL` have no comment syntax in their specs; all non-blank lines classify as Code by default when absent from `grammarTable`. Procfile is undetected entirely (no constant, no grammar) per the YAGNI cut.
 
 **`.env` extension handling**: `filepath.Ext(".env")` returns `".env"` in Go (the leading dot is the extension separator for a basename-only dotfile). Adding `".env"` to `extensionTable` correctly matches files named `.env`, `development.env`, `config.env`, etc.
 
