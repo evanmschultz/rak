@@ -89,11 +89,7 @@ After the scan loop exits (step 8): call `scanner.Err()`. If non-nil, yield
 `(nil, fmt.Errorf("lister: files-from: scanner: %w", err))` before the
 iterator function returns.
 
-**Scanner buffer:** immediately after `bufio.NewScanner(r)`, call
-`scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)` to raise the per-line
-cap to 1MiB. Default 64KiB is sufficient for real-world paths, but the 1MiB
-cap costs nothing and avoids surprising behaviour on unusual inputs. Paths
-exceeding 1MiB are not supported in v0.2.0.
+**Scanner buffer:** use the default `bufio.NewScanner(r)` buffer (64KiB per line). No `scanner.Buffer` call needed — real-world paths are nowhere near 64KiB (most filesystems cap path components at 255 chars, total path at ~4KiB). If a user reports an issue with extremely long paths, bump in v0.2.1.
 
 Export the type so `lister_test.go` can type-assert on it (same convention as
 `GitLister`, `WalkLister`, `SingleFileLister`).
@@ -142,7 +138,7 @@ filesystem.
   yields `(nil, err)` before the iterator terminates.
 - The `#draft.md` test proves hash-prefixed file names are passed through
   without filtering.
-- Per-line cap is 1MiB (`scanner.Buffer` call present in the implementation).
+- Per-line cap is the default `bufio.Scanner` 64KiB (no `scanner.Buffer` call needed). Documented as v0.2.0 limit.
 
 ---
 
