@@ -129,7 +129,6 @@ rak v0.1.x is deliberately small. Planned for v0.2:
 - **Token counting** (`--tokens`, tiktoken).
 - **Spinner / progress indication.**
 - **Parallel walk.**
-- **`--follow` symlinks.**
 - **GoReleaser binary releases** (v0.1.0 ships via `go install` only).
 - **`--include-untracked`** (opt-out from git-tracked-default).
 - **`--no-lockfiles`** denylist flag.
