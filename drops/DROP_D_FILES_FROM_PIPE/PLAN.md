@@ -16,9 +16,9 @@ Add `--files-from <FILE>` for pipe composition — the missing link between rak 
 
 - **New flag**: `--files-from <FILE>`. Use `-` (literal hyphen) to read from stdin. Reads newline-separated paths; each path is counted as a single file (re-uses the existing `SingleFileLister` machinery from v0.1.4).
 - **Stdin sentinel**: bare positional stdin (`cat README.md | rak`) is unchanged — still single-stream wc-parity counting. `--files-from -` is the explicit opt-in to "read a list of paths from stdin."
-- **Path interpretation**: paths are interpreted relative to the current working directory. Empty lines are skipped. Lines starting with `#` are treated as comments and skipped (standard Unix convention; matches `git rev-list --stdin` precedent).
-- **Path normalization**: each path goes through `path.Clean` + the same regular-file check from v0.1.4's `SingleFileLister`.
-- **Error semantics**: missing file → friendly error (`not a regular file or directory: <path>`); per-line errors aggregate via `errors.Join` so one bad path doesn't crash the whole stream.
+- **Path interpretation**: paths are interpreted relative to the current working directory. Empty lines are skipped. Each non-empty line is a path. No comment syntax — users who want comments can pre-filter with `grep -v '^#' | rak --files-from -`.
+- **Path normalization**: each path goes through `filepath.Clean` + the same regular-file check from v0.1.4's `SingleFileLister`.
+- **Error semantics**: missing file → friendly error (`not a regular file: <path>`); per-line errors are yielded as `(nil, err)` pairs and iteration continues so one bad path does not crash the whole stream.
 
 **Unblocks the canonical Unix-composition workflows:**
 - `rg --files | rak --files-from -`
@@ -39,9 +39,7 @@ Add `--files-from <FILE>` for pipe composition — the missing link between rak 
 
 Four units, linear chain D.1 → D.2 → D.3 → D.4.
 
-Design decisions pending dev confirmation are in `## Notes` below and must be
-resolved in Phase 3 before build starts. Builders should not unilaterally
-decide Q1–Q7.
+Design decisions are resolved below in `## Notes`. No open dev-signoff items remain before build starts.
 
 ---
 
@@ -70,8 +68,9 @@ func NewFilesFromLister(r io.Reader) *FilesFromLister
 
 1. Check `ctx.Err()` at the top of each scan iteration — terminate iteration
    with `yield(nil, ctx.Err())` if cancelled.
-2. `bufio.Scanner` over `r`. Each line is: trim whitespace, skip if empty,
-   skip if starts with `#` (comment per Unix convention + git precedent).
+2. `bufio.Scanner` over `r`. Each line is: trim whitespace, skip if empty.
+   No comment syntax — every non-empty line is a path, including lines that
+   start with `#` (e.g. `#draft.md`, `#merge.bak#`).
 3. `filepath.Clean` the line (OS-native clean, not `path.Clean`, since we will
    call `filepath.Abs` next which requires OS-native separators).
 4. `filepath.Abs` relative to CWD. CWD must be resolved inside `List()` (not
@@ -79,11 +78,22 @@ func NewFilesFromLister(r io.Reader) *FilesFromLister
    at list time.
 5. `os.Stat(absPath)` — if the path does not exist or is not a regular file,
    yield `(nil, fmt.Errorf("lister: files-from: %q is not a regular file: %w",
-   line, err))` and continue (per-line error aggregation via the iterator
-   contract — the walk continues past bad lines).
+   line, err))` and continue (per-line error — the walk continues past bad
+   lines; matches the FileLister iterator contract used by GitLister and
+   WalkLister).
 6. `dir, base := filepath.Dir(absPath), filepath.Base(absPath)`.
    `yield(fileset.NewFile(os.DirFS(dir), base, base), nil)`.
 7. Check `yield` return value — if `false`, stop (F14 carry-over).
+
+After the scan loop exits (step 8): call `scanner.Err()`. If non-nil, yield
+`(nil, fmt.Errorf("lister: files-from: scanner: %w", err))` before the
+iterator function returns.
+
+**Scanner buffer:** immediately after `bufio.NewScanner(r)`, call
+`scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)` to raise the per-line
+cap to 1MiB. Default 64KiB is sufficient for real-world paths, but the 1MiB
+cap costs nothing and avoids surprising behaviour on unusual inputs. Paths
+exceeding 1MiB are not supported in v0.2.0.
 
 Export the type so `lister_test.go` can type-assert on it (same convention as
 `GitLister`, `WalkLister`, `SingleFileLister`).
@@ -97,11 +107,13 @@ to the existing file per package convention):
 
 - `TestFilesFromLister_EmptyReader` — `strings.NewReader("")` yields zero
   files, zero errors.
-- `TestFilesFromLister_AllComments` — reader with only `#` lines yields zero
-  files, zero errors.
-- `TestFilesFromLister_SkipsEmptyLines` — interleaved empty lines are skipped.
-- `TestFilesFromLister_MixedWithComments` — mix of valid paths, empty lines,
-  `#` comment lines: only the valid paths produce files, in order.
+- `TestFilesFromLister_HashPrefixedFileWorks` — a file on disk actually named
+  `#draft.md` (created via `t.TempDir()` + `os.WriteFile`) is yielded
+  successfully. Proves that `#`-prefixed paths are not treated as comments.
+- `TestFilesFromLister_SkipsEmptyLines` — interleaved empty lines are skipped;
+  valid paths around them are still yielded.
+- `TestFilesFromLister_MixedPaths` — mix of valid paths and empty lines: only
+  the valid paths produce files, in order.
 - `TestFilesFromLister_MissingFile` — a path that does not exist on disk yields
   a `(nil, err)` pair; the walk continues and subsequent valid paths still
   yield files.
@@ -110,21 +122,27 @@ to the existing file per package convention):
 - `TestDetect_*` for `FilesFromLister` via `Detect` is NOT needed — `Detect`
   is not changed; `FilesFromLister` is constructed directly by the caller.
 
-For `TestFilesFromLister_MixedWithComments` and `TestFilesFromLister_MissingFile`:
-use `t.TempDir()` + `os.WriteFile` to create real on-disk files the lister can
-stat. Do NOT use `fstest.MapFS` — `FilesFromLister` calls `os.Stat` and
-`os.DirFS`, which operate on the real filesystem.
+For `TestFilesFromLister_HashPrefixedFileWorks`, `TestFilesFromLister_MixedPaths`,
+and `TestFilesFromLister_MissingFile`: use `t.TempDir()` + `os.WriteFile` to
+create real on-disk files the lister can stat. Do NOT use `fstest.MapFS` —
+`FilesFromLister` calls `os.Stat` and `os.DirFS`, which operate on the real
+filesystem.
 
 **Acceptance criteria:**
 
 - `mage test ./internal/lister/...` passes with `-race`.
 - `mage build` passes (package compiles cleanly).
-- All five scenarios above are covered by a named test.
+- All six scenarios above are covered by a named test.
 - Context-cancellation test verifies iteration terminates without panic.
 - Per-line error for a missing file does NOT abort the iterator — the next
   valid path is still yielded.
 - CWD resolution happens in `List()`, not the constructor (important for test
   isolation).
+- `scanner.Err()` is checked after the scan loop; a mid-stream scanner error
+  yields `(nil, err)` before the iterator terminates.
+- The `#draft.md` test proves hash-prefixed file names are passed through
+  without filtering.
+- Per-line cap is 1MiB (`scanner.Buffer` call present in the implementation).
 
 ---
 
@@ -133,7 +151,7 @@ stat. Do NOT use `fstest.MapFS` — `FilesFromLister` calls `os.Stat` and
 **State:** todo
 **Paths:** `cmd/rak/root.go`
 **Packages:** `cmd/rak` (package `main`)
-**Blocked by:** D.1
+**Blocked by:** D.1, and serialize after C's `--workers` / `--follow` flag-registration block (D's `--files-from` flag is appended last to the flag block)
 
 **What to build:**
 
@@ -150,14 +168,31 @@ stat. Do NOT use `fstest.MapFS` — `FilesFromLister` calls `os.Stat` and
    )
    ```
 
-3. Mutual-exclusion guard in `PersistentPreRunE` (before `RunE`, after the
-   sort-key check):
+3. Mutual-exclusion guards in `PersistentPreRunE` (before `RunE`, after the
+   sort-key check). Two guards:
 
+   **Important — signature change required:** the existing `PersistentPreRunE`
+   has both params blanked out (`_ *cobra.Command, _ []string`). To check
+   `len(args)` in the positional-conflict guard, rename the second param:
+   `func(_ *cobra.Command, args []string) error`.
+
+   Guard A — positional argument conflict:
    ```go
    if flags.filesFrom != "" && len(args) > 0 {
        return fmt.Errorf("cannot combine --files-from with a positional path argument")
    }
    ```
+
+   Guard B — `--no-gitignore` conflict:
+   ```go
+   if flags.filesFrom != "" && flags.noGitignore {
+       return fmt.Errorf("--no-gitignore is meaningless with --files-from: the caller controls which files are listed")
+   }
+   ```
+
+   Both guards run in `PersistentPreRunE` (hard error, not a warning). This
+   matches the `ErrNoGitignoreInRepo` pattern from v0.1.3 — conflicting flags
+   return an error immediately rather than silently no-oping.
 
 4. Add two `Example:` entries to the cobra command's `Example` block:
 
@@ -180,8 +215,12 @@ stat. Do NOT use `fstest.MapFS` — `FilesFromLister` calls `os.Stat` and
        }
        defer closer()
        source := lister.NewFilesFromLister(r)
+       rootLabel := flags.filesFrom
+       if flags.filesFrom == "-" {
+           rootLabel = "<stdin>"
+       }
        return runDirectory(ctx, c.OutOrStdout(), source, runDirectoryOpts{
-           rootLabel: flags.filesFrom,
+           rootLabel: rootLabel,
            binary:    flags.binary,
            langs:     flags.langs,
            sortKey:   flags.sort,
@@ -202,17 +241,24 @@ stat. Do NOT use `fstest.MapFS` — `FilesFromLister` calls `os.Stat` and
    func openFilesFrom(value string, stdin io.Reader) (io.Reader, func(), error)
    ```
 
-   `rootLabel` passed to `runDirectory` is `flags.filesFrom` (e.g. `"-"` or
-   the filename). This is subject to dev confirmation of Q3.
-
-6. `--no-gitignore` + `--files-from`: since `Detect` is never called in this
-   branch, `ErrNoGitignoreInRepo` is never raised. `--no-gitignore` silently
-   does nothing. The flag usage string for `--no-gitignore` does not need to
-   change — it already says "during the walk" which implies walk mode.
+6. `--no-gitignore` + `--files-from` is a hard error (Guard B in step 3 above).
+   `Detect` is never called in the `--files-from` branch, so the `--no-gitignore`
+   flag has no effect on filtering. Returning an error surfaces this immediately
+   rather than silently misleading the user.
 
 7. `--depth` + `--files-from`: `listerOpts(flags)` is not called in the
-   `--files-from` branch, so `--depth` is silently ignored. No warning. Subject
-   to dev confirmation of Q2.
+   `--files-from` branch, so `--depth` is silently ignored. No warning (resolved;
+   see Notes § Q2).
+
+8. `--include` / `--exclude` + `--files-from`: these glob filters are not applied
+   in the `--files-from` branch. The caller's source (ripgrep, git, find) is the
+   filter — adding a second filter layer would be unexpected. `--lang` still
+   applies post-listing via `walkAndCount` (resolved; see Notes § Q1).
+
+9. `--max-files` applies in `--files-from` mode identically to walk mode:
+   `maxFiles: flags.maxFiles` is passed through `runDirectoryOpts` to
+   `walkAndCount`, which enforces `ErrMaxFilesExceeded` mid-stream. No extra
+   wiring needed.
 
 **Acceptance criteria:**
 
@@ -225,6 +271,12 @@ stat. Do NOT use `fstest.MapFS` — `FilesFromLister` calls `os.Stat` and
   error containing `"cannot combine"`.
 - `rak --files-from /nonexistent/path.txt` returns a non-nil error wrapping
   the `os.Open` failure.
+- `rak --files-from - --no-gitignore` returns a non-nil error containing
+  `"--no-gitignore"` (Guard B). `TestFlags_FilesFromNoGitignoreHardErrors`
+  verifies this in D.3 (or D.2's own `root_test.go` additions — either is
+  acceptable).
+- Rendered TOON output for `rak --files-from -` shows `path: <stdin>` not
+  `path: -`.
 - The `runRoot` branch order is: `--files-from` branch first, then
   `len(args)==1` branch, then bare-stdin fallback. This ensures `--files-from`
   takes priority.
@@ -240,9 +292,11 @@ stat. Do NOT use `fstest.MapFS` — `FilesFromLister` calls `os.Stat` and
 
 **What to build:**
 
-Append two new test functions to `cmd/rak/integration_test.go`. Both use the
+Append new test functions to `cmd/rak/integration_test.go`. Use the
 existing fixture tree at `testdata/tree/` which has `a.txt` (12 bytes) and
-`sub/nested.txt` (8 bytes).
+`sub/nested.txt` (8 bytes), with totals `treeExpectedTotalBytes=20`,
+`treeExpectedTotalLines=2`, `treeExpectedTotalWords=4`,
+`treeExpectedTotalChars=20`.
 
 The `cmd/rak` package test runs from the `cmd/rak/` directory as CWD, so
 relative paths like `testdata/tree/a.txt` resolve correctly when
@@ -276,21 +330,32 @@ Words == 4, Chars == 20. The JSON envelope for `runDirectory` output is the
 tree-result shape (with `directories` array), NOT the flat-counts shape from
 `counting.Counts`. Assert on `parsed.Total`.
 
-**Test 2 — `TestRootCmd_Integration_FilesFrom_WithComments`:**
+**Test 2 — `TestRootCmd_Integration_FilesFrom_EmptyStdin`:**
 
-Same setup but the `strings.NewReader` includes comment lines and blank lines:
+`echo -n | rak --files-from -` equivalent: `strings.NewReader("")` as stdin,
+`--files-from -`. Produces well-formed empty output (zero directories, zero
+total) without panic or error. Assert `err == nil` and `parsed.Total.Bytes == 0`.
+
+**Test 3 — `TestRootCmd_Integration_FilesFrom_SkipsEmptyLines`:**
+
+Feed a list with blank lines interspersed:
 
 ```
-# comment line
 testdata/tree/a.txt
 
-# another comment
 testdata/tree/sub/nested.txt
+
 ```
 
-Assert same totals — comments and empty lines are skipped.
+Assert same totals as Test 1 — empty lines are skipped; output is identical.
 
-**Test 3 (optional, add if straightforward) — `TestRootCmd_Integration_FilesFrom_PositionalArgConflict`:**
+**Test 4 — `TestRootCmd_Integration_FilesFrom_HashFileWorks`:**
+
+Create a real temp file named `#draft.md` in `t.TempDir()`. Feed its path
+through `--files-from -`. Assert the file is counted (non-zero Bytes in total),
+proving that `#`-prefixed filenames are not treated as comments.
+
+**Test 5 — `TestRootCmd_Integration_FilesFrom_PositionalArgConflict`:**
 
 ```go
 cmd.SetArgs([]string{"--files-from", "-", "."})
@@ -298,20 +363,42 @@ err := cmd.Execute()
 // must be non-nil and contain "cannot combine"
 ```
 
+**Test 6 — `TestFlags_FilesFromNoGitignoreHardErrors`:**
+
+```go
+cmd.SetArgs([]string{"--files-from", "-", "--no-gitignore"})
+err := cmd.Execute()
+// must be non-nil and message must contain "--no-gitignore"
+```
+
+**Test 7 — `TestFilesFrom_MaxFiles`:**
+
+Feed a list with three files from the fixture tree (or temp files). Set
+`--max-files 1`. Assert `cmd.Execute()` returns a non-nil error wrapping
+`ErrMaxFilesExceeded`. Verify via `errors.Is(err, lister.ErrMaxFilesExceeded)`
+or `errors.Is(err, root.ErrMaxFilesExceeded)` — whichever is accessible from
+the test's package scope. (Both are the same sentinel; `ErrMaxFilesExceeded` is
+declared in `cmd/rak/root.go` as package-level `var`, accessible within
+`package main` tests.)
+
 **Acceptance criteria:**
 
 - `mage test ./cmd/rak/...` passes with `-race`.
-- Both primary tests assert on `parsed.Total` fields (Bytes, Lines, Words,
-  Chars) matching the tree fixture constants.
-- The comment-skipping test passes with the same totals as the plain test.
-- The conflict test (if added) verifies the error message contains
-  `"cannot combine"`.
+- Test 1 asserts `parsed.Total` fields (Bytes, Lines, Words, Chars) matching
+  the tree fixture constants.
+- Test 2 verifies empty stdin produces no panic, no error, and zero totals.
+- Test 3 passes with the same totals as Test 1 (empty lines skipped).
+- Test 4 proves `#`-prefixed filenames are counted normally (not dropped).
+- Test 5 verifies the error message contains `"cannot combine"`.
+- Test 6 verifies the error message references `"--no-gitignore"`.
+- Test 7 verifies `ErrMaxFilesExceeded` fires when file count exceeds
+  `--max-files` in `--files-from` mode.
 - Existing integration tests in `integration_test.go` continue to pass
   (no regressions).
 
-Note: the `treeResult`, `dirResult`, and `treeExpected*` constants defined
-earlier in `integration_test.go` are reused. Builders should not redefine
-them — they are already in scope (same package, same file).
+Note: `treeResult`, `dirResult`, and `treeExpected*` constants are already
+defined in `root_test.go` / `integration_test.go` (same package `main`).
+Builders must not redefine them — they are in scope.
 
 ---
 
@@ -373,66 +460,72 @@ them — they are already in scope (same package, same file).
 
 ## Notes
 
-**Cross-stream coordination**: Streams B, C, D all add new flags to `cmd/rak/root.go`. Unit D.2 is the cmd/rak flag-wiring unit; the orchestrator must serialize it against B and C at build time. Internal-package work (D.1, `internal/lister/*`) is parallel-safe with B and C.
+**Cross-stream coordination**: Streams B, C, D all add new flags to
+`cmd/rak/root.go`. Unit D.2 is the cmd/rak flag-wiring unit; the orchestrator
+must serialize D.2 against B and C at build time: D.2 is `Blocked by: D.1, and
+after C's flag-registration block`. The `--files-from` flag registration is
+appended last to the flag block. Internal-package work (D.1, `internal/lister/*`)
+is parallel-safe with B and C.
 
 **Factory routing decision**: `Detect` is NOT extended. `runRoot` constructs
 `lister.NewFilesFromLister(r)` directly when `flags.filesFrom != ""`, bypassing
-`Detect` entirely. Rationale: `Detect` answers "which lister for this root path?"
-— `--files-from` is an orthogonal dispatch axis and should not pollute that
-signature. The approach is consistent with `SingleFileLister` being a
-`Detect`-returned value rather than a separate factory.
+`Detect` entirely. Rationale: `Detect` answers "which lister for this root
+path?" — `--files-from` is an orthogonal dispatch axis and should not pollute
+that signature. This is consistent with `SingleFileLister` being returned by
+`Detect` rather than having its own separate factory.
+
+**Symlink behavior**: `os.Stat` (used in `FilesFromLister.List`) follows
+symlinks. The symlink target is counted, not the symlink entry itself. Matches
+v0.1.4 `SingleFileLister` behavior. Consistency intentional.
+
+**Interactive stdin (TTY)**: when `--files-from -` is used interactively
+without piping, stdin blocks until EOF (Ctrl-D). This matches Unix convention
+(`cat`, `wc`). No special handling.
+
+**Duplicate paths**: feeding the same path twice yields two count entries for
+the same file. No deduplication. Matches `wc` behavior.
+
+**Absolute paths**: when a line in the list is an absolute path (e.g.
+`/home/user/foo.go`), `filepath.Abs` returns it unchanged. The file is grouped
+under `filepath.Dir(absPath)` in the per-directory rollup. The `rootLabel` is
+unused for absolute paths — they live in the per-directory bucket keyed by
+their real parent dir.
+
+**Paths outside CWD via `../`**: resolved via `filepath.Abs` and grouped under
+their real parent directory. The rendered tree may show parent directories
+above the CWD.
 
 ---
 
-**Design questions requiring dev confirmation before build (Phase 3):**
+**Resolved design decisions:**
 
-**Q1 — Filter interaction** (`--lang`, `--include`, `--exclude`):
-When `--files-from` is set, do these filters still apply?
-- Recommendation: YES. `--files-from` only sources the candidate list;
-  `walkAndCount` already applies lang + binary filters post-listing.
-  `include`/`exclude` glob filters live in `WalkOptions` which is not used in
-  the `--files-from` branch — so `--include`/`--exclude` would NOT apply
-  unless `FilesFromLister` is given an explicit filtering step.
-  Dev decision: should `FilesFromLister` respect `--include`/`--exclude`?
-  Simplest answer: skip include/exclude in the `--files-from` branch (the
-  caller already filtered). `--lang` still applies (it's in `walkAndCount`).
+**Q1 — Filter interaction (`--lang`, `--include`, `--exclude`)** — RESOLVED:
+`--lang` applies (it is a post-listing filter in `walkAndCount`, naturally
+active in the `--files-from` branch). `--include` / `--exclude` do NOT apply:
+`listerOpts` is not called in the `--files-from` branch, and the caller has
+already controlled which files are listed (that is the point of `--files-from`
+— the source tool is the filter). This is documented in D.2 step 8.
 
-**Q2 — `--depth` interaction**:
-`--depth` is a walk-traversal limit. With `--files-from` it has no meaning.
-- Recommendation: silent no-op. `listerOpts` is not called in the `--files-from`
-  branch, so `--depth` is simply ignored.
-- Alternative: warn-and-no-op. Dev decides.
+**Q2 — `--depth` interaction** — RESOLVED: silent no-op. `listerOpts` is not
+called in the `--files-from` branch, so `--depth` is simply ignored. Walk
+traversal depth has no meaning when the caller supplies an explicit file list.
 
-**Q3 — rootLabel for rendered output**:
-When `--files-from` is set, what directory label appears in the rendered tree?
-All files collapse into one directory bucket (via `dirKey` returning `"."`).
-`labelDirectories` rewrites `"."` to `rootLabel`.
-- Option A: `flags.filesFrom` (e.g. `"-"` or the filename). Literal, clear.
-- Option B: `"."` (the io/fs root convention). Minimal.
-- Option C: `"stdin"` when value is `"-"`, filename otherwise.
-- Recommendation: Option A (`flags.filesFrom`). Dev decides.
+**Q3 — `rootLabel` for rendered output** — RESOLVED: use `"<stdin>"` when
+`flags.filesFrom == "-"`, and `flags.filesFrom` (the filename) otherwise.
+This is implemented inline in the `runRoot` branch (D.2 step 5). `path.Clean`
+does not mangle `<stdin>` — angle brackets are not path separators.
 
-**Q4 — Comment lines (`#`)** (already in Scope, surfaced for explicit signoff):
-Lines starting with `#` are skipped. This matches `git rev-list --stdin`
-precedent. Confirmed in Scope. Any deviation from this? Dev signoff captured here.
+**Q5 — Positional arg + `--files-from` conflict** — RESOLVED: hard error
+`"cannot combine --files-from with a positional path argument"` in
+`PersistentPreRunE`. `--no-gitignore + --files-from` is also a hard error
+(`"--no-gitignore is meaningless with --files-from"`). Both guards live in
+`PersistentPreRunE`.
 
-**Q5 — Positional arg + `--files-from` conflict**:
-If both `--files-from <X>` and a positional path argument are supplied, the
-behavior should be a hard error.
-- Recommendation: `"cannot combine --files-from with a positional path argument"`.
-- Alternative: `--files-from` wins silently. Recommendation is hard error.
-- Dev confirms.
+**Q6 — Empty stdin** — RESOLVED: zero files counted. TOON and other renderers
+receive a `Summary` with empty `Dirs` and zero `Total`. Pre-existing renderer
+behavior handles this gracefully. `TestRootCmd_Integration_FilesFrom_EmptyStdin`
+in D.3 verifies no panic.
 
-**Q6 — Empty stdin (`echo -n | rak --files-from -`)**:
-Zero files counted. TOON (and other) renderers receive a `Summary` with empty
-`Dirs` and zero `Total`. Verify renderer handles this gracefully (no panic, no
-crash). Pre-existing behavior — but worth a manual smoke test. Builder should
-add a test for zero-file case in D.3.
-
-**Q7 — Error aggregation**:
-When a path in the list is missing or not a regular file, the error is yielded
-as a `(nil, err)` pair and the walk continues to the next path.
-- Recommendation: `errors.Join`-style aggregation (same as `walkAndCount`
-  handles per-entry errors). The renderer's error summary will display them.
-- Alternative: fail-fast on first bad path. Recommendation is aggregate.
-- Dev confirms.
+**Q7 — Error aggregation** — RESOLVED: per-line yield `(nil, err)` — consistent
+with the `FileLister` iterator contract used by `GitLister` and `WalkLister`.
+The walk continues past bad lines; `errors.Join` is not used.
