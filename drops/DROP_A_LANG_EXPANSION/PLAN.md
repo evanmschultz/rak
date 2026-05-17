@@ -56,17 +56,26 @@ Add `LangXML Language = "xml"` constant. Change `extensionTable[".xml"]` from `L
 to `LangXML`. Update `detectContent`: the `<?xml` branch currently returns `LangHTML` —
 change it to return `LangXML`. Add `LangXML` to `grammarTable` with `<!-- -->` grammar
 (identical to `LangHTML` — XML and HTML share the same comment delimiter). Update README
-"Languages detected" paragraph to list XML as a separate entry and note that `.xml` no
+"Languages detected" section to list XML as a separate entry and note that `.xml` no
 longer maps to HTML.
 
+README format decision (locked here; A.2–A.5 builders inherit this choice): the current
+paragraph form holds up to ~15 languages; at 50+ entries from DROP_A, switch to an
+alphabetical comma-separated list. Use the format: "Language1, Language2, ..." with one
+entry per language or alias group, sorted case-insensitively. If the builder judges the
+list still readable as a paragraph at A.1's merge point, they may keep the paragraph
+form — but the A.5 builder must switch to the comma-separated list (50+ entries at that
+point). Surface to dev via PR comment if the form choice is unclear.
+
 **Acceptance:**
-1. `mage test ./internal/lang/...` passes with no new failures.
+1. `mage test` passes with no new failures.
 2. `Detect` on a file named `foo.xml` returns `LangXML`, not `LangHTML`.
 3. `Detect` on content starting with `<?xml` (extensionless file) returns `LangXML`.
 4. `Split` with `LangXML` and `<!-- comment -->` input counts 1 Comment line (HTML-same grammar confirmed).
 5. `Detect` on `foo.html` still returns `LangHTML` (regression guard).
-6. README "Languages detected" section lists XML as a separate entry (alphabetically, between YAML and the end).
-7. `mage build` passes.
+6. README "Languages detected" section lists XML as a separate entry (alphabetically, before YAML).
+7. README notes that `.xml` files now appear as `xml` in `total_by_lang` instead of `html` — this is an intentional v0.2.0 behavior change from v0.1.x; builder should flag it in the PR description for release notes.
+8. `mage build` passes.
 
 **Blocked by:** —
 
@@ -119,7 +128,7 @@ pass with `-race`.
 README "Languages detected": append the 10 new language names in alphabetical order.
 
 **Acceptance:**
-1. `mage test ./internal/lang/...` passes.
+1. `mage test` passes.
 2. Each of the 10 new extensions resolves to the correct Language constant via `Detect`.
 3. `Split` with each grammar returns correct Comment classification for a line matching
    that language's comment syntax (at minimum one assertion per grammar entry).
@@ -170,7 +179,7 @@ Add all extensions to `extensionTable`. Add grammar entries to `grammarTable`:
 - `LangLESS`: `linePrefix: "//"`, `blockOpen: "/*"`, `blockClose: "*/"` (LESS)
 - `LangVue`: `blockOpen: "<!--"`, `blockClose: "-->"` (HTML-level; sub-parsing out of scope)
 - `LangSvelte`: `blockOpen: "<!--"`, `blockClose: "-->"` (HTML-level; same policy as Vue)
-- `LangERB`: `linePrefix: "<%#"`, `blockOpen: "<!--"`, `blockClose: "-->"` (ERB comment tag + HTML block)
+- `LangERB`: `blockOpen: "<%#"`, `blockClose: "%>"` (ERB comment block — see scope note on trade-off below)
 - `LangJinja`: `blockOpen: "{#"`, `blockClose: "#}"` (Jinja2 `{# comment #}` style)
 - `LangLiquid`: `blockOpen: "{% comment %}"`, `blockClose: "{% endcomment %}"` (Liquid comment tags)
 - `LangMustache`: `linePrefix: "{{!"`, `blockOpen: "{{!--"`, `blockClose: "--}}"` (Mustache/Handlebars)
@@ -179,22 +188,37 @@ Note: `.hbs` maps to `LangMustache`. Handlebars is a Mustache superset and share
 same comment syntax; using one constant follows the existing pattern of grouping
 closely-related variants (Shell groups sh/bash/zsh/fish).
 
+ERB grammar trade-off note: `LangERB` uses `blockOpen: "<%#", blockClose: "%>"` rather
+than `linePrefix: "<%#"`. The `linePrefix` form uses `strings.HasPrefix(trimmed, prefix)`
+(split.go:174) which only matches when the ERB comment marker is at the start of the
+trimmed line. Real ERB files commonly have mid-line comments like `<%= val %> <%# note %>`
+where the `<%#` is not at line start. The block form uses `strings.Contains(line, "<%#")`
+(split.go:166), which catches it anywhere on the line. Trade-off: `blockClose: "%>"` also
+appears on expression-output lines like `<%= value %>`. Under Policy α, those lines will
+be classified as Comment (same known limitation as `]]` in Lua code context, F28 YAGNI).
+HTML comments (`<!-- -->`) inside ERB files are HTML output rendered to the browser — not
+ERB-level comments — so they are intentionally excluded from the grammar; they will be
+classified as Code. Document this in the test file comments.
+
 Tests: extend the detection table test with all new extensions. Add a `TestSplit_Templating`
 table-driven test covering at minimum: one Vue `<!-- -->` comment, one Jinja `{# #}`
-comment, one Mustache `{{!-- --}}` block comment, one JSX `/* */` block comment.
+comment, one Mustache `{{!-- --}}` block comment, one JSX `/* */` block comment, one ERB
+`<%# comment %>` mid-line occurrence (verifies block form catches it), and one ERB
+`<%= value %>` line (verifies the Policy α limitation is acknowledged in test comments).
 
 README "Languages detected": append the 12 new names alphabetically.
 
 **Acceptance:**
-1. `mage test ./internal/lang/...` passes.
+1. `mage test` passes.
 2. `Detect` on each new extension returns the correct Language constant.
 3. `.hbs` resolves to `LangMustache` (not `LangUnknown`).
 4. `.tsx` resolves to `LangTSX`, distinct from `.ts` → `LangTS`.
 5. `Split` with `LangVue` on `<!-- comment -->` counts 1 Comment line.
 6. `Split` with `LangJinja` on `{# comment #}` counts 1 Comment line.
 7. `Split` with `LangMustache` on `{{!-- comment --}}` counts 1 Comment line.
-8. README lists the 12 new languages alphabetically.
-9. `mage build` passes.
+8. `Split` with `LangERB` on a line containing `<%# note %>` counts 1 Comment line (mid-line block form).
+9. README lists the 12 new languages alphabetically.
+10. `mage build` passes.
 
 **Blocked by:** A.2
 
@@ -253,7 +277,7 @@ lines classify as Code.
 README "Languages detected": append the 11 new names alphabetically (CSV, dotenv, EditorConfig, GraphQL, HCL/Terraform, INI, JSONL, Nix, Properties, Protobuf, TSV).
 
 **Acceptance:**
-1. `mage test ./internal/lang/...` passes.
+1. `mage test` passes.
 2. `.tf`, `.tfvars`, `.hcl` all resolve to `LangHCL`.
 3. `.graphql` and `.gql` both resolve to `LangGraphQL`.
 4. `.jsonl` and `.ndjson` both resolve to `LangJSONL`.
@@ -261,7 +285,7 @@ README "Languages detected": append the 11 new names alphabetically (CSV, dotenv
 6. `Split` with `LangINI` on `; comment` counts 1 Comment line.
 7. `Split` with `LangHCL` on `# comment`, `// comment`, and `/* block */` each produce 1 Comment line.
 8. `Split` with `LangProperties` on `! comment` counts 1 Comment line.
-9. `Split` with `LangCSV` on `a,b,c` counts 1 Code line (no grammar = all Code).
+9. `Split` with `LangCSV` on `a,b,c` counts 1 Code line (no grammar = all Code); same assertion for `LangTSV` on `a\tb\tc` and `LangJSONL` on `{"key":"value"}` (all three grammar-less langs must classify all non-blank lines as Code).
 10. README lists the 11 new language names.
 11. `mage build` passes.
 
@@ -322,18 +346,19 @@ filenames (e.g. `BUILD`, `BUILD.bazel`, `WORKSPACE`, `Jenkinsfile`, `Justfile`,
 `.bzl` extension. Add `TestSplit_BuildFiles` covering Bazel `#` comment, Groovy `//`
 comment and `/* */` block comment.
 
-Also add a `--lang bazel` end-to-end note to acceptance: the filter `--lang bazel` should
-match `BUILD`, `BUILD.bazel`, `WORKSPACE`, and `*.bzl` files in a walk — verifiable by
-running `rak --lang bazel <testdata-dir>` against a minimal fixture tree containing those
-filenames (builder may use `fstest.MapFS` in-test rather than a real fixture directory if
-preferred).
+Also add a `--lang bazel` smoke to `TestDetect_BuildTaskFiles` (inside
+`internal/lang/lang_test.go`): construct a `fstest.MapFS` containing files named `BUILD`,
+`BUILD.bazel`, `WORKSPACE`, and `foo.bzl`; verify that `Detect` on each returns
+`LangBazel`. This smoke lives entirely inside the `internal/lang` package — it does NOT
+touch `cmd/rak/integration_test.go` or any `cmd/rak` path. No A.5 Paths or Packages
+expansion needed.
 
 README "Languages detected": append Bazel, Caddyfile, Earthfile, Groovy (Jenkinsfile),
 Justfile, Procfile — in alphabetical order. Vagrantfile and Brewfile map to Ruby (already
 listed); note in the README description that these filenames are detected as Ruby.
 
 **Acceptance:**
-1. `mage test ./internal/lang/...` passes.
+1. `mage test` passes.
 2. `Detect` on `BUILD`, `BUILD.bazel`, `WORKSPACE` each returns `LangBazel`.
 3. `Detect` on `foo.bzl` returns `LangBazel`.
 4. `Detect` on `Jenkinsfile` returns `LangGroovy`.
@@ -359,17 +384,25 @@ listed); note in the README description that these filenames are detected as Rub
 
 **XML split (A.1)**: The only unit that modifies an existing entry. `extensionTable[".xml"]` changes from `LangHTML` to `LangXML`. `detectContent`'s `<?xml` branch changes from returning `LangHTML` to `LangXML`. No existing test asserts `.xml` → `LangHTML` (verified: `TestDetect_ByExtension` table does not include a `.xml` row), so no existing test breaks.
 
-**Lua block comments**: Lua's `--[[ ... ]]` long-bracket syntax is assigned `blockOpen: "--[["` and `blockClose: "]]"`. Policy α known limitation: `]]` also appears as a table-index operator in Lua code. Lines containing `]]` in code context are mis-classified as Comment (same YAGNI trade-off as F28).
+**XML behavior change (v0.2.0 release note)**: Before DROP_A, `.xml` files appeared as `html` in `total_by_lang` output. After A.1, they appear as `xml`. This is an intentional v0.2.0 behavior change. Builder must call it out in the PR description. The A.1 acceptance criteria record this explicitly (item 7).
+
+**Lua block comments**: Lua's `--[[ ... ]]` long-bracket syntax is assigned `blockOpen: "--[["` and `blockClose: "]]"`. Policy α known limitation: `]]` also appears as a table-index operator in Lua code. Lines containing `]]` in code context are mis-classified as Comment (same YAGNI trade-off as F28). Additionally, `]]` inside a Lua string literal (e.g., `s = "array[i][j]]"`) can corrupt multi-line block-comment state across subsequent lines — the state machine exits the block-comment on the `]]` even when it was inside a string. Acknowledged; accepted under Policy α YAGNI.
+
+**ERB grammar trade-off**: `LangERB` uses `blockOpen: "<%#", blockClose: "%>"` (block form) rather than `linePrefix: "<%#"` (line-start form). The line-start form (`strings.HasPrefix`) misses mid-line ERB comments like `<%= val %> <%# note %>`. The block form (`strings.Contains`) catches them. Trade-off: `%>` appears on expression-close lines like `<%= value %>`, which will be mis-classified as Comment under Policy α. HTML comments (`<!-- -->`) inside `.erb` files are HTML output written to the browser — they are NOT ERB-level comments — so they are intentionally excluded from the ERB grammar; those lines classify as Code.
 
 **Sass `.sass` grammar**: Indented Sass uses `//` for line comments; `/* */` block comments exist but are rarely used in `.sass` files. Grammar uses both under Policy α YAGNI — some non-comment lines may be over-classified. Acceptable for v0.2.0.
 
+**Vue/Svelte `<script>` limitation**: `LangVue` and `LangSvelte` are assigned `blockOpen: "<!--", blockClose: "-->"` (HTML-level comment grammar). The bulk of real source logic lives inside `<script>` blocks, which use JS/TS comment syntax (`//`, `/* */`). Those comments are invisible to rak's grammar and will classify as Code. Known limitation; sub-parsing is out of scope per design principle 2 ("one file = one language"). Document in test file comments.
+
+**Templ HTML-comment fallback**: `LangTempl` is assigned Go-style comments (`linePrefix: "//"`, `blockOpen: "/*"`, `blockClose: "*/"`). Templ files also contain HTML-like template blocks where `<!-- -->` comments may appear. Those HTML comments will classify as Code under the Go-style grammar. Same known limitation as Vue/Svelte — single-grammar policy for v0.2.0.
+
 **HCL triple-comment forms**: HCL accepts `#`, `//`, and `/* */`. The grammar struct accommodates this via `linePrefix="#"`, `linePrefix2="//"`, `blockOpen="/*"`, `blockClose="*/"`.
 
-**Vagrantfile / Brewfile**: These map to `LangRuby` (same as existing Gemfile/Rakefile pattern). No new Language constant. The README should note this in the description text so users understand the mapping.
+**Vagrantfile / Brewfile / Gemfile / Rakefile symmetry**: Vagrantfile and Brewfile map to `LangRuby` (same as existing Gemfile/Rakefile pattern). No new Language constant for any of these — they are Ruby DSLs, and the existing `LangRuby` constant is correct. Procfile is different: it is its own deployment-config micro-format (key: command pairs), not a Ruby DSL, and has no comment syntax. Procfile gets its own `LangProcfile` constant for `--lang procfile` filtering. This asymmetry is intentional.
 
 **Groovy constant naming**: `LangGroovy` is used (not `LangJenkinsfile`) because Groovy is the actual language. If standalone `.groovy` files are added in a future drop, this constant is already correct.
 
-**Procfile**: No standard comment syntax. Language constant `LangProcfile` is created for `--lang procfile` filtering, but `grammarTable` has no entry — all non-blank lines classify as Code.
+**Procfile**: No standard comment syntax. Language constant `LangProcfile` is created for `--lang procfile` filtering, but `grammarTable` has no entry — all non-blank lines classify as Code. Same applies to `LangCSV`, `LangTSV`, `LangJSONL`: no comment syntax in their specs; all non-blank lines are Code by default when absent from `grammarTable`.
 
 **`.env` extension handling**: `filepath.Ext(".env")` returns `".env"` in Go (the leading dot is the extension separator for a basename-only dotfile). Adding `".env"` to `extensionTable` correctly matches files named `.env`, `development.env`, `config.env`, etc.
 
@@ -380,6 +413,6 @@ listed); note in the README description that these filenames are detected as Rub
 - `LangJSONL = "jsonl"` (acronym, all-caps in constant name; value lowercase)
 - `LangHCL = "hcl"` (acronym, all-caps in constant name; value lowercase)
 
-**README alphabetical ordering**: The current README "Languages detected" is a single paragraph. After DROP_A the list grows to ~50+ entries. Builder should maintain alphabetical order and consider whether the paragraph form still works or if a sorted list/table is clearer. This is a formatting judgment call — surface to dev if the paragraph becomes unwieldy.
+**README format (locked in A.1, inherited by A.2–A.5)**: The current "Languages detected" paragraph holds ~22 entries. After DROP_A it will hold ~52 entries. The paragraph form becomes unreadable at that size. A.5 builder must convert to an alphabetical comma-separated list. A.1–A.4 builders may keep the paragraph form if they judge it still readable at intermediate counts, but the A.5 builder must switch. Full format decision is in the A.1 scope section.
 
-**`mage ci` at A.5**: Only Unit A.5's acceptance criteria include `mage ci`. Units A.1–A.4 specify `mage build` + `mage test ./internal/lang/...`. The full `mage ci` gate (including lint, coverage, gofumpt) is reserved for the final unit per the drop's Phase 6 verify step. This is standard WORKFLOW.md practice.
+**`mage ci` at A.5**: Only Unit A.5's acceptance criteria include `mage ci`. Units A.1–A.4 specify `mage build` + `mage test`. The full `mage ci` gate (including lint, coverage, gofumpt) is reserved for the final unit per the drop's Phase 6 verify step. This is standard WORKFLOW.md practice.
