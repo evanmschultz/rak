@@ -35,3 +35,31 @@ Append a `## Unit N.M — Round K` section per build attempt. See `main/drops/WO
 ## Hylla Feedback
 
 N/A — task touched only the bug fix in `filesfrom.go` (already uncommitted). Hylla is Go-only and indexes committed state; the file was new and uncommitted, so no Hylla queries were relevant.
+
+## Unit D.2 — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-17
+- **Files touched:**
+  - `cmd/rak/root.go` (flag field, flag registration, PersistentPreRunE guards, Example entries, openFilesFrom helper, runRoot --files-from branch)
+- **Mage targets run:**
+  - `mage format` — pass (no output)
+  - `mage build` — pass (no output)
+  - `mage test` — pass (all packages green, including `cmd/rak` and `internal/lister`)
+- **Notes:**
+
+  Added `filesFrom string` field to `rootFlags`. Registered `--files-from` flag (appended after `--max-files` per cross-stream serialization rule). Added two `Example:` entries (`rg --files | rak --files-from -` and `git ls-files '*.go' | rak --files-from -`).
+
+  Renamed `PersistentPreRunE` second param from `_` to `args` to enable the positional-conflict check. Added Guard A (positional + --files-from conflict) and Guard B (--no-gitignore + --files-from conflict), both returning formatted errors.
+
+  Added `openFilesFrom(value string, stdin io.Reader) (io.Reader, func(), error)` private helper: returns stdin + no-op closer when value is `"-"`, opens the named file and returns it plus its Close func otherwise. Error wrapped with `--files-from: %w`.
+
+  Inserted `--files-from` branch at the top of `runRoot` (before the `len(args) == 1` branch) so it takes priority. Uses `lister.NewFilesFromLister(r)`, sets `rootLabel = "<stdin>"` when value is `"-"`, passes `maxFiles` through `runDirectoryOpts`. `--depth`, `--include`, `--exclude` are not applied in this branch (no `listerOpts` call) per design decisions Q1/Q2 in PLAN.md Notes.
+
+  Added `"os"` to stdlib import group (needed for `os.Open` in `openFilesFrom`).
+
+  All 9 PLAN.md "What to build" steps implemented. No scope expansion. No files touched outside the unit's declared path.
+
+## Hylla Feedback
+
+None — Hylla answered everything needed. The existing `root.go` symbols were confirmed by direct `Read` (file was last ingested before D.1; Hylla state is pre-D.1). Fell back to `Read` for live file state — standard practice for files changed since last ingest.

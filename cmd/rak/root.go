@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"strings"
 
@@ -36,6 +37,7 @@ type rootFlags struct {
 	sort        string // sort key: lines, files, bytes, path (default: lines)
 	sortAsc     bool   // flip sort direction from the key-specific default
 	maxFiles    int    // abort the walk when accepted file count reaches this value (0 = no limit)
+	filesFrom   string // path to a newline-delimited file list, or "-" for stdin
 }
 
 // ErrMaxFilesExceeded is returned (wrapped) by walkAndCount when the accepted
@@ -90,11 +92,23 @@ func newRootCmd() *cobra.Command {
   rak --max-files 1000 .
 
   # Count stdin instead of walking
-  cat README.md | rak`,
+  cat README.md | rak
+
+  # Pipe a file list from ripgrep
+  rg --files | rak --files-from -
+
+  # Count only tracked Go files
+  git ls-files '*.go' | rak --files-from -`,
 		Args: cobra.MaximumNArgs(1),
-		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+		PersistentPreRunE: func(_ *cobra.Command, args []string) error {
 			if _, ok := validSortKeys[flags.sort]; !ok {
 				return fmt.Errorf("%q is not a valid sort key; valid keys: lines, files, bytes, path", flags.sort)
+			}
+			if flags.filesFrom != "" && len(args) > 0 {
+				return fmt.Errorf("cannot combine --files-from with a positional path argument")
+			}
+			if flags.filesFrom != "" && flags.noGitignore {
+				return fmt.Errorf("--no-gitignore is meaningless with --files-from: the caller controls which files are listed")
 			}
 			return nil
 		},
@@ -183,6 +197,12 @@ func newRootCmd() *cobra.Command {
 		0,
 		"abort the walk when the file count exceeds N (default 0 = no limit)",
 	)
+	cmd.Flags().StringVar(
+		&flags.filesFrom,
+		"files-from",
+		"",
+		"read newline-separated file paths from FILE (use - for stdin)",
+	)
 
 	return cmd
 }
@@ -225,6 +245,28 @@ func runRoot(c *cobra.Command, args []string, flags *rootFlags) error {
 
 	renderer := resolveRenderer(flags)
 
+	if flags.filesFrom != "" {
+		r, closer, err := openFilesFrom(flags.filesFrom, c.InOrStdin())
+		if err != nil {
+			return err
+		}
+		defer closer()
+		source := lister.NewFilesFromLister(r)
+		rootLabel := flags.filesFrom
+		if flags.filesFrom == "-" {
+			rootLabel = "<stdin>"
+		}
+		return runDirectory(ctx, c.OutOrStdout(), source, runDirectoryOpts{
+			rootLabel: rootLabel,
+			binary:    flags.binary,
+			langs:     flags.langs,
+			sortKey:   flags.sort,
+			sortAsc:   flags.sortAsc,
+			maxFiles:  flags.maxFiles,
+			renderer:  renderer,
+		})
+	}
+
 	if len(args) == 1 {
 		source, err := lister.Detect(ctx, args[0], listerOpts(flags))
 		if err != nil {
@@ -254,6 +296,22 @@ func runRoot(c *cobra.Command, args []string, flags *rootFlags) error {
 		return fmt.Errorf("render counts: %w", err)
 	}
 	return nil
+}
+
+// openFilesFrom resolves the --files-from value to an io.Reader and a cleanup
+// func. When value is "-", it returns stdin directly with a no-op closer
+// (stdin is not owned by this call). Otherwise it opens the named file and
+// returns the file plus its Close method as the closer. The returned closer
+// must always be called (typically via defer) to release the file handle.
+func openFilesFrom(value string, stdin io.Reader) (io.Reader, func(), error) {
+	if value == "-" {
+		return stdin, func() {}, nil
+	}
+	f, err := os.Open(value)
+	if err != nil {
+		return nil, nil, fmt.Errorf("--files-from: %w", err)
+	}
+	return f, func() { _ = f.Close() }, nil
 }
 
 // runDirectoryOpts bundles the per-call options for runDirectory so callers

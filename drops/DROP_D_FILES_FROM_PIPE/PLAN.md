@@ -144,7 +144,7 @@ filesystem.
 
 ### Unit D.2 — CLI flag wiring + runRoot third branch
 
-**State:** todo
+**State:** done
 **Paths:** `cmd/rak/root.go`
 **Packages:** `cmd/rak` (package `main`)
 **Blocked by:** D.1, and serialize after C's `--workers` / `--follow` flag-registration block (D's `--files-from` flag is appended last to the flag block)
