@@ -383,6 +383,55 @@ func TestSplit_Kotlin(t *testing.T) {
 	}
 }
 
+// TestSplit_XML verifies Unit A.1: LangXML uses the same "<!-- -->" grammar
+// as LangHTML. A line containing "<!-- comment -->" is classified as Comment;
+// a plain element line is Code. This confirms the grammar entry is correct
+// and that XML and HTML share the same comment delimiter.
+func TestSplit_XML(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		input string
+		want  LineCounts
+	}{
+		{
+			name:  "xml comment line",
+			input: "<!-- comment -->\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 0},
+		},
+		{
+			name:  "xml element is Code",
+			input: "<root>\n  <child/>\n</root>\n",
+			want:  LineCounts{Blank: 0, Comment: 0, Code: 3},
+		},
+		{
+			name:  "mixed comment and element",
+			input: "<!-- note -->\n<item/>\n\n",
+			want:  LineCounts{Blank: 1, Comment: 1, Code: 1},
+		},
+		{
+			name:  "multiline xml block comment",
+			input: "<!-- open\n     body\n-->\n<end/>\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := Split(strings.NewReader(tc.input), LangXML)
+			if err != nil {
+				t.Fatalf("Split: unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %+v; want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestSplit_Swift verifies that Swift uses "//" for line comments and
 // "/* */" for block comments. Nested block comments are not tracked (Policy α,
 // YAGNI v0.1.0): the flat open/close scan is acceptable.

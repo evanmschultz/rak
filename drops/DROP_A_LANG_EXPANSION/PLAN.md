@@ -40,7 +40,7 @@ file would be over-engineering given the purely additive map-literal nature of t
 
 ### Unit A.1 — XML split from HTML
 
-**State:** todo
+**State:** done
 
 **Paths:**
 - `internal/lang/lang.go`

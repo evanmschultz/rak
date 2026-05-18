@@ -47,6 +47,7 @@ const (
 	LangSwift    Language = "swift"
 	LangTS       Language = "typescript"
 	LangTOML     Language = "toml"
+	LangXML      Language = "xml"
 	LangYAML     Language = "yaml"
 )
 
@@ -95,7 +96,7 @@ var extensionTable = map[string]Language{
 	".swift":   LangSwift,
 	".toml":    LangTOML,
 	".ts":      LangTS,
-	".xml":     LangHTML,
+	".xml":     LangXML,
 	".yaml":    LangYAML,
 	".yml":     LangYAML,
 	".zsh":     LangShell,
@@ -235,7 +236,7 @@ func detectContent(buf []byte) Language {
 
 	switch {
 	case bytes.HasPrefix(trimmed, []byte("<?xml")):
-		return LangHTML // treat XML as HTML for v0.1.0
+		return LangXML
 	case bytes.HasPrefix(trimmed, []byte("<!DOCTYPE")):
 		return LangHTML
 	case bytes.HasPrefix(trimmed, []byte("---")):

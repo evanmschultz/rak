@@ -37,6 +37,7 @@ func TestDetect_ByExtension(t *testing.T) {
 		{"foo.cpp", LangCPP},
 		{"foo.cc", LangCPP},
 		{"foo.html", LangHTML},
+		{"foo.xml", LangXML},
 		{"foo.css", LangCSS},
 		{"foo.xyzzy", LangUnknown},
 	}
@@ -289,5 +290,62 @@ func TestDetect_NewLanguages_UnknownNegative(t *testing.T) {
 	got := Detect(f)
 	if got != LangUnknown {
 		t.Errorf("Detect(%q) = %q; want LangUnknown", "foo.unknown", got)
+	}
+}
+
+// TestDetect_XML_ExtensionAndContentSniff verifies Unit A.1: .xml extension
+// maps to LangXML (not LangHTML), and content-sniff on a <?xml declaration
+// also returns LangXML.
+func TestDetect_XML_ExtensionAndContentSniff(t *testing.T) {
+	t.Parallel()
+
+	t.Run("extension .xml", func(t *testing.T) {
+		t.Parallel()
+		fsys := fstest.MapFS{"data.xml": &fstest.MapFile{Data: []byte(`<?xml version="1.0"?>`)}}
+		f := newTestFile(fsys, "data.xml")
+		got := Detect(f)
+		if got != LangXML {
+			t.Errorf("Detect(%q) = %q; want %q", "data.xml", got, LangXML)
+		}
+	})
+
+	t.Run("content sniff <?xml extensionless", func(t *testing.T) {
+		t.Parallel()
+		// File has no extension → extension lookup returns LangUnknown.
+		// Content heuristic sees <?xml prefix → must return LangXML.
+		const relPath = "feed"
+		fsys := fstest.MapFS{relPath: &fstest.MapFile{Data: []byte("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<rss/>\n")}}
+		f := newTestFile(fsys, relPath)
+		got := Detect(f)
+		if got != LangXML {
+			t.Errorf("Detect(%q) = %q; want %q", relPath, got, LangXML)
+		}
+	})
+}
+
+// TestDetect_HTML_Regression verifies that the XML split (Unit A.1) did not
+// break HTML detection: .html and .htm extensions still return LangHTML.
+func TestDetect_HTML_Regression(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		path string
+		want Language
+	}{
+		{"index.html", LangHTML},
+		{"page.htm", LangHTML},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.path, func(t *testing.T) {
+			t.Parallel()
+			fsys := fstest.MapFS{tc.path: &fstest.MapFile{Data: []byte("<!DOCTYPE html>")}}
+			f := newTestFile(fsys, tc.path)
+			got := Detect(f)
+			if got != tc.want {
+				t.Errorf("Detect(%q) = %q; want %q", tc.path, got, tc.want)
+			}
+		})
 	}
 }

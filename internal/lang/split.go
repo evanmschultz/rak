@@ -116,6 +116,7 @@ var grammarTable = map[Language]grammar{
 
 	// HTML/XML-family: "<!-- -->" block, no line-comment form.
 	LangHTML:     {blockOpen: "<!--", blockClose: "-->"},
+	LangXML:      {blockOpen: "<!--", blockClose: "-->"},
 	LangMarkdown: {blockOpen: "<!--", blockClose: "-->"},
 
 	// JSON has no comment syntax per spec; all non-blank lines are Code.
