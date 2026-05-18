@@ -61,7 +61,8 @@ func effectiveAsc(key SortKey, asc bool) bool {
 // expected to reject unrecognized keys before this point, so a panic here
 // surfaces programming errors only.
 //
-// SortDirs uses slices.SortFunc (stdlib, Go 1.21+) for the in-place sort.
+// SortDirs uses slices.SortStableFunc (stdlib, Go 1.21+) for the in-place
+// sort, so equal elements preserve their original relative order across runs.
 func SortDirs(dirs []Directory, key SortKey, asc bool) {
 	switch key {
 	case SortLines, SortFiles, SortBytes, SortPath:
@@ -72,7 +73,7 @@ func SortDirs(dirs []Directory, key SortKey, asc bool) {
 
 	eff := effectiveAsc(key, asc)
 
-	slices.SortFunc(dirs, func(a, b Directory) int {
+	slices.SortStableFunc(dirs, func(a, b Directory) int {
 		var result int
 		switch key {
 		case SortLines:

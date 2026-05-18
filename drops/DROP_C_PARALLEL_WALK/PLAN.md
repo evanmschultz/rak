@@ -1,6 +1,6 @@
 # DROP_C — STABLE_SORT_FIX
 
-**State:** planning
+**State:** building
 **Tier:** B
 **Blocked by:** —
 **Paths (expected):** internal/summary/sort.go, internal/summary/sort_test.go
@@ -30,7 +30,7 @@ Single unit. Tier B = falsification-only build-QA; the test suite is the proof.
 
 ### Unit C.1 — Stable sort fix in internal/summary
 
-**State:** todo
+**State:** done
 **Paths:** `internal/summary/sort.go`, `internal/summary/sort_test.go`
 **Packages:** `internal/summary`
 **Blocked by:** —
