@@ -45,7 +45,7 @@ Design decisions are resolved below in `## Notes`. No open dev-signoff items rem
 
 ### Unit D.1 — FilesFromLister impl
 
-**State:** todo
+**State:** done
 **Paths:** `internal/lister/filesfrom.go` (NEW), `internal/lister/lister_test.go` (additions)
 **Packages:** `internal/lister`
 **Blocked by:** —

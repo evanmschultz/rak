@@ -318,6 +318,219 @@ func TestDetect_BrokenSymlink(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// FilesFromLister tests
+// ---------------------------------------------------------------------------
+
+// TestFilesFromLister_EmptyReader verifies that a FilesFromLister backed by an
+// empty reader yields zero files and zero errors.
+func TestFilesFromLister_EmptyReader(t *testing.T) {
+	t.Parallel()
+
+	fl := lister.NewFilesFromLister(strings.NewReader(""))
+	var files []*fileset.File
+	var errs []error
+	for f, e := range fl.List(t.Context()) {
+		if e != nil {
+			errs = append(errs, e)
+			continue
+		}
+		files = append(files, f)
+	}
+	if len(files) != 0 {
+		t.Errorf("got %d files, want 0", len(files))
+	}
+	if len(errs) != 0 {
+		t.Errorf("got %d errors, want 0: %v", len(errs), errs)
+	}
+}
+
+// TestFilesFromLister_HashPrefixedFileWorks verifies that a file literally
+// named "#draft.md" is yielded normally — hash-prefixed paths are NOT treated
+// as comments.
+func TestFilesFromLister_HashPrefixedFileWorks(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "#draft.md")
+	if err := os.WriteFile(target, []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	fl := lister.NewFilesFromLister(strings.NewReader(target + "\n"))
+	var files []*fileset.File
+	var errs []error
+	for f, e := range fl.List(t.Context()) {
+		if e != nil {
+			errs = append(errs, e)
+			continue
+		}
+		files = append(files, f)
+	}
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	if len(files) != 1 {
+		t.Fatalf("got %d files, want 1", len(files))
+	}
+	if got := files[0].RelPath; got != "#draft.md" {
+		t.Errorf("RelPath = %q, want %q", got, "#draft.md")
+	}
+}
+
+// TestFilesFromLister_SkipsEmptyLines verifies that blank lines interspersed in
+// the reader are skipped; valid paths around them are still yielded.
+func TestFilesFromLister_SkipsEmptyLines(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	fileA := filepath.Join(tmp, "a.txt")
+	fileB := filepath.Join(tmp, "b.txt")
+	for _, f := range []string{fileA, fileB} {
+		if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+	}
+
+	input := "\n" + fileA + "\n\n" + fileB + "\n\n"
+	fl := lister.NewFilesFromLister(strings.NewReader(input))
+	var files []*fileset.File
+	var errs []error
+	for f, e := range fl.List(t.Context()) {
+		if e != nil {
+			errs = append(errs, e)
+			continue
+		}
+		files = append(files, f)
+	}
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	if len(files) != 2 {
+		t.Errorf("got %d files, want 2", len(files))
+	}
+}
+
+// TestFilesFromLister_MixedPaths verifies that a mix of valid paths and empty
+// lines produces only the valid-path files, in order.
+func TestFilesFromLister_MixedPaths(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	fileA := filepath.Join(tmp, "first.go")
+	fileB := filepath.Join(tmp, "second.go")
+	for _, f := range []string{fileA, fileB} {
+		if err := os.WriteFile(f, []byte("package p\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+	}
+
+	input := fileA + "\n\n" + fileB + "\n"
+	fl := lister.NewFilesFromLister(strings.NewReader(input))
+	var relPaths []string
+	var errs []error
+	for f, e := range fl.List(t.Context()) {
+		if e != nil {
+			errs = append(errs, e)
+			continue
+		}
+		relPaths = append(relPaths, f.RelPath)
+	}
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	want := []string{"first.go", "second.go"}
+	if len(relPaths) != len(want) {
+		t.Fatalf("got %v, want %v", relPaths, want)
+	}
+	for i, w := range want {
+		if relPaths[i] != w {
+			t.Errorf("relPaths[%d] = %q, want %q", i, relPaths[i], w)
+		}
+	}
+}
+
+// TestFilesFromLister_MissingFile verifies that a path that does not exist on
+// disk yields a (nil, err) pair while iteration continues; subsequent valid
+// paths are still yielded.
+func TestFilesFromLister_MissingFile(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	realFile := filepath.Join(tmp, "real.txt")
+	if err := os.WriteFile(realFile, []byte("data"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	missing := filepath.Join(tmp, "does_not_exist.txt")
+
+	input := missing + "\n" + realFile + "\n"
+	fl := lister.NewFilesFromLister(strings.NewReader(input))
+	var files []*fileset.File
+	var errs []error
+	for f, e := range fl.List(t.Context()) {
+		if e != nil {
+			errs = append(errs, e)
+			continue
+		}
+		files = append(files, f)
+	}
+	if len(errs) != 1 {
+		t.Errorf("got %d errors, want 1", len(errs))
+	}
+	if len(files) != 1 {
+		t.Errorf("got %d files, want 1 (iteration must continue past bad paths)", len(files))
+	}
+	if len(files) == 1 && files[0].RelPath != "real.txt" {
+		t.Errorf("RelPath = %q, want %q", files[0].RelPath, "real.txt")
+	}
+}
+
+// TestFilesFromLister_ContextCancel verifies that cancelling the context after
+// the first yield terminates iteration with a context error and does not panic.
+func TestFilesFromLister_ContextCancel(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	// Create three files so there are entries after the first.
+	for _, name := range []string{"a.txt", "b.txt", "c.txt"} {
+		f := filepath.Join(tmp, name)
+		if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+	}
+	fileA := filepath.Join(tmp, "a.txt")
+	fileB := filepath.Join(tmp, "b.txt")
+	fileC := filepath.Join(tmp, "c.txt")
+
+	ctx, cancel := context.WithCancel(t.Context())
+
+	fl := lister.NewFilesFromLister(strings.NewReader(fileA + "\n" + fileB + "\n" + fileC + "\n"))
+	count := 0
+	var ctxErr error
+	for f, e := range fl.List(ctx) {
+		if e != nil {
+			ctxErr = e
+			break
+		}
+		count++
+		_ = f
+		if count == 1 {
+			cancel()
+		}
+	}
+
+	if ctxErr == nil {
+		t.Error("expected a context error after cancellation, got nil")
+	}
+	if count > 2 {
+		t.Errorf("iteration continued past cancellation: count = %d", count)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestSingleFileLister_List (original, not FilesFromLister)
+// ---------------------------------------------------------------------------
+
 // TestSingleFileLister_List verifies that a SingleFileLister constructed
 // directly yields exactly one file with the expected RelPath value, and that
 // iterating a second time produces the same result (idempotency).
