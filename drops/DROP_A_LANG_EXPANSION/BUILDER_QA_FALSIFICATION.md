@@ -508,3 +508,196 @@ Round-trip: orch dispatches a `go-builder-agent` to make the swap → re-run A.4
 ### Hylla Feedback
 
 N/A — review touched only Go source files inside `internal/lang` (lang.go, split.go, lang_test.go, split_test.go) and non-Go README.md / PLAN.md / BUILDER_WORKLOG.md / BUILDER_QA_FALSIFICATION.md. Hylla not the load-bearing evidence source — the falsification axes (extension-key collision checks, grammar struct field compatibility, alphabetical ordering, doc-comment formatting, state-machine traces, stdlib semantics) are local to small self-contained map literals where `Read` on the full file is faster and more authoritative than block summaries. None — Hylla answered everything needed at the structural level and was not required for the within-package A.4 review.
+
+## Unit A.5 — Round 1
+
+**Verdict:** PASS
+
+Falsification exhausts the 11 attack angles from the spawn prompt plus opportunistic adjacent attacks targeting build/task-file detection, special-filename normalization, lock-in regression for the YAGNI Procfile cut, and the drop-end `mage ci` gate. All attacks REFUTED or marked EXHAUSTED-no-counterexample. Empirical `mage ci` run from `main/` PASSED with 87.8% coverage on `./internal/...` (floor 70.0%).
+
+### Counterexamples / Attacks
+
+#### Attack 1 — Procfile YAGNI lock-in test missing
+
+- **Severity:** blocker (REFUTED)
+- **Where:** `internal/lang/lang_test.go:499`, `internal/lang/lang.go:208-211`
+- **Hypothesis:** Builder omits the `Procfile → LangUnknown` row in the table test. A future "helpful" PR adds `LangProcfile` without anyone noticing the regression.
+- **Mitigation accepted:** REFUTED. `TestDetect_BuildTaskFiles` row `{"Procfile", LangUnknown}` is present at line 499, accompanied by inline lock-in commentary: `"YAGNI cut: Procfile has no Language constant. Do not add one without updating this row and the PLAN.md Notes § 'Vagrantfile / Brewfile / Gemfile'."` The production-side comment at `internal/lang/lang.go:208-211` mirrors the cut decision. Both layers (test + source comment) point at PLAN.md for the rationale, so a future builder cannot add a `procfile` entry to `specialFilenames` without breaking this assertion. Lock-in is tight.
+
+#### Attack 2 — Justfile case sensitivity
+
+- **Severity:** blocker (REFUTED)
+- **Where:** `internal/lang/lang.go:199, 350`, `internal/lang/lang_test.go:487-488`
+- **Hypothesis:** Only `Justfile` (or only `justfile`) is in the special-filenames map, so the other casing falls through to extension lookup and returns LangUnknown.
+- **Mitigation accepted:** REFUTED. `specialFilenames` has a single lowercase key `"justfile" → LangJust` (line 199). `Detect` lowercases the basename via `strings.ToLower(filepath.Base(f.RelPath))` at line 350 BEFORE the lookup. Both `Justfile` and `justfile` normalize to `"justfile"` and hit the map. Tests at lines 487-488 cover both casings explicitly; both PASS. Adversarial extra: `JUSTFILE` (all-caps) would also resolve correctly via the same ToLower path — not in scope but covered by construction.
+
+#### Attack 3 — `BUILD` vs `BUILD.bazel` both must resolve to LangBazel
+
+- **Severity:** blocker (REFUTED)
+- **Where:** `internal/lang/lang.go:192-193`, `internal/lang/lang_test.go:479-480, 521-537`
+- **Hypothesis:** Only one of the two basename forms is in `specialFilenames`, so the missing form falls through and either resolves to LangUnknown (if `BUILD.bazel`'s `.bazel` extension is also missing from `extensionTable`) or to some unintended language.
+- **Mitigation accepted:** REFUTED. Both keys present: `"build" → LangBazel` (line 192) and `"build.bazel" → LangBazel` (line 193). Both forms are case-insensitive-matched (lowered basenames). The table test rows at lines 479-480 plus the dedicated `"bazel MapFS smoke"` subtest at lines 521-537 exercise both. Critical adversarial check: a hypothetical `BUILD.bazel` WITHOUT the `build.bazel` special-filename entry would not be saved by `.bazel` in `extensionTable` (verified: no `.bazel` extension exists in `extensionTable`; only `.bzl` does). So the explicit `"build.bazel"` entry is load-bearing and present.
+
+#### Attack 4 — `Jenkinsfile` naming consistency (Groovy, not Jenkinsfile)
+
+- **Severity:** concern (REFUTED)
+- **Where:** `internal/lang/lang.go:162-165, 197`, `internal/lang/lang_test.go:485`
+- **Hypothesis:** Builder ships `LangJenkinsfile = "jenkinsfile"` instead of `LangGroovy = "groovy"`, contradicting the dev's language-first-not-tool-first decision recorded in PLAN.md Notes § "Groovy constant naming".
+- **Mitigation accepted:** REFUTED. Constant declared as `LangGroovy Language = "groovy"` at line 165 with a doc comment explaining "Groovy is a Java-family language" — language-first, not tool-first. The `specialFilenames` mapping at line 197 is `"jenkinsfile" → LangGroovy`. Test at line 485 asserts `Jenkinsfile → LangGroovy`. A future `.groovy` extension can adopt the same constant without renaming. Matches PLAN.md Notes § "Groovy constant naming" verbatim.
+
+#### Attack 5 — `Vagrantfile` / `Brewfile` mistakenly get their own constants
+
+- **Severity:** concern (REFUTED)
+- **Where:** `internal/lang/lang.go:206-207`, `internal/lang/lang_test.go:494-495`
+- **Hypothesis:** Builder adds `LangVagrant` / `LangBrew` constants instead of mapping `Vagrantfile` / `Brewfile` to existing `LangRuby` (breaking the Gemfile/Rakefile pattern).
+- **Mitigation accepted:** REFUTED. No `LangVagrant`, `LangBrew`, `LangVagrantfile`, or `LangBrewfile` constants exist anywhere in `lang.go` (verified by full-file scan of the const block). `specialFilenames` maps `"vagrantfile" → LangRuby` and `"brewfile" → LangRuby` at lines 206-207. Tests assert both resolve to LangRuby (lines 494-495). Mirrors the existing `Gemfile / Rakefile → LangRuby` precedent.
+
+#### Attack 6 — `Caddyfile` extensionless detection
+
+- **Severity:** blocker (REFUTED)
+- **Where:** `internal/lang/lang.go:203, 348-353`, `internal/lang/lang_test.go:492`
+- **Hypothesis:** `Caddyfile` has no extension; if special-filename lookup ran AFTER extension lookup, `filepath.Ext("Caddyfile")` would return `""`, the extension lookup would short-circuit (line 357: `if ext != ""`), then content sniff would return LangUnknown.
+- **Mitigation accepted:** REFUTED. `Detect` runs special-filename lookup FIRST (lang.go:349-353), then extension lookup (lang.go:355-361). For `Caddyfile`: basename → `"caddyfile"` → map hit → `LangCaddy` returned immediately. Extension lookup is never reached. Test at line 492 asserts the round-trip; PASSES. Adversarial follow-up: even if extension lookup were tried, `ext == ""` short-circuit at lang.go:357 prevents an empty-key map lookup that could accidentally collide with another zero-value behavior — defensive coding aligns.
+
+#### Attack 7 — `.bzl` extension placement
+
+- **Severity:** blocker (REFUTED)
+- **Where:** `internal/lang/lang.go:303` (extensionTable), NOT `specialFilenames`
+- **Hypothesis:** `.bzl` is in `specialFilenames` (where it would never match because basenames like `foo.bzl` aren't literal keys) instead of `extensionTable`.
+- **Mitigation accepted:** REFUTED. `extensionTable[".bzl"] = LangBazel` at line 303 (correct placement). No `"bzl"` or `".bzl"` key in `specialFilenames`. The four MapFS smoke entries at lang_test.go:523-528 (BUILD, BUILD.bazel, WORKSPACE via specialFilenames; foo.bzl via extensionTable) verify both routing paths converge on LangBazel. Test PASSES.
+
+#### Attack 8 — README alphabetical ordering regressions
+
+- **Severity:** blocker (REFUTED)
+- **Where:** `main/README.md:144`
+- **Hypothesis:** The 61-entry alphabetical list has at least one mis-ordering. The A.4 CONFIRMED bug (`CSV, CSS` inverted) might still be present, or a new mis-order might have crept in during the A.5 inserts (Bazel, Caddyfile, Earthfile, Groovy, Justfile).
+- **Mitigation accepted:** REFUTED on all checked adjacencies. Verified case-insensitive ordering pass through the entire 61-entry list:
+  - `Bazel(ba), C(c), C++(c++), C#(c#), Caddyfile(ca), CMakeLists.txt(cm), CSS(cs..s), CSV(cs..v), Dart(d)` — `bazel < c`; `c#` placed between `c++` and `Caddyfile` is the conventional "C-family cluster" ordering (strict ASCII would invert `c#` and `c++`; this is by design — readers cluster `C / C++ / C#`); A.4's `CSV/CSS` swap fix held: line 144 now reads `..., CSS, CSV, Dart, ...`. ✓
+  - `Earthfile, EditorConfig, Elixir, ERB` — `ea < ed < el < er`. ✓
+  - `HCL/Terraform, HTML` — `hcl < htm`. ✓
+  - `JSON, JSONL, JSX` — `json < jsonl < jsx`. ✓
+  - `LESS, Liquid, Lua` — `le < li < lu`. ✓
+  - `Sass, Scala, SCSS, Shell, SQL, Svelte, Swift` — `sa < sc..a < sc..s < sh < sq < sv < sw`. ✓
+  - `Templ, TOML, TSV, TSX, TypeScript` — `te < to < ts..v < ts..x < ty`. ✓
+  - A.5 inserts verified at correct alphabetical positions: `Bazel` (head), `Caddyfile` between `C#` and `CMakeLists.txt`, `Earthfile` between `dotenv` and `EditorConfig`, `Groovy` between `GraphQL` and `Haskell`, `Justfile` between `JSX` and `Kotlin`. ✓
+  - 61 entries counted: matches PLAN.md claim and worklog A.5 note.
+- **Adversarial leftover:** the `C / C++ / C#` cluster intentionally departs from strict ASCII (`#`=35 < `+`=43 so strict-ASCII would yield `C, C#, C++`). This is a conventional human-readable ordering — not a bug under "alphabetical" interpretation. No PLAN.md acceptance criterion enforces strict ASCII. Accepted.
+
+#### Attack 9 — `mage ci` failure from main/
+
+- **Severity:** blocker (REFUTED)
+- **Where:** drop-end Phase 6 verify gate; PLAN.md A.5 Acceptance #12
+- **Hypothesis:** `mage ci` (gofumpt + lint + race-test + coverage) fails when run from `main/`, blocking PR open.
+- **Mitigation accepted:** REFUTED empirically. Ran `mage ci` from `/Users/evanschultz/Documents/Code/hylla/rak/main`. Result: PASS clean. Output tail confirms: every package green, race detector enabled, gofumpt 0 diffs, golangci-lint 0 issues, `coverage: 87.8% (floor: 70.0%, scope: ./internal/...)`. The full pre-push gate is satisfied.
+
+#### Attack 10 — Missing or malformed doc comments on the 5 new constants
+
+- **Severity:** blocker (REFUTED)
+- **Where:** `internal/lang/lang.go:158-174`
+- **Hypothesis:** One of `LangBazel`, `LangGroovy`, `LangJust`, `LangEarth`, `LangCaddy` lacks a `// Name …` Godoc-conforming comment, violating `main/CLAUDE.md` § "Go-Idiomatic Naming Rules" rule 11.
+- **Mitigation accepted:** REFUTED. All five constants carry properly-named doc comments at:
+  - `LangBazel` — lines 158-161 (`// LangBazel is the Language constant for Bazel build files …`).
+  - `LangGroovy` — lines 162-165 (`// LangGroovy is the Language constant for Groovy source files …`).
+  - `LangJust` — lines 166-168 (`// LangJust is the Language constant for Justfile task runner files …`).
+  - `LangEarth` — lines 169-171 (`// LangEarth is the Language constant for Earthly build files …`).
+  - `LangCaddy` — lines 172-174 (`// LangCaddy is the Language constant for Caddyfile web server configuration …`).
+  - Each comment starts with the identifier name, conforming to Go doc conventions. `golangci-lint run` (part of `mage ci`) would surface any `golint`-style violation; the lint stage PASSED.
+
+#### Attack 11 — Coverage floor breach at drop end
+
+- **Severity:** blocker (REFUTED)
+- **Where:** `magefile.go` `Coverage` target (70% floor on `./internal/...`); A.5 worklog claim of 87.8%
+- **Hypothesis:** Adding 5 new constants + 5 new grammar entries + special-filename keys without corresponding tests would push `./internal/lang` coverage below the per-package floor (or the aggregate `./internal/...` floor of 70%).
+- **Mitigation accepted:** REFUTED. `mage ci` output (verified empirically): `total: (statements) 87.8%`, `coverage: 87.8% (floor: 70.0%, scope: ./internal/...)`. Per-function breakdown for `internal/lang`:
+  - `Detect` 100.0%
+  - `detectShebang` 85.7%
+  - `detectContent` 55.6% (note: A.5 didn't touch this function; the 55.6% reflects unchanged pre-existing coverage gaps in `<?xml`/`<!DOCTYPE` content-sniff branches that fire only when steps 1+2+3 all return LangUnknown)
+  - `Split` 97.4%
+  - `Add` 100.0%
+  - All A.5 grammar/specialFilenames keys are exercised by `TestDetect_BuildTaskFiles` (table + smoke subtest) and `TestSplit_BuildFiles` (8 subtests). The aggregate floor is comfortably cleared.
+
+#### Attack 12 — `BUILD.go` regression from new `build` special-filename key
+
+- **Severity:** concern (REFUTED)
+- **Where:** `internal/lang/lang.go:192, 348-361`
+- **Hypothesis:** Adding `"build" → LangBazel` accidentally catches `BUILD.go` (lowercased basename `"build.go"`) or any other `build.<ext>` file before the extension lookup runs.
+- **Mitigation accepted:** REFUTED. `specialFilenames` key is `"build"` exactly — Go map lookup is exact-string. `"build.go"` does not match. Trace: `BUILD.go` → basename `"BUILD.go"` → lower → `"build.go"` → `specialFilenames["build.go"]` returns `("", false)` → fall through to extension lookup → `ext = ".go"` → `extensionTable[".go"] = LangGo` → return LangGo. Identical pattern to the existing `Makefile.go → LangGo` test case (lang_test.go:78). No regression introduced.
+
+#### Attack 13 — `WORKSPACE.bazel` modern Bazel gap
+
+- **Severity:** nit (EXHAUSTED, no counterexample under PLAN.md scope)
+- **Where:** `internal/lang/lang.go:194`
+- **Hypothesis:** New-style Bazel WORKSPACE files are named `WORKSPACE.bazel`. The specialFilenames map only contains `"workspace"` — `WORKSPACE.bazel` resolves to LangUnknown (no key match; `.bazel` is not in `extensionTable`).
+- **Mitigation accepted:** EXHAUSTED. Trace confirms LangUnknown result for `WORKSPACE.bazel`. **However**, PLAN.md A.5 Scope explicitly enumerates only `BUILD`, `BUILD.bazel`, `WORKSPACE`, and `*.bzl` (lines 21, 317). `WORKSPACE.bazel` and `MODULE.bazel` (newer bzlmod) are out of scope. Not a finding against A.5 — informational only, suggested for a future v0.2.1+ if Bazel coverage broadens.
+
+#### Attack 14 — Mid-build `mage format` artifacts uncommitted
+
+- **Severity:** blocker (REFUTED)
+- **Where:** worklog line 121-122 ("`mage format`: reformatted `internal/lang/lang.go` and `internal/lang/lang_test.go`")
+- **Hypothesis:** Builder ran `mage format` mid-build but the reformatted output is not committed; `mage ci`'s `gofumpt -l .` assertion would surface uncommitted diffs.
+- **Mitigation accepted:** REFUTED. `mage ci` ran clean (gofumpt 0 diffs reported in tail output). If reformat output were uncommitted, `gofumpt -l .` would list the affected files and fail the ci gate. It didn't.
+
+#### Attack 15 — `build` directory false-positive on `Detect` call
+
+- **Severity:** nit (REFUTED)
+- **Where:** `internal/fileset/walker.go`, `internal/lang/lang.go`
+- **Hypothesis:** A directory named `build/` (common in Java/Gradle/Bazel/etc.) is sent to `Detect`, where the basename `"build"` matches specialFilenames and returns LangBazel — a false positive for what is actually a directory.
+- **Mitigation accepted:** REFUTED. `Detect(*fileset.File)` is only called for FILES, not directories. The walker (`internal/fileset/walker.go`) yields `*fileset.File` for regular files only; directories are traversal nodes, not Walk yield items. No `Detect` invocation happens on a directory entry. Verified by inspection of the walker contract.
+
+#### Attack 16 — `Detect` called on a file literally named `BUILD` inside an unrelated repo
+
+- **Severity:** nit (REFUTED — by design)
+- **Where:** `internal/lang/lang.go:192`
+- **Hypothesis:** Any plain-text file named `BUILD` (Bazel files are common, but `BUILD` is also a generic name) is now misclassified as Bazel/Starlark. Non-Bazel `BUILD` files exist in the wild (e.g., one-line text notes).
+- **Mitigation accepted:** REFUTED — this is the intended pattern. Same trade-off applies to `Makefile`, `Dockerfile`, `Gemfile`, `Rakefile` — special-filename matching is heuristic and accepts the rare false-positive for the common-case correctness. The PLAN.md scope explicitly includes `BUILD` (line 21). Not a finding; the same Policy is consistent across the existing special-filename roster.
+
+#### Attack 17 — Grammar struct's `linePrefix` doesn't fire for Bazel `#`
+
+- **Severity:** blocker (REFUTED)
+- **Where:** `internal/lang/split.go:243`, `internal/lang/split_test.go:986-995`
+- **Hypothesis:** `LangBazel: {linePrefix: "#"}` is registered, but `Split`'s `linePrefix` branch (split.go:312) might not fire when other grammar fields are empty.
+- **Mitigation accepted:** REFUTED. Test `bazel hash comment` at split_test.go:986-989 asserts `# comment\ngo_binary(name = 'rak')\n` → `{Blank: 0, Comment: 1, Code: 1}` and PASSES. The `linePrefix` branch (split.go:312) is `if !isComment && g.linePrefix != "" && strings.HasPrefix(trimmed, g.linePrefix)` — fires independently of `blockOpen`/`blockClose`. Verified empirically.
+
+#### Attack 18 — Groovy state-machine consistency on multi-line block
+
+- **Severity:** concern (REFUTED)
+- **Where:** `internal/lang/split.go:246`, `internal/lang/split_test.go:1003-1014`
+- **Hypothesis:** Groovy's `{linePrefix: "//", blockOpen: "/*", blockClose: "*/"}` is identical to Go/Java/C — but the state-machine carry-over might break on a 3-line block (`/* open\n * body\n */`).
+- **Mitigation accepted:** REFUTED. Test `groovy block comment` asserts `/* open\n * body\n */\nstage('build') {}\n` → `{Comment: 3, Code: 1}` and PASSES. State trace: line 1 contains `/*` → Comment + `inBlockComment=true`; line 2 → `inBlockComment` carry → Comment; line 3 contains `*/` → Comment + closes block; line 4 → Code. Matches Go-family precedent (TestSplit_BlockSpansMultipleLines).
+
+#### Attack 19 — Inline Groovy `/* val */` Policy α regression
+
+- **Severity:** nit (REFUTED)
+- **Where:** `internal/lang/split_test.go:1010-1014`
+- **Hypothesis:** Inline block-comment (`def x = /* val */ 1`) might classify as Code, missing the Policy α blanket-Comment rule.
+- **Mitigation accepted:** REFUTED. Test `groovy inline block comment (Policy α)` at lines 1010-1014 asserts `def x = /* value */ 1\n` → `{Blank: 0, Comment: 1, Code: 0}` and PASSES. Consistent with existing Go/Java/Kotlin/Swift Policy α tests. Lock-in is tight.
+
+#### Attack 20 — Just/Earth/Caddy hash-comment branch firing on Code lines starting with `#!` shebang
+
+- **Severity:** nit (REFUTED — by design)
+- **Where:** `internal/lang/split.go:249-255` (Just/Earth/Caddy grammar)
+- **Hypothesis:** A Justfile beginning with `#!/usr/bin/env just` would classify the shebang line as Comment.
+- **Mitigation accepted:** REFUTED — by design. `#` is the line-comment prefix in Just/Earth/Caddy. A line starting with `#!` matches `strings.HasPrefix(trimmed, "#")` → Comment. This is the conventionally-correct interpretation: shebangs in `#`-comment languages ARE comments to the language proper (the OS interprets them; the language parser ignores them). Same behavior as Python, Bash, Ruby, etc. Not a regression; matches cloc semantics.
+
+#### Attack 21 — Coverage at function-level for new constants is 0%
+
+- **Severity:** concern (REFUTED)
+- **Where:** `internal/lang/lang.go:158-174`, `internal/lang/split.go:243-255`
+- **Hypothesis:** Constants don't have executable code, so "0% coverage on the new constants" might be a hidden-debt signal even if aggregate coverage stays above 70%.
+- **Mitigation accepted:** REFUTED. Constants are compile-time values, not executable statements — Go's coverage tool measures statement coverage. The constants are USED inside `specialFilenames`, `extensionTable`, and `grammarTable` literals, all of which ARE exercised by the table tests. The relevant function-level coverage for the touched code paths (`Detect`, `Split`) is 100.0% and 97.4% respectively. No hidden debt.
+
+### Informational notes (not counterexamples against A.5)
+
+- **C-cluster ordering (`C, C++, C#`)**: convention-first ordering departs from strict ASCII (`#` < `+`). README "alphabetical" claim is loose at this cluster. PLAN.md doesn't enforce strict ASCII; current ordering reads naturally. Future contributor attention only if a strict-ASCII convention is desired.
+- **`WORKSPACE.bazel` / `MODULE.bazel` modern Bazel gap (Attack 13)**: PLAN.md scope explicitly excludes; LangUnknown is the current behavior. Suggested for a future drop if Bazel coverage broadens.
+- **`Caddyfile.json` Caddy alternate config**: Caddy supports a JSON-formatted alternative config (`Caddyfile.json`, but more commonly any `.json` file passed via `--config`). Basename `"caddyfile.json"` is not in specialFilenames; falls through to `.json → LangJSON`. This is correct — the JSON form should classify as JSON, not Caddy. Not a finding; verified by trace.
+- **`brewfile.lock.json` Homebrew bundle lockfile**: Basename `"brewfile.lock.json"` is not in specialFilenames; falls through to `.json → LangJSON`. Correct.
+- **Worklog Hylla Feedback prose**: A.5 worklog § "Hylla Feedback (Unit A.5)" says "None — Hylla answered everything needed". For Go-source review of small map-literal additions, this is accurate; Hylla's block-level summaries don't surface map-literal contents but the falsification axes (key membership, value mapping, table-test row presence) are inherently file-local. No miss to escalate.
+
+### Summary
+
+21 attack vectors evaluated. All 21 REFUTED or EXHAUSTED-no-counterexample. The 11 spawn-prompt angles all bounce cleanly: Procfile lock-in test present with anti-regression commentary (Attack 1), Justfile both casings covered via lowercase-key+ToLower-basename pattern (Attack 2), `BUILD` and `BUILD.bazel` both as explicit specialFilenames keys (Attack 3), `Jenkinsfile → LangGroovy` per language-first design (Attack 4), Vagrantfile/Brewfile reuse `LangRuby` with no new constants (Attack 5), Caddyfile extensionless detection works via special-filename-before-extension priority (Attack 6), `.bzl` correctly in `extensionTable` not `specialFilenames` (Attack 7), 61-entry README alphabetical order verified end-to-end with A.4's `CSV/CSS` swap held (Attack 8), `mage ci` PASSES empirically with 87.8% coverage (Attacks 9 and 11), doc comments conform on all 5 new constants (Attack 10). Opportunistic adjacent attacks (Attacks 12-21): no regression on `BUILD.go` extension fallback, no false-positive on `build/` directory (walker contract), Groovy block-state and Policy α inline behavior consistent with Go/Java/Kotlin precedents, hash-comment Just/Earth/Caddy classify shebangs as Comment per cloc convention. **PASS — A.5 implementation survives full falsification sweep. Drop-end Phase 6 gate satisfied.**
+
+### Hylla Feedback
+
+N/A — review touched only Go source files inside `internal/lang` (lang.go, split.go, lang_test.go, split_test.go) and non-Go README.md / PLAN.md / BUILDER_WORKLOG.md / BUILDER_QA_FALSIFICATION.md / magefile.go output. Hylla is not the load-bearing evidence source for this review — the falsification axes (special-filename + extension table membership, doc-comment formatting, alphabetical ordering, grammar registration, drop-end `mage ci` empirical verification) are local to small self-contained map literals and table-driven tests where `Read` on the full file is both faster and more authoritative than block summaries. None — Hylla answered everything needed at the structural level and was not required for the within-package A.5 review.

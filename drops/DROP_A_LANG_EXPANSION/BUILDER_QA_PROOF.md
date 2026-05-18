@@ -244,3 +244,80 @@ None. PASS with no findings.
 ### Hylla Feedback
 
 None — Hylla answered everything needed. Verification used direct `Read` of the changed Go files (`lang.go`, `split.go`, `lang_test.go`, `split_test.go`), `README.md`, `git show 45934ea --stat`, and `mage test` / `mage build` execution. No committed-state symbol cross-referencing through Hylla was required for this round — the diff was small, well-localized, and the relevant surface (extensionTable rows, grammarTable rows, doc comments) reads directly from the source files.
+
+## Unit A.5 — Round 1
+
+**Verdict:** PASS
+
+All 12 acceptance criteria from `PLAN.md` Unit A.5 are satisfied by the committed code (commits `f568440 feat(lang): add bazel groovy just earth caddy build/task file detection` and follow-up `3dfead8 docs(readme): swap css/csv in languages list to fix alpha order`). Five new build/task Language constants are declared with Go doc comments, mapped via 9 `specialFilenames` entries + 1 `extensionTable` entry, given correct grammar entries, exercised by table-driven detection + split tests (including the `bazel MapFS smoke` in-package test and the Procfile YAGNI-cut lock-in row), and listed alphabetically in the README. `mage ci` passes from `main/` (coverage 87.8% on `./internal/...`, floor 70.0%).
+
+### Acceptance trace
+
+| # | Criterion | Evidence |
+|---|---|---|
+| 1 | `mage test` passes | Subsumed by Acceptance #12 (`mage ci` runs the test suite with `-race`). `mage ci` from `main/` returned exit 0; all 8 packages green (`internal/lang` included). |
+| 2 | `Detect` on `BUILD`, `BUILD.bazel`, `WORKSPACE` each returns `LangBazel` | `specialFilenames` entries `"build"`/`"build.bazel"`/`"workspace"` → `LangBazel` at `internal/lang/lang.go:192-194`. `Detect` lowercases the basename at `lang.go:350` before lookup. Asserted by `TestDetect_BuildTaskFiles` rows at `lang_test.go:479-481` (`BUILD`/`BUILD.bazel`/`WORKSPACE`) and the `bazel MapFS smoke` subtest at `lang_test.go:521-537` (runs `Detect` against an `fstest.MapFS` containing all three filenames + `foo.bzl`). |
+| 3 | `Detect` on `foo.bzl` returns `LangBazel` | `extensionTable[".bzl"]: LangBazel` at `lang.go:303`. Asserted by `TestDetect_BuildTaskFiles` row at `lang_test.go:483` (`{"foo.bzl", LangBazel}`) and within the `bazel MapFS smoke` subtest at `lang_test.go:527`. Independent `t.Parallel()` subtest — would fail individually if the extension mapping regressed. |
+| 4 | `Detect` on `Jenkinsfile` returns `LangGroovy` | `specialFilenames["jenkinsfile"]: LangGroovy` at `lang.go:197`. Asserted by `TestDetect_BuildTaskFiles` row at `lang_test.go:485` (`{"Jenkinsfile", LangGroovy}`) plus the nested-path regression row at `lang_test.go:502` (`{"ci/Jenkinsfile", LangGroovy}`) — confirms basename-only match on nested paths. |
+| 5 | `Detect` on `Justfile` AND `justfile` both return `LangJust` | `specialFilenames["justfile"]: LangJust` at `lang.go:199`. `Detect` calls `strings.ToLower(filepath.Base(...))` at `lang.go:350` so both casings normalize to `"justfile"` and match. Asserted by `TestDetect_BuildTaskFiles` rows `{"Justfile", LangJust}` and `{"justfile", LangJust}` at `lang_test.go:487-488` — independent subtests; either casing regression fails individually. |
+| 6 | `Detect` on `Vagrantfile` returns `LangRuby` | `specialFilenames["vagrantfile"]: LangRuby` at `lang.go:206` (re-uses existing `LangRuby` constant, same pattern as Gemfile/Rakefile). Asserted by `TestDetect_BuildTaskFiles` row at `lang_test.go:494` (`{"Vagrantfile", LangRuby}`). |
+| 7 | `Detect` on `Brewfile` returns `LangRuby` | `specialFilenames["brewfile"]: LangRuby` at `lang.go:207` (same re-use pattern). Asserted by `TestDetect_BuildTaskFiles` row at `lang_test.go:495` (`{"Brewfile", LangRuby}`). |
+| 8 | `Detect` on `Procfile` returns `LangUnknown` (NOT a Procfile-specific constant) | YAGNI cut verified two ways: (a) no `"procfile"` key in `specialFilenames` (source comment at `lang.go:208-211` explicitly documents the absence); (b) no `LangProcfile` constant anywhere in `lang.go`. `Detect` falls through steps 1+2 (no match in either table), step 3 sees no shebang, step 4's `detectContent` sees no marker, returns `LangUnknown`. Asserted by `TestDetect_BuildTaskFiles` row at `lang_test.go:499` (`{"Procfile", LangUnknown}`) — non-vacuous lock-in test that would fail if a future builder accidentally added Procfile detection without deliberately updating this row. |
+| 9 | `Split` with `LangGroovy` on `// comment` + `/* block */` counts correct Comment lines | `grammarTable[LangGroovy]: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"}` at `split.go:246`. Three independent subtests at `split_test.go:998-1014`: `groovy line comment` asserts `Comment: 1` for `"// comment\n…"`, `groovy block comment` asserts `Comment: 3` for the 3-line `/* … */` block, `groovy inline block comment (Policy α)` asserts `Comment: 1` for inline `def x = /* value */ 1` — locks in the Policy α YAGNI behavior. |
+| 10 | `Split` with `LangBazel` on `# comment` counts 1 Comment line | `grammarTable[LangBazel]: {linePrefix: "#"}` at `split.go:243` (Starlark = Python-like hash syntax). Asserted by `TestSplit_BuildFiles/bazel hash comment` at `split_test.go:984-989` with input `"# comment\ngo_binary(name = 'rak')\n"` expecting `LineCounts{Blank: 0, Comment: 1, Code: 1}` — first line is the asserted Comment. |
+| 11 | README lists the 5 new language names (Bazel, Caddyfile, Earthfile, Groovy, Justfile); Procfile absent | `README.md:144` (case-insensitive alphabetical, comma-separated form per PLAN.md format-switch decision): `Bazel, C, C++, C#, Caddyfile, CMakeLists.txt, CSS, CSV, Dart, Dockerfile, dotenv, Earthfile, EditorConfig, Elixir, ERB, F#, Go, GraphQL, Groovy, …, Justfile, Kotlin, …`. All 5 (Bazel, Caddyfile, Earthfile, Groovy, Justfile) present at correct alphabetical positions. Procfile absent (visual scan of full list at `README.md:144` — no `Procfile` token). README.md:146 also adds a "Special-filename detection" prose sentence explicitly noting `Procfile is intentionally undetected — those files count as bytes/lines/words but do not appear in --lang filtering or total_by_lang.` — surfaces the YAGNI cut to end users. |
+| 12 | `mage ci` passes from `main/` | Re-ran `mage ci` from `main/` for this review: exit 0. gofumpt clean (no files listed), `go vet ./...` + `golangci-lint run` clean, all 8 packages pass with `-race`, coverage 87.8% on `./internal/...` (floor 70.0%). Drop-end gate satisfied. |
+
+### Additional verification (beyond the 12 numbered criteria)
+
+- **All 5 new `Lang*` constants have Go doc comments.** Verified line-by-line at `lang.go:158-174`:
+  - `LangBazel` doc at `lang.go:158-160` — references special-filename + `.bzl` + Starlark/`#` comment style.
+  - `LangGroovy` doc at `lang.go:162-164` — references Jenkinsfile + Java-family `//` and `/* */`.
+  - `LangJust` doc at `lang.go:166-167` — references both `Justfile`/`justfile` casings + `#`.
+  - `LangEarth` doc at `lang.go:169-170` — references `Earthfile` + Earthly `#` syntax.
+  - `LangCaddy` doc at `lang.go:172-173` — references `Caddyfile` + `#`.
+  Each doc comment begins with the identifier name per `main/CLAUDE.md` § "Project Structure" rule 11.
+- **`--lang bazel` smoke test lives inside `internal/lang/lang_test.go` (NOT `cmd/rak`).** Verified: `bazel MapFS smoke` subtest at `lang_test.go:521-537` — uses `fstest.MapFS` containing `BUILD`, `BUILD.bazel`, `WORKSPACE`, `foo.bzl` and asserts `Detect` returns `LangBazel` for all four paths. The test exercises both detection paths (specialFilenames lookup for `BUILD`/`BUILD.bazel`/`WORKSPACE`, extensionTable lookup for `foo.bzl`) in a single parallel subtest. No corresponding edit to `cmd/rak/integration_test.go` or any `cmd/rak` path (verified via `git show --stat f568440`: changes touched only `README.md`, `internal/lang/*`, and the drop directory).
+- **README "Languages detected" list is alphabetical (CSV/CSS swap fixed).** Follow-up commit `3dfead8 docs(readme): swap css/csv in languages list to fix alpha order` corrected the ordering. Current order at `README.md:144`: `…CSS, CSV, Dart…` — case-insensitive alphabetical (CSS < CSV by third character `S` < `V`). Spot-checked other positions: `Caddyfile, CMakeLists.txt` (A < M); `Earthfile, EditorConfig` (Ear < Edi, "a" < "d"); `GraphQL, Groovy` ("Gr" same, "a" < "o"); `JSX, Justfile` (JS < Ju, "S" < "u" case-insensitively); `Procfile` absent throughout. All alphabetical relative to neighbors.
+
+### Implementation matches Scope
+
+- **5 new `Language` constants** declared at `lang.go:156-174` under the `// Unit A.5 — Build and task files.` block header. Each has a substantive Go doc comment. Values are all lowercase single-word strings (`"bazel"`, `"groovy"`, `"just"`, `"earth"`, `"caddy"`) matching the naming-convention note in PLAN.md.
+- **9 `specialFilenames` entries** added at `lang.go:192-207`. All keys pre-lowercased per the `specialFilenames` contract documented at `lang.go:177-180`. Detect lowercases the lookup basename at `lang.go:350` for case-insensitive match. The trailing source comment at `lang.go:208-211` documents the Procfile YAGNI cut.
+- **1 `extensionTable` entry** added at `lang.go:303` (`".bzl": LangBazel`). The block comment at `lang.go:301-302` clarifies that `.bzl` is the Starlark macro/rule file extension for Bazel.
+- **5 `grammarTable` entries** added at `split.go:239-255`:
+  - `LangBazel` at `split.go:243`: `linePrefix: "#"` (Starlark).
+  - `LangGroovy` at `split.go:246`: `linePrefix: "//"`, `blockOpen: "/*"`, `blockClose: "*/"` (Java-family).
+  - `LangJust` at `split.go:249`: `linePrefix: "#"`.
+  - `LangEarth` at `split.go:252`: `linePrefix: "#"`.
+  - `LangCaddy` at `split.go:255`: `linePrefix: "#"`.
+  The trailing source comment at `split.go:257-260` documents both the Vagrantfile/Brewfile → LangRuby re-use and the Procfile zero-grammar fallback.
+
+### Test quality
+
+- `TestDetect_BuildTaskFiles` (`lang_test.go:471-538`) — 14-row table-driven test (Acceptance criteria 2-8 verified row-by-row) + a multi-path `bazel MapFS smoke` subtest. All rows non-vacuous: each constructs a fresh `fstest.MapFS` and asserts `Detect` against the expected constant. Subtests use `t.Parallel()` and unique paths → race-safe.
+- The nested-path rows at `lang_test.go:501-502` (`"infra/BUILD"`, `"ci/Jenkinsfile"`) are real regression guards for the basename-only match policy in `Detect` — would fail if `Detect` were ever changed to use the full path instead of the basename.
+- The `Procfile` → `LangUnknown` row at `lang_test.go:499` is non-vacuous and tamper-evident: a future change adding a `LangProcfile` constant or a `"procfile"` `specialFilenames` entry would fail this assertion, surfacing the intentional YAGNI cut.
+- `TestSplit_BuildFiles` (`split_test.go:974-1051`) — 8-row table covering Bazel `#`, Groovy `//` line + `/* */` block + inline block (Policy α), Just `#`, Earth `#`, Caddy `#`. Notable cases:
+  - **Groovy multi-line block comment** (`split_test.go:1003-1008`) — 3-line `/* / * body / */` walks the `inBlockComment` state machine across lines, exercising the block-open/close index tracking. Would catch any regression in Groovy grammar wiring or block-state ordering.
+  - **Groovy inline block comment (Policy α)** (`split_test.go:1009-1014`) — explicit Policy α lock-in test for `def x = /* value */ 1` → `Comment: 1, Code: 0`. Non-vacuous: future Policy β implementation would fail this row deliberately.
+- All subtests use `t.Parallel()`; race detector is implicit per `main/CLAUDE.md` (`mage test` runs `-race` unconditionally).
+
+### `mage ci` drop-end gate verification
+
+Re-ran `mage ci` from `main/` for this review (the drop-end gate per WORKFLOW.md Phase 6). Output excerpt:
+
+- `gofumpt -l .` → no files listed (clean).
+- `go vet ./...` + `golangci-lint run` → exit 0, no issues.
+- `go test -race ./...` → all 8 packages green: `cmd/rak`, `counting`, `fileset`, `ignore`, `lang`, `lister`, `render`, `summary`.
+- Coverage: `total: (statements) 87.8%`, with the explicit `coverage: 87.8% (floor: 70.0%, scope: ./internal/...)` line confirming the gate. Per-file breakdown shows `Detect 100.0%` and `Split 97.4%` — directly relevant to A.5.
+
+Exit code: 0. Drop-end gate satisfied.
+
+### Findings
+
+None. PASS with no findings.
+
+### Hylla Feedback
+
+None — Hylla answered everything needed. Verification used direct `Read` of the changed Go files (`lang.go`, `split.go`, `lang_test.go`, `split_test.go`), `README.md`, `git show --stat f568440 3dfead8`, and `mage ci` execution. No committed-state symbol cross-referencing through Hylla was required for this round — the A.5 diff is small (5 constants, 9 specialFilenames entries, 1 extensionTable entry, 5 grammarTable entries, two table-driven tests, README updates) and well-localized within `internal/lang/*` + `README.md`.
