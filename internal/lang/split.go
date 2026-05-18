@@ -154,6 +154,56 @@ var grammarTable = map[Language]grammar{
 
 	// Haskell: "--" line + "{- -}" block.
 	LangHaskell: {linePrefix: "--", blockOpen: "{-", blockClose: "-}"},
+
+	// Unit A.3 — Templating and frontend variants.
+
+	// Go-superset templ: "//" line + "/* */" block (same as Go).
+	// HTML-like <!-- --> comments inside .templ files classify as Code
+	// (single-grammar policy, design principle 2, out of scope v0.2.0).
+	LangTempl: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+
+	// JSX/TSX: JS/TS family "//" line + "/* */" block.
+	LangJSX: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+	LangTSX: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+
+	// CSS preprocessors: "//" line + "/* */" block.
+	// SCSS supports both forms per spec. Sass indented syntax uses // for
+	// line comments; /* */ exists but is less common (Policy α YAGNI).
+	// LESS supports both forms per spec.
+	LangSCSS: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+	LangSass: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+	LangLESS: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+
+	// Vue/Svelte: HTML-level <!-- --> block, no line-comment form.
+	// JS/TS comments inside <script> blocks use JS/TS syntax invisible to
+	// rak's grammar → those lines classify as Code (design principle 2,
+	// one file = one grammar, sub-parsing out of scope for v0.2.0).
+	LangVue:    {blockOpen: "<!--", blockClose: "-->"},
+	LangSvelte: {blockOpen: "<!--", blockClose: "-->"},
+
+	// ERB: block form <%# ... %> rather than linePrefix "<%#".
+	// The linePrefix form (strings.HasPrefix) only matches when "<%#" is at
+	// trimmed-line start. Real ERB files commonly have mid-line comments like
+	// "<%= val %> <%# note %>" where "<%#" is not at line start. The block
+	// form (strings.Contains) catches those. Trade-off: blockClose "%>" also
+	// appears on expression-output lines like "<%= value %>" — those lines are
+	// mis-classified as Comment under Policy α (known limitation, YAGNI F28).
+	// HTML <!-- --> comments inside .erb files are HTML output written to the
+	// browser, not ERB-level comments; they classify as Code (intentional).
+	LangERB: {blockOpen: "<%#", blockClose: "%>"},
+
+	// Jinja2: {# ... #} block comment syntax.
+	LangJinja: {blockOpen: "{#", blockClose: "#}"},
+
+	// Liquid: {% comment %} / {% endcomment %} block tags.
+	LangLiquid: {blockOpen: "{% comment %}", blockClose: "{% endcomment %}"},
+
+	// Mustache/Handlebars: "{{!" line prefix + "{{!--" / "--}}" block.
+	// linePrefix "{{!" catches single-line {{! comment }} style.
+	// blockOpen "{{!--" + blockClose "--}}" catches the multi-line form.
+	// Note: "{{!" is a prefix of "{{!--" so the linePrefix fires first on
+	// single-line {{! comments; the blockOpen fires on {{!-- block opens.
+	LangMustache: {linePrefix: "{{!", blockOpen: "{{!--", blockClose: "--}}"},
 }
 
 // Split reads r line by line and classifies each line as Blank, Comment, or

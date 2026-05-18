@@ -595,6 +595,221 @@ func TestSplit_ProgrammingLanguages(t *testing.T) {
 	}
 }
 
+// TestSplit_Templating verifies Unit A.3: blank/comment/code classification
+// for the 12 new templating and frontend language grammars. Tests cover at
+// minimum: one Vue <!-- --> comment, one Jinja {# #} comment, one Mustache
+// {{!-- --}} block comment, one JSX /* */ block comment, one ERB <%# note %>
+// mid-line occurrence (verifies block form catches it), and one ERB <%= value %>
+// line (verifies the Policy α known limitation: %> on expression lines is
+// treated as a block-close, mis-classifying code lines as Comment).
+//
+// Vue/Svelte sub-parsing limitation: LangVue and LangSvelte use HTML-level
+// <!-- --> grammar. JS/TS comments inside <script> blocks are invisible to
+// rak's grammar and classify as Code. One file = one grammar per design
+// principle 2 (out of scope for v0.2.0).
+//
+// Templ HTML-comment limitation: LangTempl uses Go-style // and /* */ grammar.
+// HTML-like <!-- --> comments inside .templ files classify as Code. Same
+// single-grammar policy.
+//
+// Sass Policy α YAGNI: LangSass is assigned // + /* */ grammar. Indented Sass
+// uses // for real; /* */ block comments exist but are less common. Some
+// non-comment lines may be over-classified. Acceptable for v0.2.0.
+func TestSplit_Templating(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		lang  Language
+		input string
+		want  LineCounts
+	}{
+		// LangTempl — Go-style // line + /* */ block.
+		{
+			name:  "templ line comment",
+			lang:  LangTempl,
+			input: "// comment\nfunc Foo() templ.Component {\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "templ block comment",
+			lang:  LangTempl,
+			input: "/* open\n * body\n */\nvar x = 1\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+		// LangJSX — JS-family // line + /* */ block.
+		{
+			name:  "jsx line comment",
+			lang:  LangJSX,
+			input: "// comment\nconst x = <div/>\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "jsx block comment (Acceptance #5 analog — /* */)",
+			lang:  LangJSX,
+			input: "/* open\n * note\n */\nreturn <App/>\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+		// LangTSX — TS-family // line + /* */ block.
+		{
+			name:  "tsx line comment",
+			lang:  LangTSX,
+			input: "// comment\nexport const App = () => <div/>\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		// LangSCSS — // line + /* */ block.
+		{
+			name:  "scss line comment",
+			lang:  LangSCSS,
+			input: "// comment\n.foo { color: red; }\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "scss block comment",
+			lang:  LangSCSS,
+			input: "/* open\n * body\n */\n.bar { margin: 0; }\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+		// LangSass — // line + /* */ block (Policy α YAGNI; see func comment).
+		{
+			name:  "sass line comment",
+			lang:  LangSass,
+			input: "// comment\n.foo\n  color: red\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 2},
+		},
+		// LangLESS — // line + /* */ block.
+		{
+			name:  "less line comment",
+			lang:  LangLESS,
+			input: "// comment\n.foo { color: red; }\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		// LangVue — HTML-level <!-- --> block (Acceptance #5).
+		// JS/TS comments inside <script> blocks are Code per design principle 2.
+		{
+			name:  "vue html comment (Acceptance #5)",
+			lang:  LangVue,
+			input: "<!-- comment -->\n<template>\n  <div/>\n</template>\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 3},
+		},
+		{
+			name:  "vue multiline html comment",
+			lang:  LangVue,
+			input: "<!-- open\n     body\n-->\n<div/>\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+		{
+			name:  "vue script js comment is Code (sub-parsing out of scope)",
+			lang:  LangVue,
+			input: "<script>\n// this js comment classifies as Code — single grammar policy\nconst x = 1\n</script>\n",
+			want:  LineCounts{Blank: 0, Comment: 0, Code: 4},
+		},
+		// LangSvelte — HTML-level <!-- --> block (same policy as Vue).
+		{
+			name:  "svelte html comment",
+			lang:  LangSvelte,
+			input: "<!-- comment -->\n<script>\nlet x = 1\n</script>\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 3},
+		},
+		// LangERB — block form <%# ... %> (Acceptance #8).
+		// blockOpen="<%#", blockClose="%>": Policy α uses strings.Contains so
+		// mid-line <%# note %> is detected.
+		// Known limitation: %> on expression-output lines like <%= value %> is also
+		// treated as blockClose → whole line classified as Comment (Policy α YAGNI).
+		{
+			name:  "erb comment at line start",
+			lang:  LangERB,
+			input: "<%# comment %>\n<%= @user.name %>\n",
+			// Line 1: contains "<%#" (blockOpen) → Comment.
+			// Line 2: contains "%>" (blockClose) → Comment (Policy α known limitation).
+			want: LineCounts{Blank: 0, Comment: 2, Code: 0},
+		},
+		{
+			name:  "erb mid-line comment (Acceptance #8 — block form catches it)",
+			lang:  LangERB,
+			input: "<%= val %> <%# note %>\n",
+			// Contains "<%#" (blockOpen) → Comment. Also contains "%>" twice but
+			// blockOpen is found first → Comment on the first pass.
+			want: LineCounts{Blank: 0, Comment: 1, Code: 0},
+		},
+		{
+			name: "erb expression-output line is Comment (Policy α known limitation)",
+			// <%= value %> contains "%>" which is the blockClose for ERB grammar.
+			// Under Policy α this line is mis-classified as Comment. This is the
+			// accepted trade-off (see PLAN.md ERB grammar trade-off note and Notes §
+			// "ERB grammar trade-off"). Document here to lock in the known behavior.
+			lang:  LangERB,
+			input: "<%= @title %>\n<p>plain html</p>\n",
+			// Line 1: "<%= @title %>" contains "%>" → Comment (known limitation).
+			// Line 2: "<p>plain html</p>" — no markers → Code.
+			want: LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		// LangJinja — {# ... #} block (Acceptance #6).
+		{
+			name:  "jinja comment (Acceptance #6)",
+			lang:  LangJinja,
+			input: "{# comment #}\n{{ variable }}\n",
+			// Line 1: contains "{#" (blockOpen) → Comment.
+			// Line 2: "{{ variable }}" — no "#}" marker → Code.
+			want: LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "jinja multiline comment",
+			lang:  LangJinja,
+			input: "{# open\n   body\n#}\n{{ var }}\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+		// LangLiquid — {% comment %} / {% endcomment %} block.
+		{
+			name:  "liquid comment block",
+			lang:  LangLiquid,
+			input: "{% comment %}\nThis is hidden.\n{% endcomment %}\n{{ title }}\n",
+			// Line 1: contains "{% comment %}" (blockOpen) → Comment; sets inBlockComment.
+			// Line 2: "This is hidden." — inBlockComment=true → Comment.
+			// Line 3: "{% endcomment %}" — inBlockComment=true at start → Comment; closes block.
+			// Line 4: "{{ title }}" — no markers → Code.
+			want: LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+		// LangMustache — {{! linePrefix + {{!-- --}} block (Acceptance #7).
+		{
+			name:  "mustache line comment via linePrefix",
+			lang:  LangMustache,
+			input: "{{! inline comment }}\n{{name}}\n",
+			// Line 1: trimmed starts with "{{!" (linePrefix) → Comment.
+			// Line 2: "{{name}}" — no "{{!" prefix, no blockOpen "{{!--" → Code.
+			want: LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "mustache block comment {{!-- --}} (Acceptance #7)",
+			lang:  LangMustache,
+			input: "{{!-- comment --}}\n{{name}}\n",
+			// Line 1: contains "{{!--" (blockOpen) → Comment.
+			// Line 2: "{{name}}" → Code.
+			want: LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "mustache multiline block comment",
+			lang:  LangMustache,
+			input: "{{!--\n  multiline\n--}}\n{{name}}\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := Split(strings.NewReader(tc.input), tc.lang)
+			if err != nil {
+				t.Fatalf("Split: unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %+v; want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestSplit_Swift verifies that Swift uses "//" for line comments and
 // "/* */" for block comments. Nested block comments are not tracked (Policy α,
 // YAGNI v0.1.0): the flat open/close scan is acceptable.

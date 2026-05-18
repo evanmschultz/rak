@@ -73,6 +73,49 @@ const (
 	LangSQL Language = "sql"
 	// LangZig is the Language constant for Zig source files (.zig).
 	LangZig Language = "zig"
+
+	// Unit A.3 — Templating and frontend variants.
+
+	// LangTempl is the Language constant for Go-superset templ files (.templ).
+	// Templ uses Go-style comment syntax (// and /* */).
+	LangTempl Language = "templ"
+	// LangJSX is the Language constant for React JSX files (.jsx).
+	LangJSX Language = "jsx"
+	// LangTSX is the Language constant for TypeScript JSX files (.tsx).
+	// Distinct from .ts → LangTS.
+	LangTSX Language = "tsx"
+	// LangSCSS is the Language constant for SCSS stylesheets (.scss).
+	// SCSS supports both // line comments and /* */ block comments.
+	LangSCSS Language = "scss"
+	// LangSass is the Language constant for indented Sass stylesheets (.sass).
+	// Uses // for line comments; /* */ block comments exist but are less common
+	// (Policy α YAGNI — some non-comment lines may be over-classified).
+	LangSass Language = "sass"
+	// LangLESS is the Language constant for LESS stylesheets (.less).
+	LangLESS Language = "less"
+	// LangVue is the Language constant for Vue single-file components (.vue).
+	// Grammar covers HTML-level <!-- --> comments; JS/TS inside <script> blocks
+	// uses JS/TS comment syntax not detected here (one file = one grammar,
+	// design principle 2, out of scope for v0.2.0).
+	LangVue Language = "vue"
+	// LangSvelte is the Language constant for Svelte components (.svelte).
+	// Same single-grammar HTML-level policy as LangVue.
+	LangSvelte Language = "svelte"
+	// LangERB is the Language constant for Ruby ERB templates (.erb).
+	// Grammar uses block form <%# ... %> to catch mid-line ERB comments.
+	// Known limitation: %> also appears on expression-output lines like
+	// <%= value %> — those lines are mis-classified as Comment (Policy α YAGNI).
+	LangERB Language = "erb"
+	// LangJinja is the Language constant for Jinja2 templates
+	// (.j2, .jinja, .jinja2).
+	LangJinja Language = "jinja"
+	// LangLiquid is the Language constant for Liquid templates (.liquid).
+	LangLiquid Language = "liquid"
+	// LangMustache is the Language constant for Mustache and Handlebars templates
+	// (.mustache, .hbs). Handlebars is a Mustache superset sharing the same
+	// comment syntax; one constant follows the existing pattern of grouping
+	// closely-related variants (Shell groups sh/bash/zsh/fish).
+	LangMustache Language = "mustache"
 )
 
 // specialFilenames maps exact lowercased basenames to languages. Lookup is
@@ -140,6 +183,23 @@ var extensionTable = map[string]Language{
 	".scala": LangScala,
 	".sql":   LangSQL,
 	".zig":   LangZig,
+
+	// Unit A.3 — Templating and frontend variants.
+	".templ":   LangTempl,
+	".jsx":     LangJSX,
+	".tsx":     LangTSX,
+	".scss":    LangSCSS,
+	".sass":    LangSass,
+	".less":    LangLESS,
+	".vue":     LangVue,
+	".svelte":  LangSvelte,
+	".erb":     LangERB,
+	".j2":      LangJinja,
+	".jinja":   LangJinja,
+	".jinja2":  LangJinja,
+	".liquid":  LangLiquid,
+	".mustache": LangMustache,
+	".hbs":     LangMustache,
 }
 
 // shebangsTable maps interpreter basenames to languages. For

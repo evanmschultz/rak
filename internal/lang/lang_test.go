@@ -401,3 +401,58 @@ func TestDetect_HTML_Regression(t *testing.T) {
 		})
 	}
 }
+
+// TestDetect_Templating verifies Unit A.3: all 12 new templating and frontend
+// language constants resolve correctly from their extensions via Detect.
+// Covers Acceptance criteria 2, 3, and 4.
+func TestDetect_Templating(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		path string
+		want Language
+	}{
+		// LangTempl — Go-superset template language (.templ)
+		{"component.templ", LangTempl},
+		// LangJSX — React JSX (.jsx)
+		{"app.jsx", LangJSX},
+		// LangTSX — TypeScript JSX (.tsx); must be distinct from .ts → LangTS (Acceptance #4)
+		{"app.tsx", LangTSX},
+		// .ts still maps to LangTS (regression guard for Acceptance #4)
+		{"types.ts", LangTS},
+		// LangSCSS — (.scss)
+		{"styles.scss", LangSCSS},
+		// LangSass — indented Sass syntax (.sass)
+		{"styles.sass", LangSass},
+		// LangLESS — (.less)
+		{"styles.less", LangLESS},
+		// LangVue — Vue SFC (.vue)
+		{"App.vue", LangVue},
+		// LangSvelte — Svelte component (.svelte)
+		{"App.svelte", LangSvelte},
+		// LangERB — Ruby ERB template (.erb)
+		{"index.html.erb", LangERB},
+		// LangJinja — three Jinja2 extensions
+		{"template.j2", LangJinja},
+		{"template.jinja", LangJinja},
+		{"template.jinja2", LangJinja},
+		// LangLiquid — Liquid template (.liquid)
+		{"page.liquid", LangLiquid},
+		// LangMustache — Mustache (.mustache) and Handlebars (.hbs) — Acceptance #3
+		{"view.mustache", LangMustache},
+		{"view.hbs", LangMustache},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.path, func(t *testing.T) {
+			t.Parallel()
+			fsys := fstest.MapFS{tc.path: &fstest.MapFile{Data: []byte("content")}}
+			f := newTestFile(fsys, tc.path)
+			got := Detect(f)
+			if got != tc.want {
+				t.Errorf("Detect(%q) = %q; want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+}

@@ -57,3 +57,26 @@ Append a `## Unit N.M — Round K` section per build attempt. See `main/drops/WO
 ## Hylla Feedback (Unit A.2)
 
 N/A — task touched non-Go files (README.md, PLAN.md, BUILDER_WORKLOG.md) via `Read` tool directly. For Go files, Hylla was queried for structural orientation but implementation details required `Read` on `lang.go`, `split.go`, and test files (expected behavior — Hylla indexes block-level summaries, not raw map literals). No misses to report: the Read fallback was correct and efficient for all four Go source files. None — Hylla answered everything needed at the structural level.
+
+## Unit A.3 — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-17
+- **Files touched:**
+  - `internal/lang/lang.go` — added 12 `Language` constants (LangTempl, LangJSX, LangTSX, LangSCSS, LangSass, LangLESS, LangVue, LangSvelte, LangERB, LangJinja, LangLiquid, LangMustache) with doc comments; added 15 extension entries (.templ, .jsx, .tsx, .scss, .sass, .less, .vue, .svelte, .erb, .j2, .jinja, .jinja2, .liquid, .mustache, .hbs) to `extensionTable`.
+  - `internal/lang/split.go` — added 12 grammar entries to `grammarTable`: C-family (LangTempl, LangJSX, LangTSX, LangSCSS, LangSass, LangLESS with `//`+`/* */`), HTML-level (LangVue, LangSvelte with `<!--`/`-->`), LangERB (`<%#`/`%>` block form to catch mid-line comments), LangJinja (`{#`/`#}` block), LangLiquid (`{% comment %}`/`{% endcomment %}` block), LangMustache (`{{!` linePrefix + `{{!--`/`--}}` block).
+  - `internal/lang/lang_test.go` — added `TestDetect_Templating` table with 16 cases covering all 12 new languages and all 15 extensions; includes `.tsx` vs `.ts` regression guard (Acceptance #4) and `.hbs` → LangMustache case (Acceptance #3).
+  - `internal/lang/split_test.go` — added `TestSplit_Templating` with 21 subtests covering all 12 grammar entries: templ (line + block), JSX (line + block), TSX (line), SCSS (line + block), Sass (line), LESS (line), Vue (html comment + multiline + script-as-Code), Svelte (html comment), ERB (at-line-start, mid-line Acceptance #8, expression-output known limitation), Jinja (comment Acceptance #6 + multiline), Liquid (block Acceptance implied), Mustache (linePrefix comment, block `{{!--` Acceptance #7, multiline block).
+  - `README.md` — updated "Languages detected" paragraph to add 12 new languages alphabetically (ERB, Jinja, JSX, LESS, Liquid, Mustache/Handlebars, Sass, SCSS, Svelte, Templ, TSX, Vue); list now at 45 entries (paragraph form; A.5 builder switches at 50+ per PLAN.md).
+  - `drops/DROP_A_LANG_EXPANSION/PLAN.md` — state `todo` → `in_progress` for Unit A.3 (transitions to `done` after `mage test` passes).
+- **Mage targets run:** (pending — awaiting Bash permission grant to run `mage build` and `mage test`)
+- **Design decisions:**
+  - ERB grammar: `blockOpen: "<%#", blockClose: "%>"` (block form) rather than `linePrefix: "<%#"` (line-start form), per PLAN.md spec. Rationale: `strings.Contains` catches mid-line `<%# note %>` whereas `strings.HasPrefix` would miss it. Known limitation: `%>` on expression-output lines (`<%= value %>`) is also treated as blockClose, mis-classifying those lines as Comment. Tests explicitly document this YAGNI behavior.
+  - Vue/Svelte: `{blockOpen: "<!--", blockClose: "-->"}` (HTML-level only). `<script>` block JS/TS comments classify as Code (one file = one grammar, design principle 2). Test case "vue script js comment is Code" locks in this known limitation.
+  - Mustache: dual `linePrefix: "{{!"` + `blockOpen: "{{!--"` / `blockClose: "--}}"`. The linePrefix handles single-line `{{! comment }}` style; the block form handles multi-line `{{!-- ... --}}`. Since `{{!` is a prefix of `{{!--`, the block-open check fires first for `{{!--` lines (block-marker check before linePrefix check in Split logic).
+  - Sass: assigned C-family grammar (same as SCSS) per PLAN.md. Indented Sass uses `//` for line comments; `/* */` exists but is less common. Policy α YAGNI accepted.
+  - Templ: Go-style `//` + `/* */` grammar. HTML-like `<!-- -->` comments in template blocks classify as Code. Same single-grammar limitation as Vue/Svelte.
+
+## Hylla Feedback (Unit A.3)
+
+None — Hylla answered everything needed at the structural level. For Go files, `Read` was used for implementation-detail inspection (map literals, struct field names) as expected — Hylla indexes block-level summaries. Non-Go files (README.md, PLAN.md, BUILDER_WORKLOG.md) read via `Read` tool directly (correct: Hylla is Go-only today).

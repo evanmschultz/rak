@@ -144,7 +144,7 @@ README "Languages detected": append the 10 new language names in alphabetical or
 
 ### Unit A.3 — Templating and frontend variants
 
-**State:** todo
+**State:** done
 
 **Paths:**
 - `internal/lang/lang.go`
