@@ -257,3 +257,138 @@ Already documented in the Unit E.3 § "Out-of-scope observation routed to orches
 ### Hylla Feedback
 
 N/A — E.2 review was a surgical 2-file inspection (`lister.go` ~126 LOC + `lister_test.go` ~610 LOC). `Read` + `git diff HEAD~3` were the right primary tools; no Hylla query was attempted (integration points were named explicitly in the spawn prompt + visible in the diff). No miss to report.
+
+## Unit E.4 — Round 1
+
+- **Reviewer:** go-qa-falsification-agent
+- **Started:** 2026-05-17
+- **Verdict:** PASS (no CONFIRMED counterexample; two minor findings — F4 stale docstring, F5 README/default-version drift — routed to orchestrator for optional polish)
+- **Commit under review:** `353d93f ci(release): add goreleaser config and tag-triggered workflow`
+- **Files reviewed:**
+  - `.goreleaser.yml` (NEW)
+  - `.github/workflows/release.yml` (NEW)
+  - `cmd/rak/main.go` (`const version` → `var version` for ldflags injection)
+  - `cmd/rak/root_test.go` (`TestRootCmd_Version` updated to read live `version` var)
+  - `README.md` (`## Download a binary` section, `--version` example output line)
+- **Mage targets run:** `mage ci` (PASS — gofumpt clean, lint 0 issues, all 9 packages green with `-race`, coverage 87.9% above 70% floor)
+
+### Attack 1 — `.goreleaser.yml` schema validity (v2 + 4 platforms + tar.gz + LICENSE/README + ldflags)
+
+REFUTED with two deprecation observations.
+
+Verified against `/goreleaser/goreleaser` Context7 reference and the `goreleaser-action@v6` + `version: '~> v2'` workflow pin:
+
+- `version: 2` (line 1) — correct top-level v2 schema marker.
+- `builds[0]` — `main: ./cmd/rak`, `binary: rak`, `env: [CGO_ENABLED=0]`, `goos: [linux, darwin]`, `goarch: [amd64, arm64]` — yields exactly the four required platform×arch combinations (linux/amd64, linux/arm64, darwin/amd64, darwin/arm64). NO `windows` in `goos` (matches PLAN.md "NO Windows in v0.2.0").
+- `ldflags: ['-s -w -X main.version={{.Version}}']` (line 16) — `-X` flag with package path `main.version` matches the now-`var version` symbol in `cmd/rak/main.go:15`. The `-s -w` strip symbols/debug info — standard size reduction. `{{.Version}}` is the canonical GoReleaser template var that resolves to the git tag minus the leading `v` (e.g. tag `v0.2.0` → `Version = "0.2.0"`); combined with `cobra`'s default `--version` format it would print `rak version 0.2.0` (NOT `rak version v0.2.0`). See Finding F5 below for the related README drift.
+- `archives[0]` — `format: tar.gz` (line 22), `name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"`, `files: [LICENSE, README.md]` (lines 24-26). LICENSE + README.md included per PLAN spec.
+- `checksum.name_template: checksums.txt` (line 29) — standard.
+
+**Deprecation observations (not counterexamples — backward-compatible aliases):**
+
+- `format: tar.gz` (line 22): per Context7 `/goreleaser/goreleaser` "Rename Archive Format to Formats" (v2.6 deprecation), `format` is now spelled `formats: [tar.gz]`. The singular spelling is still accepted but will emit a deprecation warning on every release run. Trivial future fix: `formats: ["tar.gz"]`.
+- `builds: [rak]` inside `archives[0]` (lines 20-21): per Context7 "Update Archive Builds Field" (v2.8 deprecation), `builds` is renamed to `ids`. Backward-compatible but warns.
+- Both deprecations will appear as inline warnings during `goreleaser release` on the first tag push. They do NOT break the build today; they will be hard-removed in a future major. Not a counterexample — but worth a one-line fix when convenient.
+
+### Attack 2 — `.github/workflows/release.yml` validity (triggers, permissions, action versions, fetch-depth)
+
+REFUTED. All spawn-prompt-required attributes present and correctly shaped:
+
+- **Trigger** (lines 3-6): `on.push.tags: ['v*.*.*']` — single-event-single-glob shape that fires only on semver tag pushes (`v0.2.0`, `v1.2.3`), NOT on `v0.2.0-dev` (no `*.*.*` match), commits, or non-tag pushes. Per PLAN spec.
+- **Permissions** (lines 8-9): `contents: write` at workflow level — required for `gh release create` via GoReleaser, no `id-token` or other broader scopes leaked.
+- **Checkout** (lines 16-19): `actions/checkout@v4` + `fetch-depth: 0` — full history required for GoReleaser changelog generation (`changelog.sort: asc` in `.goreleaser.yml` depends on git log). Builder worklog explicitly calls this out.
+- **Go setup** (lines 21-26): `actions/setup-go@v5`, `go-version: '1.26.x'` (matches `go.mod` `go 1.26.3`), `cache: true` with `cache-dependency-path: go.sum`. Consistent with `ci.yml`'s Go pinning.
+- **GoReleaser action** (lines 28-35): `goreleaser/goreleaser-action@v6`, `distribution: goreleaser` (not `goreleaser-pro`), `version: '~> v2'` (semver constraint pinning to goreleaser v2.x — matches `version: 2` in `.goreleaser.yml`), `args: release --clean`. `--clean` removes the `dist/` directory before each release (idempotent), per GoReleaser convention.
+- **Env** (lines 34-35): `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` — automatic per-job token, no PAT or external secret required.
+
+No misuse: no `pull_request` trigger (which would race releases), no `workflow_dispatch` manual escape hatch (acceptable for v0.2.0), no matrix builds (single-runner is correct since GoReleaser cross-compiles internally).
+
+### Attack 3 — `const` → `var version` change enables `-X main.version=...` linker override
+
+REFUTED. `cmd/rak/main.go:15` now reads `var version = "v0.2.0-dev"` (was `const version = "v0.1.4"`). The Go linker's `-X importpath.name=value` flag can ONLY override **package-level variables of type string** — it silently ignores `const` declarations because constants are inlined at compile time. The builder's worklog correctly identified this as the load-bearing change: without `const` → `var`, every GoReleaser-produced binary would print the hardcoded fallback regardless of the actual tag.
+
+Live confirmation: `var version = "v0.2.0-dev"` (line 15) is package-level (not inside a func), type string (inferred from literal), and exported-equivalent for `-ldflags` purposes (linker `-X` accesses by symbol path, not Go visibility rules — `main.version` works even though `version` is unexported).
+
+Fallback `"v0.2.0-dev"`: present for local `go install` / `go build ./cmd/rak` invocations without `-ldflags`. Matches the GoReleaser convention of `<next-version>-dev` for the pre-release dev tree.
+
+### Attack 4 — `TestRootCmd_Version` reads live `version` variable (no v0.1.4 brittleness)
+
+REFUTED for the assertion logic. `cmd/rak/root_test.go:1182` sets `cmd.Version = version` (the live var) and line 1193 asserts `strings.Contains(got, version)`. This is correct: future version bumps to the `var version = "..."` line in `main.go` automatically flow through to the test without edits — no hardcoded `"v0.1.4"` or `"v0.2.0-dev"` literal remains in the assertion.
+
+The Round-1 build-QA for E.2 (lines 132-150) and E.3 (lines 244-251) of this file flagged the prior-state failure (`v0.1.4` hardcoded assert against `v0.2.0-dev` working-tree state) as F3. F3 is now RESOLVED by E.4's diff. Confirmed by `mage ci` PASS (test now green).
+
+### Finding F4 — Stale docstring comment on `TestRootCmd_Version` (non-counterexample)
+
+`cmd/rak/root_test.go:1169-1173` doc-comment still reads `"...prints output containing \"v0.1.4\" when invoked with --version."`. The assertion was updated (line 1193 reads from live `version`), but the function's leading godoc comment was not. Today the test passes against `v0.2.0-dev` because the assertion is parameterized; the docstring is now factually wrong about what value it expects.
+
+Not a code counterexample — `mage ci` is green and `golangci-lint` doesn't flag doc-comment staleness. Trivial polish: rewrite the comment to read "containing the value of the package-level `version` variable" (or similar). Routed to orchestrator for optional cleanup.
+
+### Attack 5 — README "Download a binary" section placement + go install preservation
+
+REFUTED. `README.md:7-15` introduces the new `## Download a binary` section ABOVE the existing `## Install` section (line 17). The new section:
+
+- Names supported platforms (macOS amd64/arm64, Linux amd64/arm64) — matches `.goreleaser.yml` build matrix.
+- Links to `https://github.com/evanmschultz/rak/releases` — canonical GitHub releases page URL.
+- Includes a `curl | tar | mv` example for `darwin_arm64`.
+
+Existing `## Install` section (`go install ...`) preserved unchanged at line 17-21. Both install paths visible. The `### From source` subsection (lines 27-34) also intact. PLAN spec ("Don't remove `go install` instructions — both are valid install paths") satisfied.
+
+### Finding F5 — README example output (`v0.2.0`) drifts from main.go default (`v0.2.0-dev`)
+
+`README.md:39-40` shows the Quick Example output:
+```
+$ rak --version
+rak version v0.2.0
+```
+
+But `cmd/rak/main.go:15` defines the dev-default as `var version = "v0.2.0-dev"`. A user who follows the README's `## Install` section (`go install github.com/evanmschultz/rak/cmd/rak@latest`) and runs `rak --version` against the `main` branch tip will see `rak version v0.2.0-dev` (the dev fallback, since `go install` does not invoke `-ldflags`), not the example's `rak version v0.2.0`.
+
+Additionally, GoReleaser's `{{.Version}}` template resolves to the tag **minus** the leading `v` per its templating conventions — so a release of tag `v0.2.0` would inject `-X main.version=0.2.0`, producing `rak version 0.2.0` (no `v` prefix). The README example's `rak version v0.2.0` would only match if (a) the user happens to be running a release with a manual `v`-prefixed `-ldflags` override, OR (b) the tag template is adjusted to prepend `v` (e.g. `-X main.version=v{{.Version}}` or use `{{.Tag}}` which keeps the leading `v`).
+
+Two options for the orchestrator:
+1. **Cosmetic README fix only**: change line 40 to `rak version v0.2.0-dev` to match the local-build reality, and add a parenthetical noting "(release binaries show the tagged version without the `-dev` suffix)".
+2. **Tag-template fix in `.goreleaser.yml`**: switch ldflags to `-X main.version={{.Tag}}` (which preserves the `v` prefix), then `rak version v0.2.0` actually matches what a released binary prints. Most idiomatic; matches the `v`-prefixed example users will copy.
+
+Not a CONFIRMED counterexample against E.4's stated acceptance criteria (PLAN.md does NOT specify the exact format string for the `--version` output; the criteria are limited to "version injected via ldflags" + "syntactically valid `.goreleaser.yml`"). Routed as a polish finding; dev-signoff applies per Tier B drop convention.
+
+### Attack 6 — `mage ci` cleanliness (drop-end gate)
+
+REFUTED. Just ran `mage ci` from `main/`:
+
+- `gofumpt -l .` → empty output (no formatting issues).
+- `go vet ./...` → clean.
+- `golangci-lint run` → 0 issues.
+- `go test -race ./...` → all 9 packages PASS.
+- Coverage: 87.9% on `./internal/...` (well above the 70% floor).
+
+The previously red `TestRootCmd_Version` (F3 from Rounds for E.2/E.3) is now green — E.4's test fix (lines 1190-1194 of `root_test.go`) plumbs the live `version` variable through both the cobra command and the assertion. Confirmed via the coverage report showing all `cmd/rak` tests participated and the `total: 87.9%` rollup line.
+
+### Attack 7 — `mage install` invocation by an agent (Go-quality discipline)
+
+EXHAUSTED, no counterexample found. Builder worklog (`BUILDER_WORKLOG.md` E.4 section, lines 91-109) lists files touched + describes the const→var rationale + admits the path expansion to `cmd/rak/main.go` per scope-expansion protocol. Worklog explicitly states "`mage build` not run — CI-config-only unit per PLAN.md"; no `mage install` or raw `go build`/`go test`/`go vet` invocations recorded. Consistent with `main/CLAUDE.md` § "Build Verification" rule 3 ("NEVER run `mage install` from an agent").
+
+### Attack 8 — Cross-stream race / concurrent worktree mutation (per CLAUDE.md concurrency rules)
+
+N/A. CI config + 1-token Go change + README prose. No goroutines, no shared state, no channels, no `init()` side effects. Static config files; no runtime concurrency surface introduced.
+
+### Attack 9 — Workflow trigger over-firing (release on PR, branch push, dev tags)
+
+REFUTED. `on.push.tags: ['v*.*.*']` glob requires three dot-separated components — matches `v0.2.0`, `v1.10.3`, `v2.0.0-rc.1` (the trailing `-rc.1` is matched by the last `*`), but does NOT match:
+- Non-tag branch push (different event scope: `push.branches`, not `push.tags`).
+- Pull request events (not in `on:` list at all).
+- Dev tags without the `v` prefix or without `.` separators (e.g. tag `nightly` → no match).
+- Tags with fewer than 3 dot components (e.g. `v1` or `v0.2` → no match).
+
+No `workflow_dispatch` means the release cannot be triggered manually from the Actions UI — a deliberate Tier-B-acceptable trade per dev signoff convention; can be added later if needed.
+
+Note: tags like `v0.2.0-dev` WILL match the `v*.*.*` glob (the trailing `-dev` is matched by the third `*`), so pushing a `v0.2.0-dev` tag would inadvertently trigger a release. Not a counterexample since the dev controls tag-push manually and the v0.2.0-dev string is the in-tree dev placeholder (not a tag); but worth noting as a small footgun. Tighter regex (e.g. via a custom workflow filter) is out of scope for this unit.
+
+### Verdict
+
+**PASS for Unit E.4.** All 7 spawn-prompt attack angles (`.goreleaser.yml` validity / `release.yml` validity / const-to-var ldflags / test fix / README placement / README version example / `mage ci`) plus 2 additional adversarial probes (Go-quality discipline / workflow-trigger over-firing) applied. Six angles REFUTED with concrete trace through the artifact; two angles surfaced minor polish findings (F4 stale docstring on the test, F5 README `v0.2.0` example vs main.go `v0.2.0-dev` default); two angles N/A by construction. `mage ci` GREEN end-to-end.
+
+The two GoReleaser-config deprecation notes (`format` → `formats` v2.6, `builds` → `ids` v2.8) are backward-compatible aliases that will emit warnings on first release run; route as a one-line follow-up at orchestrator's discretion.
+
+### Hylla Feedback
+
+N/A — Unit E.4 touched only non-Go files (`.goreleaser.yml`, `.github/workflows/release.yml`, `README.md`) and one 5-line Go diff in `cmd/rak/main.go` (const → var). Hylla is Go-only today; all evidence came from `Read`, `git show 353d93f`, `mage ci`, and Context7 (`/goreleaser/goreleaser`) for the v2-schema deprecation cross-checks. No Hylla query attempted; no miss forced a fallback.
