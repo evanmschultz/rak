@@ -503,6 +503,7 @@ func TestFilesFromLister_ContextCancel(t *testing.T) {
 	fileC := filepath.Join(tmp, "c.txt")
 
 	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 
 	fl := lister.NewFilesFromLister(strings.NewReader(fileA + "\n" + fileB + "\n" + fileC + "\n"))
 	count := 0
