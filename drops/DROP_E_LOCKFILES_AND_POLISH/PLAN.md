@@ -95,7 +95,7 @@ Create a new tiny package `internal/lockfiles/` with a denylist of well-known lo
 
 ### Unit E.2 — Friendly error for non-regular files
 
-**State:** todo
+**State:** done
 **Paths:** `internal/lister/lister.go`, `internal/lister/lister_test.go`
 **Packages:** `internal/lister`
 **Blocked by:** —

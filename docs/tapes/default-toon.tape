@@ -18,3 +18,10 @@ Type "rak internal/counting"
 Sleep 500ms
 Enter
 Sleep 4s
+
+Sleep 2s
+
+Type "rak --human internal/counting"
+Sleep 500ms
+Enter
+Sleep 5s

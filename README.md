@@ -2,7 +2,7 @@
 
 **rak** is `wc++` for LLM-first consumption. Walk a directory, count bytes/lines/words/chars/files, detect languages, split blank/comment/code, and emit compact TOON output by default — designed to be fed directly to a language model. From Swedish *räkna* ("to count").
 
-![rak default TOON output](docs/default-toon.gif)
+![rak default TOON output then --human](docs/default-toon.gif)
 
 ## Install
 
