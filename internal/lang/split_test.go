@@ -961,6 +961,95 @@ func TestSplit_ConfigDataFormats(t *testing.T) {
 	}
 }
 
+// TestSplit_BuildFiles verifies Unit A.5: blank/comment/code classification
+// for the new build and task file language grammars.
+//
+// Bazel (Starlark) uses "#" for line comments (Python-like hash syntax).
+// Groovy (Jenkinsfile) uses "//" for line comments and "/* */" for block
+// comments (Java-family). Just, Earth, and Caddy all use "#" for line comments.
+//
+// Procfile is not tested here because it has no Language constant and therefore
+// no grammarTable entry — any Procfile line would fall through to the
+// LangUnknown zero-grammar path (all non-blank lines = Code). No test needed.
+func TestSplit_BuildFiles(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		lang  Language
+		input string
+		want  LineCounts
+	}{
+		// LangBazel — "#" line comment (Starlark = Python-like hash syntax).
+		{
+			name:  "bazel hash comment",
+			lang:  LangBazel,
+			input: "# comment\ngo_binary(name = 'rak')\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "bazel blank and code",
+			lang:  LangBazel,
+			input: "load('@rules_go//go:def.bzl', 'go_binary')\n\ngo_binary(name = 'rak')\n",
+			want:  LineCounts{Blank: 1, Comment: 0, Code: 2},
+		},
+		// LangGroovy — "//" line + "/* */" block (Java-family, Jenkinsfile).
+		{
+			name:  "groovy line comment",
+			lang:  LangGroovy,
+			input: "// comment\npipeline { agent any }\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "groovy block comment",
+			lang:  LangGroovy,
+			input: "/* open\n * body\n */\nstage('build') {}\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+		{
+			name:  "groovy inline block comment (Policy α)",
+			lang:  LangGroovy,
+			input: "def x = /* value */ 1\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 0},
+		},
+		// LangJust — "#" line comment (justfile syntax).
+		{
+			name:  "just hash comment",
+			lang:  LangJust,
+			input: "# comment\nbuild:\n  cargo build\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 2},
+		},
+		// LangEarth — "#" line comment (Earthly syntax).
+		{
+			name:  "earth hash comment",
+			lang:  LangEarth,
+			input: "# comment\nBUILD:\n  FROM golang:latest\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 2},
+		},
+		// LangCaddy — "#" line comment (Caddyfile syntax).
+		{
+			name:  "caddy hash comment",
+			lang:  LangCaddy,
+			input: "# comment\nexample.com {\n  root * /var/www\n}\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 3},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := Split(strings.NewReader(tc.input), tc.lang)
+			if err != nil {
+				t.Fatalf("Split: unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %+v; want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestSplit_Swift verifies that Swift uses "//" for line comments and
 // "/* */" for block comments. Nested block comments are not tracked (Policy α,
 // YAGNI v0.1.0): the flat open/close scan is acceptable.

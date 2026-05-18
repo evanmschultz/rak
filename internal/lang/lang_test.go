@@ -455,6 +455,88 @@ func TestDetect_ConfigDataFormats(t *testing.T) {
 	}
 }
 
+// TestDetect_BuildTaskFiles verifies Unit A.5: special-filename detection for
+// build and task files. Covers Bazel (BUILD, BUILD.bazel, WORKSPACE), Groovy
+// (Jenkinsfile), Just (Justfile, justfile), Earth (Earthfile), Caddy
+// (Caddyfile), Ruby re-use (Vagrantfile, Brewfile), and the .bzl extension.
+//
+// The Procfile row intentionally asserts LangUnknown — Procfile is not given a
+// Language constant (YAGNI cut, PLAN.md § "Unit A.5"). This test locks in that
+// decision so a future builder cannot accidentally add Procfile detection without
+// deliberately updating this assertion.
+//
+// The MapFS smoke at the bottom verifies Bazel detection via the fstest.MapFS
+// helper, exercising all four Bazel-matching paths through Detect in a single
+// parallel subtest.
+func TestDetect_BuildTaskFiles(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		path string
+		want Language
+	}{
+		// Bazel — special filenames (case-insensitive basename match).
+		{"BUILD", LangBazel},
+		{"BUILD.bazel", LangBazel},
+		{"WORKSPACE", LangBazel},
+		// Bazel — .bzl extension (Acceptance #3).
+		{"foo.bzl", LangBazel},
+		// Groovy — Jenkinsfile special filename (Acceptance #4).
+		{"Jenkinsfile", LangGroovy},
+		// Just — both casings (Acceptance #5).
+		{"Justfile", LangJust},
+		{"justfile", LangJust},
+		// Earth — Earthfile special filename.
+		{"Earthfile", LangEarth},
+		// Caddy — Caddyfile special filename.
+		{"Caddyfile", LangCaddy},
+		// Ruby re-use — Vagrantfile and Brewfile map to LangRuby (Acceptance #6, #7).
+		{"Vagrantfile", LangRuby},
+		{"Brewfile", LangRuby},
+		// Procfile is intentionally undetected — returns LangUnknown (Acceptance #8).
+		// YAGNI cut: Procfile has no Language constant. Do not add one without
+		// updating this row and the PLAN.md Notes § "Vagrantfile / Brewfile / Gemfile".
+		{"Procfile", LangUnknown},
+		// Nested path — basename match still works.
+		{"infra/BUILD", LangBazel},
+		{"ci/Jenkinsfile", LangGroovy},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.path, func(t *testing.T) {
+			t.Parallel()
+			fsys := fstest.MapFS{tc.path: &fstest.MapFile{Data: []byte("content")}}
+			f := newTestFile(fsys, tc.path)
+			got := Detect(f)
+			if got != tc.want {
+				t.Errorf("Detect(%q) = %q; want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+
+	// MapFS smoke: verify all four Bazel-matching paths through Detect in one
+	// parallel subtest. BUILD, BUILD.bazel, WORKSPACE → specialFilenames;
+	// foo.bzl → extensionTable. All must return LangBazel.
+	t.Run("bazel MapFS smoke", func(t *testing.T) {
+		t.Parallel()
+		fsys := fstest.MapFS{
+			"BUILD":       &fstest.MapFile{Data: []byte("load('@rules_go//go:def.bzl', 'go_binary')")},
+			"BUILD.bazel": &fstest.MapFile{Data: []byte("go_binary(name='rak')")},
+			"WORKSPACE":   &fstest.MapFile{Data: []byte("workspace(name='rak')")},
+			"foo.bzl":     &fstest.MapFile{Data: []byte("def foo(): pass")},
+		}
+		for _, relPath := range []string{"BUILD", "BUILD.bazel", "WORKSPACE", "foo.bzl"} {
+			relPath := relPath
+			f := newTestFile(fsys, relPath)
+			got := Detect(f)
+			if got != LangBazel {
+				t.Errorf("Detect(%q) = %q; want %q (LangBazel)", relPath, got, LangBazel)
+			}
+		}
+	})
+}
+
 // TestDetect_Templating verifies Unit A.3: all 12 new templating and frontend
 // language constants resolve correctly from their extensions via Detect.
 // Covers Acceptance criteria 2, 3, and 4.

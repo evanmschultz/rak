@@ -152,6 +152,26 @@ const (
 	// LangJSONL is the Language constant for JSON Lines files (.jsonl, .ndjson).
 	// JSON Lines has no comment syntax; all non-blank lines are classified as Code.
 	LangJSONL Language = "jsonl"
+
+	// Unit A.5 — Build and task files.
+
+	// LangBazel is the Language constant for Bazel build files (BUILD, BUILD.bazel,
+	// WORKSPACE special filenames and .bzl extension). Bazel uses Starlark
+	// (Python-like) syntax with "#" for line comments.
+	LangBazel Language = "bazel"
+	// LangGroovy is the Language constant for Groovy source files, including
+	// Jenkinsfile (special filename). Groovy is a Java-family language with "//"
+	// line comments and "/* */" block comments.
+	LangGroovy Language = "groovy"
+	// LangJust is the Language constant for Justfile task runner files (Justfile
+	// and justfile special filenames). Uses "#" for line comments.
+	LangJust Language = "just"
+	// LangEarth is the Language constant for Earthly build files (Earthfile special
+	// filename). Uses "#" for line comments per Earthly syntax.
+	LangEarth Language = "earth"
+	// LangCaddy is the Language constant for Caddyfile web server configuration
+	// files (Caddyfile special filename). Uses "#" for line comments.
+	LangCaddy Language = "caddy"
 )
 
 // specialFilenames maps exact lowercased basenames to languages. Lookup is
@@ -165,6 +185,30 @@ var specialFilenames = map[string]Language{
 	"gnumakefile":    LangMakefile,
 	"makefile":       LangMakefile,
 	"rakefile":       LangRuby,
+
+	// Unit A.5 — Build and task files.
+	// Bazel: BUILD, BUILD.bazel, and WORKSPACE are well-known Bazel entry points.
+	// Keys are pre-lowercased; Detect lowercases the basename before lookup.
+	"build":       LangBazel,
+	"build.bazel": LangBazel,
+	"workspace":   LangBazel,
+	// Groovy: Jenkinsfile is the standard CI pipeline file. The constant is
+	// LangGroovy (not LangJenkinsfile) because Groovy is the actual language.
+	"jenkinsfile": LangGroovy,
+	// Just: both Justfile (conventional) and justfile (lowercase) are valid.
+	"justfile": LangJust,
+	// Earth: Earthfile is the standard Earthly build definition file.
+	"earthfile": LangEarth,
+	// Caddy: Caddyfile is the standard Caddy web server configuration file.
+	"caddyfile": LangCaddy,
+	// Ruby DSLs: Vagrantfile and Brewfile are Ruby DSLs; they reuse LangRuby
+	// (same as existing Gemfile/Rakefile pattern). No new constant needed.
+	"vagrantfile": LangRuby,
+	"brewfile":    LangRuby,
+	// Procfile is intentionally NOT listed here. Files named "Procfile" count
+	// as bytes/lines/words but return LangUnknown from Detect (YAGNI cut,
+	// 2026-05-16: nobody asked to filter by Procfile specifically). If a user
+	// requests Procfile detection, add in v0.2.1+ with a LangProcfile constant.
 }
 
 // extensionTable maps lowercased file extensions (with the leading dot, e.g.
@@ -253,6 +297,10 @@ var extensionTable = map[string]Language{
 	".tsv":          LangTSV,
 	".jsonl":        LangJSONL,
 	".ndjson":       LangJSONL,
+
+	// Unit A.5 — Build and task files.
+	// .bzl is the Starlark extension used for Bazel macro and rule files.
+	".bzl": LangBazel,
 }
 
 // shebangsTable maps interpreter basenames to languages. For

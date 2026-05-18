@@ -68,24 +68,45 @@ Structured output with `total_by_lang` mapped by language name. `omitempty` keep
 ### Common invocations
 
 ```sh
-rak                          # count current dir (TOON, default)
-rak ./internal               # count a specific path
-rak --lang go,rust .         # only count Go and Rust files
-rak --sort files .           # sort directories by file count (desc by default)
-rak --sort path --sort-asc . # alphabetical directory order
-rak --depth 2 .              # limit walk to 2 levels deep
-rak --max-files 1000 .       # abort if more than 1000 files are accepted
-rak --hidden .               # include hidden (dotfile/dotdir) entries
-rak --include '*.go' .       # only files matching the glob
-rak --exclude '*_test.go' .  # exclude files matching the glob
-cat README.md | rak          # wc-parity counts on stdin
-cat data.json | rak --json   # JSON output on stdin
-rak CLAUDE.md                # count a single file (wc-style)
+rak                                      # count current dir (TOON, default)
+rak ./internal                           # count a specific path
+rak --lang go,rust .                     # only count Go and Rust files
+rak --sort files .                       # sort directories by file count (desc by default)
+rak --sort path --sort-asc .             # alphabetical directory order
+rak --depth 2 .                          # limit walk to 2 levels deep
+rak --max-files 1000 .                   # abort if more than 1000 files are accepted
+rak --hidden .                           # include hidden (dotfile/dotdir) entries
+rak --include '*.go' .                   # only files matching the glob
+rak --exclude '*_test.go' .              # exclude files matching the glob
+cat README.md | rak                      # wc-parity counts on stdin
+cat data.json | rak --json               # JSON output on stdin
+rak CLAUDE.md                            # count a single file (wc-style)
+git ls-files '*.go' | rak --files-from - # count only tracked Go files
 ```
 
 **About `--sort`:** the value is a **key** — one of `lines`, `files`, `bytes`, `path` — not a path. Numeric keys (`lines`/`files`/`bytes`) sort descending by default; `path` sorts ascending. Pass `--sort-asc` to flip the default direction. The positional argument (e.g. `.` or `./internal`) is the walk root — separate from the sort key.
 
 ![rak --sort files demo](docs/sort-files.gif)
+
+## Piping
+
+`--files-from <FILE>` composes rak with any tool that emits newline-separated paths — ripgrep, git, find, gh, or anything else in your Unix toolchain. Pass `-` to read from stdin. The source tool controls which files are listed; rak counts them.
+
+```sh
+# Pipe a file list from ripgrep
+rg --files | rak --files-from -
+
+# Count only tracked Go files
+git ls-files '*.go' | rak --files-from -
+
+# Find by name
+find . -name '*.go' | rak --files-from -
+
+# Count files changed in a PR
+gh pr diff 42 --name-only | rak --files-from -
+```
+
+![rak --files-from demo](docs/pipe.gif)
 
 ## Default behavior
 
@@ -112,6 +133,7 @@ rak CLAUDE.md                # count a single file (wc-style)
 | `--exclude <glob>` | none | exclude files matching the glob (repeatable, wins over `--include`) |
 | `--no-gitignore` | off | **inside a git repo: hard error** (rak uses git-tracked enumeration; this flag is meaningless). Outside a git repo: disable `.gitignore` filtering. |
 | `--binary` | off | include binary files in counts |
+| `--files-from <FILE>` | none | read newline-separated file paths from FILE (use `-` for stdin) |
 | `--version` | — | print version and exit |
 | `--help` | — | print help and exit |
 
@@ -119,7 +141,9 @@ Mutually exclusive: `--human`, `--json`, `--toon` (cobra rejects more than one).
 
 ## Languages detected
 
-C, C++, C#, CMakeLists.txt, CSV, CSS, Dart, Dockerfile, dotenv, EditorConfig, Elixir, ERB, F#, Go, GraphQL, Haskell, HCL/Terraform, HTML, INI, Java, JavaScript, Jinja, JSON, JSONL, JSX, Kotlin, LESS, Liquid, Lua, Makefile, Markdown, Mustache/Handlebars, Nix, PHP, Properties, Protobuf, Python, R, Ruby, Rust, Sass, Scala, SCSS, Shell (sh/bash/zsh/fish), SQL, Svelte, Swift, Templ, TOML, TSV, TSX, TypeScript, Vue, XML, YAML, Zig. Detection priority: special filename → extension → shebang → content heuristic. Files whose language can't be detected appear in counts but are excluded from `--lang` filtering and the `total_by_lang` block.
+Bazel, C, C++, C#, Caddyfile, CMakeLists.txt, CSV, CSS, Dart, Dockerfile, dotenv, Earthfile, EditorConfig, Elixir, ERB, F#, Go, GraphQL, Groovy, Haskell, HCL/Terraform, HTML, INI, Java, JavaScript, Jinja, JSON, JSONL, JSX, Justfile, Kotlin, LESS, Liquid, Lua, Makefile, Markdown, Mustache/Handlebars, Nix, PHP, Properties, Protobuf, Python, R, Ruby, Rust, Sass, Scala, SCSS, Shell (sh/bash/zsh/fish), SQL, Svelte, Swift, Templ, TOML, TSV, TSX, TypeScript, Vue, XML, YAML, Zig. Detection priority: special filename → extension → shebang → content heuristic. Files whose language can't be detected appear in counts but are excluded from `--lang` filtering and the `total_by_lang` block.
+
+Special-filename detection covers: `Makefile`, `Dockerfile`, `CMakeLists.txt`, `Gemfile`, `Rakefile` (Ruby), `BUILD`, `BUILD.bazel`, `WORKSPACE`, `*.bzl` (Bazel), `Jenkinsfile` (Groovy), `Justfile`/`justfile`, `Earthfile`, `Caddyfile`, `Vagrantfile`/`Brewfile` (Ruby DSLs). `Procfile` is intentionally undetected — those files count as bytes/lines/words but do not appear in `--lang` filtering or `total_by_lang`.
 
 > **v0.2.0 behavior change:** `.xml` files previously appeared as `html` in `total_by_lang`. They now appear as `xml`. This is an intentional split — XML and HTML are distinct languages.
 
@@ -128,7 +152,7 @@ C, C++, C#, CMakeLists.txt, CSV, CSS, Dart, Dockerfile, dotenv, EditorConfig, El
 ### v0.2 (in development)
 
 - **Broader polyglot language detection** — v0.1.x covers 22 languages; v0.2 adds ~30 more (programming, templating, config, data, build files).
-- **`--files-from <FILE>`** for pipe composition (e.g. `git ls-files '*.go' | rak --files-from -`).
+- **`--files-from <FILE>`** for pipe composition — shipped in v0.2.0 (see [Piping](#piping)).
 - **Lockfile exclusion by default** with `--include-lockfiles` opt-in — `go.sum`, `package-lock.json`, etc. hidden from counts by default so you see code your team wrote, not machine-generated dep manifests.
 - **GoReleaser binary releases** (v0.1.0 ships via `go install` only).
 

@@ -295,7 +295,7 @@ README "Languages detected": append the 11 new names alphabetically (CSV, dotenv
 
 ### Unit A.5 — Build and task files
 
-**State:** todo
+**State:** done
 
 **Paths:**
 - `internal/lang/lang.go`

@@ -235,6 +235,29 @@ var grammarTable = map[Language]grammar{
 	// LangCSV, LangTSV, LangJSONL intentionally absent from grammarTable:
 	// CSV, TSV, and JSON Lines have no comment syntax — all non-blank lines
 	// classify as Code via the zero-grammar fallback in Split.
+
+	// Unit A.5 — Build and task files.
+
+	// Bazel (Starlark): "#" line comment (Python-like hash syntax). No block-comment
+	// form in Starlark.
+	LangBazel: {linePrefix: "#"},
+
+	// Groovy (Jenkinsfile): Java-family "//" line + "/* */" block.
+	LangGroovy: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+
+	// Just (justfile): "#" line comment. Justfile has no block-comment form.
+	LangJust: {linePrefix: "#"},
+
+	// Earth (Earthfile): "#" line comment (Earthly syntax). No block-comment form.
+	LangEarth: {linePrefix: "#"},
+
+	// Caddy (Caddyfile): "#" line comment. Caddyfile has no block-comment form.
+	LangCaddy: {linePrefix: "#"},
+
+	// Vagrantfile and Brewfile are detected as LangRuby (existing entry above).
+	// Procfile is intentionally absent: no Language constant, no grammar
+	// (YAGNI cut, 2026-05-16). Files named Procfile count as bytes/lines/words
+	// but classify all non-blank lines as Code via zero-grammar fallback.
 }
 
 // Split reads r line by line and classifies each line as Blank, Comment, or

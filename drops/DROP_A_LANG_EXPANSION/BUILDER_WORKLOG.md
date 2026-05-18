@@ -103,3 +103,31 @@ None — Hylla answered everything needed at the structural level. For Go files,
 ## Hylla Feedback (Unit A.4)
 
 N/A — task touched non-Go files (README.md, PLAN.md, BUILDER_WORKLOG.md) via `Read` tool directly (correct: Hylla is Go-only). For Go files, implementation details required `Read` on lang.go, split.go, and test files (expected — Hylla indexes block-level summaries, not raw map literals). No misses to report.
+
+## Unit A.5 — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-17
+- **Files touched:**
+  - `internal/lang/lang.go` — added 5 `Language` constants (LangBazel, LangGroovy, LangJust, LangEarth, LangCaddy) with doc comments under `// Unit A.5 — Build and task files.`; added 9 `specialFilenames` entries (`"build"`, `"build.bazel"`, `"workspace"` → LangBazel; `"jenkinsfile"` → LangGroovy; `"justfile"` → LangJust; `"earthfile"` → LangEarth; `"caddyfile"` → LangCaddy; `"vagrantfile"`, `"brewfile"` → LangRuby); added `.bzl` → LangBazel to `extensionTable`; added YAGNI cut comment for Procfile in `specialFilenames`.
+  - `internal/lang/split.go` — added 5 grammar entries to `grammarTable`: LangBazel `#`, LangGroovy `//`+`/* */`, LangJust `#`, LangEarth `#`, LangCaddy `#`; added YAGNI cut comment for Procfile.
+  - `internal/lang/lang_test.go` — added `TestDetect_BuildTaskFiles` table-driven test (14 cases: all new special filenames, `.bzl` extension, Procfile asserting LangUnknown, nested path examples) plus a `"bazel MapFS smoke"` subtest exercising all four Bazel-matching paths through Detect (BUILD, BUILD.bazel, WORKSPACE via specialFilenames; foo.bzl via extensionTable). `mage format` reformatted the trailing whitespace in the MapFS literal.
+  - `internal/lang/split_test.go` — added `TestSplit_BuildFiles` with 8 subtests: Bazel `#` (comment + blank/code), Groovy `//` line comment + `/* */` block comment + inline block (Policy α), Just `#`, Earth `#`, Caddy `#`.
+  - `README.md` — converted "Languages detected" to final alphabetical comma-separated form with 61 entries (was 56 after A.4); inserted Bazel, Caddyfile, Earthfile, Groovy, Justfile at correct alphabetical positions; added a "Special-filename detection" prose sentence noting Vagrantfile/Brewfile → Ruby and Procfile intentionally undetected.
+  - `drops/DROP_A_LANG_EXPANSION/PLAN.md` — state `todo` → `done` for Unit A.5.
+- **Mage targets run:**
+  - `mage test`: all 8 packages pass (internal/lang 1.780s); RED confirmed on undefined constants before production code; GREEN confirmed after.
+  - `mage build`: pass (no output).
+  - `mage format`: reformatted `internal/lang/lang.go` and `internal/lang/lang_test.go` (trailing whitespace in MapFS literal and alignment in extensionTable).
+  - `mage ci`: pass — gofumpt clean, 0 lint issues, all 8 packages green with race detector; coverage 87.8% (floor 70.0%).
+- **TDD discipline:** Tests written first (`TestDetect_BuildTaskFiles` + `TestSplit_BuildFiles`) → `mage test` RED (compile error: undefined LangBazel, LangGroovy, etc.) → production code added (constants, specialFilenames, extensionTable, grammarTable) → `mage test` GREEN → `mage format` → `mage ci` GREEN.
+- **Design decisions:**
+  - `"build"` key in `specialFilenames`: lowercased basename of `BUILD` → `"build"`. Correctly maps to LangBazel.
+  - Procfile YAGNI cut: no `LangProcfile` constant and no `"procfile"` key in `specialFilenames`. `Detect` on `Procfile` returns `LangUnknown` via zero-match fallback (basename → no match; no extension; content heuristic: no `<?xml`, `<!DOCTYPE`, `---`, `{`/`[` prefix → LangUnknown). Locked by `Procfile` test row asserting LangUnknown.
+  - LangGroovy (not LangJenkinsfile): the constant name reflects the actual language per PLAN.md rationale — a future `.groovy` extension drop can reuse this constant.
+  - Vagrantfile/Brewfile → LangRuby: reuses existing LangRuby constant, same pattern as Gemfile/Rakefile. No new constant needed.
+  - README: A.4 already converted to comma-separated alphabetical format. A.5 inserted 5 entries at correct alphabetical positions and added the special-filename prose note per PLAN.md Acceptance #11.
+
+## Hylla Feedback (Unit A.5)
+
+None — Hylla answered everything needed at the structural level (block summaries for `Detect`, `Split`, `extensionTable`, `grammarTable`, `specialFilenames`). Implementation-detail inspection (map literals, existing key set) required `Read` on lang.go and split.go — expected behavior, not a miss. Non-Go files (README.md, PLAN.md, BUILDER_WORKLOG.md) read via `Read` directly (Hylla is Go-only today). No fallback misses to report.
