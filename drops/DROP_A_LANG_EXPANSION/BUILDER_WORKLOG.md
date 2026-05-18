@@ -28,3 +28,32 @@ Append a `## Unit N.M — Round K` section per build attempt. See `main/drops/WO
 - **Result:** Returned `LangHTML` const and `Detect` func with accurate summaries. Hylla answered the structural/existence questions well.
 - **Miss:** Hylla did not surface the full file content of `lang.go` or `split.go` — only block-level summaries. For the actual map literals and function bodies I needed `Read` on the files. This is expected behavior (Hylla indexes blocks, not raw source), so not a miss per se — the fallback to `Read` was correct and efficient.
 - **Suggestion:** None; the block-level summaries were accurate and the `Read` fallback is the right tool for implementation-detail inspection.
+
+## Unit A.2 — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-17
+- **Files touched:**
+  - `internal/lang/lang.go` — added 10 `Language` constants (LangCSharp, LangDart, LangElixir, LangFSharp, LangHaskell, LangLua, LangR, LangScala, LangSQL, LangZig) with doc comments; added 14 extension entries (.cs, .dart, .ex, .exs, .fs, .fsi, .fsx, .hs, .lhs, .lua, .r, .scala, .sql, .zig) to `extensionTable`.
+  - `internal/lang/split.go` — added 10 grammar entries to `grammarTable`: C-family (LangCSharp, LangDart, LangScala with `//`+`/* */`), LangSQL (`--`+`/* */`), LangLua (`--`+`--[[`/`]]` long-bracket with YAGNI limitation comment), LangElixir (`#` only), LangZig (`//` only), LangR (`#` only), LangFSharp (`//`+`(* *)`), LangHaskell (`--`+`{- -}`).
+  - `internal/lang/lang_test.go` — added `TestDetect_ProgrammingLanguages` table with 17 cases covering all 10 languages and their extensions; includes `.r`/`.R` case for Acceptance #4.
+  - `internal/lang/split_test.go` — added `TestSplit_ProgrammingLanguages` with 22 subtests covering all 10 grammars (line comment + block comment per lang where applicable; Lua block comment Acceptance #5 covered; Zig doc comment `///` subtest; Elixir code-only subtest).
+  - `README.md` — updated "Languages detected" paragraph to add 10 new languages alphabetically (C#, Dart, Elixir, F#, Haskell, Lua, R, Scala, SQL, Zig); list now at 33 entries (paragraph form still readable; A.5 builder switches at 50+).
+  - `drops/DROP_A_LANG_EXPANSION/PLAN.md` — state `todo` → `done` for Unit A.2.
+- **Mage targets run:** `mage build` (pass, no output), `mage test` (all 8 packages pass; `internal/lang` 1.292s).
+- **Notes:**
+  - All 7 acceptance criteria satisfied:
+    1. `mage test` passes all packages.
+    2. All 10 extensions resolve to correct Language constants (verified by `TestDetect_ProgrammingLanguages`).
+    3. `Split` returns correct Comment classification for each grammar (verified by `TestSplit_ProgrammingLanguages`).
+    4. LangR: `analysis.R` and `script.r` both return `LangR` — `strings.ToLower(filepath.Ext(...))` in `Detect` handles the uppercase case.
+    5. Lua block-comment limitation documented in test comments; `--[[ comment ]]` classified as Comment (verified).
+    6. README lists all 10 new languages alphabetically.
+    7. `mage build` passes.
+  - The pre-existing `internal/summary` failure from A.1's worklog is now gone — all packages clean.
+  - Grammar design choices: LangCSharp, LangDart, LangScala are C-family (straightforward). LangLua's `--[[`/`]]` is the only non-trivial entry — block-close `]]` is also a Lua table-index operator (YAGNI limitation acknowledged in both split.go comment and test). LangFSharp uses `(*`/`*)` (ML-style, not C-style). LangHaskell uses `{-`/`-}` (unique delimiters, no collision risk with other grammars).
+  - TDD discipline: tests written immediately after production code; `mage build` confirmed compile before test run; `mage test` confirmed all cases green on first run.
+
+## Hylla Feedback (Unit A.2)
+
+N/A — task touched non-Go files (README.md, PLAN.md, BUILDER_WORKLOG.md) via `Read` tool directly. For Go files, Hylla was queried for structural orientation but implementation details required `Read` on `lang.go`, `split.go`, and test files (expected behavior — Hylla indexes block-level summaries, not raw map literals). No misses to report: the Read fallback was correct and efficient for all four Go source files. None — Hylla answered everything needed at the structural level.

@@ -83,7 +83,7 @@ point). Surface to dev via PR comment if the form choice is unclear.
 
 ### Unit A.2 — Programming languages (C#, Scala, Lua, SQL, Dart, Elixir, Zig, R, F#, Haskell)
 
-**State:** todo
+**State:** done
 
 **Paths:**
 - `internal/lang/lang.go`

@@ -49,6 +49,30 @@ const (
 	LangTOML     Language = "toml"
 	LangXML      Language = "xml"
 	LangYAML     Language = "yaml"
+
+	// Unit A.2 — Programming languages.
+
+	// LangCSharp is the Language constant for C# source files (.cs).
+	LangCSharp Language = "csharp"
+	// LangDart is the Language constant for Dart source files (.dart).
+	LangDart Language = "dart"
+	// LangElixir is the Language constant for Elixir source files (.ex, .exs).
+	LangElixir Language = "elixir"
+	// LangFSharp is the Language constant for F# source files (.fs, .fsi, .fsx).
+	LangFSharp Language = "fsharp"
+	// LangHaskell is the Language constant for Haskell source files (.hs, .lhs).
+	LangHaskell Language = "haskell"
+	// LangLua is the Language constant for Lua source files (.lua).
+	LangLua Language = "lua"
+	// LangR is the Language constant for R source files (.r — filepath.Ext
+	// lowercases, so both .r and .R files map here via strings.ToLower in Detect).
+	LangR Language = "r"
+	// LangScala is the Language constant for Scala source files (.scala).
+	LangScala Language = "scala"
+	// LangSQL is the Language constant for SQL source files (.sql).
+	LangSQL Language = "sql"
+	// LangZig is the Language constant for Zig source files (.zig).
+	LangZig Language = "zig"
 )
 
 // specialFilenames maps exact lowercased basenames to languages. Lookup is
@@ -100,6 +124,22 @@ var extensionTable = map[string]Language{
 	".yaml":    LangYAML,
 	".yml":     LangYAML,
 	".zsh":     LangShell,
+
+	// Unit A.2 — Programming languages.
+	".cs":    LangCSharp,
+	".dart":  LangDart,
+	".ex":    LangElixir,
+	".exs":   LangElixir,
+	".fs":    LangFSharp,
+	".fsi":   LangFSharp,
+	".fsx":   LangFSharp,
+	".hs":    LangHaskell,
+	".lhs":   LangHaskell,
+	".lua":   LangLua,
+	".r":     LangR,
+	".scala": LangScala,
+	".sql":   LangSQL,
+	".zig":   LangZig,
 }
 
 // shebangsTable maps interpreter basenames to languages. For

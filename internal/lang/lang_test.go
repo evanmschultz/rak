@@ -323,6 +323,58 @@ func TestDetect_XML_ExtensionAndContentSniff(t *testing.T) {
 	})
 }
 
+// TestDetect_ProgrammingLanguages verifies Unit A.2: all 10 new language
+// constants resolve correctly from their extensions via Detect.
+// Also covers the LangR case: filepath.Ext lowercases inside Detect via
+// strings.ToLower, so both "analysis.R" and "script.r" return LangR.
+func TestDetect_ProgrammingLanguages(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		path string
+		want Language
+	}{
+		// C# — .cs
+		{"main.cs", LangCSharp},
+		// Dart — .dart
+		{"main.dart", LangDart},
+		// Elixir — .ex, .exs
+		{"app.ex", LangElixir},
+		{"config.exs", LangElixir},
+		// F# — .fs, .fsi, .fsx
+		{"module.fs", LangFSharp},
+		{"iface.fsi", LangFSharp},
+		{"script.fsx", LangFSharp},
+		// Haskell — .hs, .lhs
+		{"Main.hs", LangHaskell},
+		{"Literate.lhs", LangHaskell},
+		// Lua — .lua
+		{"script.lua", LangLua},
+		// R — .r and .R (Acceptance #4: strings.ToLower in Detect lowercases ext)
+		{"script.r", LangR},
+		{"analysis.R", LangR},
+		// Scala — .scala
+		{"Main.scala", LangScala},
+		// SQL — .sql
+		{"schema.sql", LangSQL},
+		// Zig — .zig
+		{"main.zig", LangZig},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.path, func(t *testing.T) {
+			t.Parallel()
+			fsys := fstest.MapFS{tc.path: &fstest.MapFile{Data: []byte("content")}}
+			f := newTestFile(fsys, tc.path)
+			got := Detect(f)
+			if got != tc.want {
+				t.Errorf("Detect(%q) = %q; want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestDetect_HTML_Regression verifies that the XML split (Unit A.1) did not
 // break HTML detection: .html and .htm extensions still return LangHTML.
 func TestDetect_HTML_Regression(t *testing.T) {

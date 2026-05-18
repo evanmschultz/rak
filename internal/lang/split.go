@@ -121,6 +121,39 @@ var grammarTable = map[Language]grammar{
 
 	// JSON has no comment syntax per spec; all non-blank lines are Code.
 	// LangJSON intentionally absent (zero grammar).
+
+	// Unit A.2 — Programming languages.
+
+	// C-family: "//" line + "/* */" block (same as Go/Rust/Java/etc.).
+	LangCSharp: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+	LangDart:   {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+	LangScala:  {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+
+	// SQL (ANSI): "--" line + "/* */" block.
+	LangSQL: {linePrefix: "--", blockOpen: "/*", blockClose: "*/"},
+
+	// Lua: "--" line + "--[[" / "]]" long-bracket block.
+	// Known limitation (Policy α YAGNI): "]]" also appears as a table-index
+	// operator in Lua code. Lines containing "]]" in code context are
+	// mis-classified as Comment. Additionally, "]]" inside string literals can
+	// corrupt multi-line block-comment state. Accepted under F28 YAGNI.
+	LangLua: {linePrefix: "--", blockOpen: "--[[", blockClose: "]]"},
+
+	// Elixir: "#" line only — Elixir has no block-comment form.
+	LangElixir: {linePrefix: "#"},
+
+	// Zig: "//" line only — Zig has no block-comment form.
+	// "////" doc comments use the same "//" prefix and are detected correctly.
+	LangZig: {linePrefix: "//"},
+
+	// R: "#" line only — R has no block-comment form.
+	LangR: {linePrefix: "#"},
+
+	// F# (ML-style): "//" line + "(* *)" block.
+	LangFSharp: {linePrefix: "//", blockOpen: "(*", blockClose: "*)"},
+
+	// Haskell: "--" line + "{- -}" block.
+	LangHaskell: {linePrefix: "--", blockOpen: "{-", blockClose: "-}"},
 }
 
 // Split reads r line by line and classifies each line as Blank, Comment, or

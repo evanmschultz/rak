@@ -432,6 +432,169 @@ func TestSplit_XML(t *testing.T) {
 	}
 }
 
+// TestSplit_ProgrammingLanguages verifies Unit A.2: blank/comment/code
+// classification for each of the 10 new language grammars. One representative
+// snippet per language confirms the comment markers are registered correctly.
+func TestSplit_ProgrammingLanguages(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		lang  Language
+		input string
+		want  LineCounts
+	}{
+		// C# — C-family "//" line + "/* */" block.
+		{
+			name:  "csharp line comment",
+			lang:  LangCSharp,
+			input: "// comment\nint x = 1;\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "csharp block comment",
+			lang:  LangCSharp,
+			input: "/* open\n * doc\n */\nclass Foo {}\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+		// Scala — C-family "//" line + "/* */" block.
+		{
+			name:  "scala line comment",
+			lang:  LangScala,
+			input: "// comment\nval x = 1\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "scala block comment",
+			lang:  LangScala,
+			input: "/* open\n * body\n */\nval y = 2\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+		// Dart — C-family "//" line + "/* */" block.
+		{
+			name:  "dart line comment",
+			lang:  LangDart,
+			input: "// comment\nint x = 1;\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "dart block comment",
+			lang:  LangDart,
+			input: "/* open\n * doc\n */\nvoid f() {}\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+		// SQL — ANSI "--" line + "/* */" block.
+		{
+			name:  "sql line comment",
+			lang:  LangSQL,
+			input: "-- comment\nSELECT 1;\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "sql block comment",
+			lang:  LangSQL,
+			input: "/* open\n * multi\n */\nSELECT 2;\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+		// Lua — "--" line + "--[[" / "]]" long-bracket block.
+		// Acceptance #5: a line "--[[ comment ]]" is classified as Comment.
+		// Known limitation (Policy α, YAGNI): "]]" also appears as a table-index
+		// operator; such lines are mis-classified as Comment.
+		{
+			name:  "lua line comment",
+			lang:  LangLua,
+			input: "-- comment\nlocal x = 1\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "lua block comment single-line (Acceptance #5)",
+			lang:  LangLua,
+			input: "--[[ comment ]]\nlocal y = 2\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "lua block comment multi-line",
+			lang:  LangLua,
+			input: "--[[\nline two\n]]\nlocal z = 3\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+		// Elixir — "#" line only (no block-comment form).
+		{
+			name:  "elixir line comment",
+			lang:  LangElixir,
+			input: "# comment\nx = 1\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "elixir code only",
+			lang:  LangElixir,
+			input: "defmodule Foo do\nend\n",
+			want:  LineCounts{Blank: 0, Comment: 0, Code: 2},
+		},
+		// Zig — "//" line only (no block-comment form).
+		// "////" doc comments use the same "//" prefix and are detected.
+		{
+			name:  "zig line comment",
+			lang:  LangZig,
+			input: "// comment\nconst x = 1;\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "zig doc comment uses same prefix",
+			lang:  LangZig,
+			input: "/// doc comment\npub fn f() void {}\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		// R — "#" line only (no block-comment form).
+		{
+			name:  "r line comment",
+			lang:  LangR,
+			input: "# comment\nx <- 1\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		// F# — "//" line + "(* *)" ML-style block.
+		{
+			name:  "fsharp line comment",
+			lang:  LangFSharp,
+			input: "// comment\nlet x = 1\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "fsharp block comment",
+			lang:  LangFSharp,
+			input: "(* open\n * body\n *)\nlet y = 2\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+		// Haskell — "--" line + "{- -}" block.
+		{
+			name:  "haskell line comment",
+			lang:  LangHaskell,
+			input: "-- comment\nx = 1\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "haskell block comment",
+			lang:  LangHaskell,
+			input: "{- open\n   body\n-}\nx = 2\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := Split(strings.NewReader(tc.input), tc.lang)
+			if err != nil {
+				t.Fatalf("Split: unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %+v; want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestSplit_Swift verifies that Swift uses "//" for line comments and
 // "/* */" for block comments. Nested block comments are not tracked (Policy α,
 // YAGNI v0.1.0): the flat open/close scan is acceptable.
