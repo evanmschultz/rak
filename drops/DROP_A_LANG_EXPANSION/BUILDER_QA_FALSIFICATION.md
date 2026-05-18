@@ -184,3 +184,173 @@ All 11 attack vectors REFUTED. No counterexamples found. Extension table additio
 ### Hylla Feedback
 
 N/A — review touched only Go source files already fully resolvable via direct `Read` (lang.go, split.go, *_test.go), plus non-Go README.md / PLAN.md / BUILDER_WORKLOG.md / BUILDER_QA_FALSIFICATION.md. Hylla was not the load-bearing evidence source for any attack — the falsification axes (collision checks, doc-comment formatting, alphabetical ordering, grammar correctness) are all local to small, self-contained map literals and table-driven tests where `Read` on the full file is both faster and more authoritative than block summaries. None — Hylla answered everything needed at the structural level for the upstream Drop D / lister cross-stream context check, and was not required for the within-package A.2 review.
+
+## Unit A.3 — Round 1
+
+**Verdict:** PASS (with one minor non-blocking observation routed to Notes — templ HTML-comment limitation has docstring documentation but no lock-in test)
+
+### Counterexamples / Attacks
+
+#### Attack 1 — Extension collisions among 15 new entries
+
+- **Severity:** blocker (REFUTED)
+- **Where:** `internal/lang/lang.go:187-202`
+- **Counterexample / hypothesis:** Any of the 15 new extensions (`.templ`, `.jsx`, `.tsx`, `.scss`, `.sass`, `.less`, `.vue`, `.svelte`, `.erb`, `.j2`, `.jinja`, `.jinja2`, `.liquid`, `.mustache`, `.hbs`) might clobber an existing key. Highest-risk pairs: `.jsx` vs `.js`, `.tsx` vs `.ts`, `.scss` vs `.css`, `.svelte` vs `.svg`, `.hbs` vs `.hs`.
+- **Mitigation accepted:** REFUTED. Map keys are exact-string. Pre-A.3 table (lang.go:137-185, including A.2 additions) contains: `.bash, .c, .cc, .cpp, .css, .cxx, .fish, .gemspec, .go, .h, .hpp, .htm, .html, .java, .js, .json, .kt, .kts, .md, .php, .phtml, .py, .rake, .rb, .rs, .sh, .swift, .toml, .ts, .xml, .yaml, .yml, .zsh, .cs, .dart, .ex, .exs, .fs, .fsi, .fsx, .hs, .lhs, .lua, .r, .scala, .sql, .zig`. None of the 15 A.3 keys appear there. `.jsx ≠ .js`, `.tsx ≠ .ts`, `.scss ≠ .css`, `.svg` not in table at all, `.hbs ≠ .hs`. A duplicate map-literal key would fail compile-time (Go enforces unique map-literal keys); `mage build` passes — no collisions.
+
+#### Attack 2 — ERB grammar trade-off acknowledged in test (locks in `%>` mis-classification)
+  
+- **Severity:** blocker (REFUTED)
+- **Where:** `internal/lang/split_test.go:719-746`
+- **Counterexample / hypothesis:** PLAN.md ERB grammar trade-off note says `%>` on expression-output lines like `<%= value %>` is mis-classified as Comment under Policy α. If the test does NOT lock this in, a future "fix" could silently regress the documented contract without any test catching it.
+- **Mitigation accepted:** REFUTED. Two explicit lock-in tests:
+  - `erb comment at line start` (split_test.go:719-725) asserts `{Comment: 2, Code: 0}` for input `<%# comment %>\n<%= @user.name %>\n`. Line 2 `<%= @user.name %>` containing `%>` is asserted as Comment — locking in the known limitation. Inline comment at lines 723-724 explicitly says "Line 2: contains `%>` (blockClose) → Comment (Policy α known limitation)."
+  - `erb expression-output line is Comment (Policy α known limitation)` (split_test.go:735-746) is a dedicated subtest with verbose comment at lines 736-740: "This line is mis-classified as Comment. This is the accepted trade-off (see PLAN.md ERB grammar trade-off note and Notes § "ERB grammar trade-off"). Document here to lock in the known behavior." Expected `{Comment: 1, Code: 1}` for `<%= @title %>\n<p>plain html</p>\n`.
+  - The function docstring (split_test.go:601-604) restates the limitation at the suite level.
+
+#### Attack 3 — Vue `<script>` JS-comment blind spot test lock-in
+  
+- **Severity:** blocker (REFUTED)
+- **Where:** `internal/lang/split_test.go:701-706`
+- **Counterexample / hypothesis:** Vue uses HTML-level `<!-- -->` grammar; JS comments inside `<script>` blocks should classify as Code (one-grammar policy). If no test locks this in, a future "fix" adding JS sub-parsing to Vue/Svelte could silently regress without any failure.
+- **Mitigation accepted:** REFUTED. Explicit lock-in subtest `vue script js comment is Code (sub-parsing out of scope)` (split_test.go:701-706) asserts `{Comment: 0, Code: 4}` for input `<script>\n// this js comment classifies as Code — single grammar policy\nconst x = 1\n</script>\n`. The asserted Comment=0 locks in the limitation; the inline test-comment in the input string ("classifies as Code — single grammar policy") makes the intent unambiguous to future maintainers. Function docstring (split_test.go:606-609) restates the policy at the suite level.
+
+#### Attack 4 — `.hbs` → LangMustache explicit test
+  
+- **Severity:** blocker (REFUTED)
+- **Where:** `internal/lang/lang.go:202`, `internal/lang/lang_test.go:442-443`
+- **Counterexample / hypothesis:** `.hbs` Handlebars extension might map to LangUnknown (no entry) or to a wrong constant.
+- **Mitigation accepted:** REFUTED. lang.go:202 `.hbs: LangMustache`. lang_test.go:443 row `{"view.hbs", LangMustache}` exercises it. PLAN.md Acceptance #3 satisfied.
+
+#### Attack 5 — Templ HTML-comment limitation: docstring vs test lock-in
+
+- **Severity:** concern (PARTIALLY CONFIRMED — non-blocking)
+- **Where:** `internal/lang/split.go:160-162`, `internal/lang/lang.go:79-80`, `internal/lang/split_test.go` (no templ HTML-comment lock-in subtest)
+- **Counterexample / hypothesis:** PLAN.md Notes (`Templ HTML-comment fallback`) and PLAN.md A.3 scope say `LangTempl` uses Go-style grammar; HTML-like `<!-- -->` comments in `.templ` template blocks should classify as Code (single-grammar policy). Vue has an explicit lock-in test for the analogous limitation (Attack 3) — does templ?
+- **Mitigation accepted:** PARTIALLY CONFIRMED. The limitation is documented in three places:
+  - `LangTempl` const docstring (lang.go:79-80): "Templ uses Go-style comment syntax (// and /* */)."
+  - grammar entry inline comment (split.go:160-162): "HTML-like `<!-- -->` comments inside `.templ` files classify as Code (single-grammar policy, design principle 2, out of scope v0.2.0)."
+  - `TestSplit_Templating` function docstring (split_test.go:611-613) restates the policy at suite level.
+- **However**, unlike the Vue case (split_test.go:701-706 has an explicit `vue script js comment is Code` lock-in subtest), there is **no analogous lock-in subtest for templ** that asserts `Split(LangTempl, "<!-- html comment -->\nfunc Foo() ...")` produces `Comment: 0`. The two templ subtests (`templ line comment` at split_test.go:629-633, `templ block comment` at split_test.go:635-639) only exercise Go-style `//` and `/* */`, not the HTML-comment-as-Code negative assertion. A future maintainer who adds HTML-comment grammar to templ would not be caught by a failing test — only the docstring would flag the contract change.
+- **Severity rationale:** non-blocking because (a) the contract is documented in three places, (b) A.3's acceptance criteria 2-10 don't mandate this specific lock-in test, (c) the suite docstring covers it at the test-file level. **Routed to Notes / future-maintainer attention**, not back to builder. A future "Drop A.6 — limitation lock-in tests" would be the right place to add this; not appropriate to gate A.3 close on it.
+
+#### Attack 6 — Jinja multi-extension coverage (`.j2`, `.jinja`, `.jinja2`)
+  
+- **Severity:** blocker (REFUTED)
+- **Where:** `internal/lang/lang.go:197-199`, `internal/lang/lang_test.go:436-438`
+- **Counterexample / hypothesis:** Any of the three Jinja extensions might be missing or mapped to a different language.
+- **Mitigation accepted:** REFUTED. All three present (`.j2`, `.jinja`, `.jinja2` → `LangJinja` at lang.go:197-199). Test exercises all three (lang_test.go:436-438). No collision with other entries.
+
+#### Attack 7 — Liquid `{% comment %}` multi-line state-machine correctness
+  
+- **Severity:** concern (REFUTED)
+- **Where:** `internal/lang/split.go:199`, `internal/lang/split_test.go:763-772`
+- **Counterexample / hypothesis:** Liquid uses `{% comment %}` / `{% endcomment %}` block tags typically on separate lines. If the state-machine update logic (split.go:272-288) mis-handles the multi-character markers, the inside-block lines would mis-classify.
+- **Mitigation accepted:** REFUTED. split.go:199 grammar `{blockOpen: "{% comment %}", blockClose: "{% endcomment %}"}` uses correct full-tag strings. Test `liquid comment block` (split_test.go:763-772) exercises the canonical 4-line case: line 1 `{% comment %}` (Comment via blockOpen + sets inBlockComment), line 2 `This is hidden.` (inBlockComment=true → Comment), line 3 `{% endcomment %}` (inBlockComment=true at line start → Comment, then closes block), line 4 `{{ title }}` (Code). Expected `{Comment: 3, Code: 1}` matches the state-machine trace.
+
+#### Attack 8 — `-race` cleanliness for `internal/lang`
+  
+- **Severity:** blocker (REFUTED)
+- **Where:** repo-wide via `mage test` (always runs with `-race`)
+- **Counterexample / hypothesis:** `internal/lang` might surface a race under `-race` (despite being a pure-function package with no goroutines, parallel subtests share package-level `grammarTable` / `extensionTable` / `specialFilenames` / `shebangsTable`).
+- **Mitigation accepted:** REFUTED. `mage test` (runs `-race`) — output: all 8 packages pass including `ok  github.com/evanmschultz/rak/internal/lang`. Package-level tables are immutable (Go map literals as `var`, never mutated after init) — concurrent reads are race-free.
+
+#### Attack 9 — Doc comments on all 12 new constants
+  
+- **Severity:** blocker (REFUTED)
+- **Where:** `internal/lang/lang.go:77-118`
+- **Counterexample / hypothesis:** Any of the 12 new `Lang*` constants might be missing a doc comment or have one not starting with the identifier — would fail `golangci-lint` `revive` / `staticcheck` `exported` rule.
+- **Mitigation accepted:** REFUTED. All 12 have well-formed doc comments starting with `// LangX`:
+  - `// LangTempl is the Language constant for Go-superset templ files (.templ). Templ uses Go-style comment syntax (// and /* */).` (line 79-80)
+  - `// LangJSX is the Language constant for React JSX files (.jsx).` (line 82-83)
+  - `// LangTSX is the Language constant for TypeScript JSX files (.tsx). Distinct from .ts → LangTS.` (line 84-86)
+  - `// LangSCSS is the Language constant for SCSS stylesheets (.scss). SCSS supports both // line comments and /* */ block comments.` (line 87-89)
+  - `// LangSass is the Language constant for indented Sass stylesheets (.sass). Uses // for line comments; /* */ block comments exist but are less common (Policy α YAGNI — some non-comment lines may be over-classified).` (line 90-93)
+  - `// LangLESS is the Language constant for LESS stylesheets (.less).` (line 94-95)
+  - `// LangVue is the Language constant for Vue single-file components (.vue). Grammar covers HTML-level <!-- --> comments; JS/TS inside <script> blocks uses JS/TS comment syntax not detected here (one file = one grammar, design principle 2, out of scope for v0.2.0).` (line 96-100)
+  - `// LangSvelte is the Language constant for Svelte components (.svelte). Same single-grammar HTML-level policy as LangVue.` (line 101-103)
+  - `// LangERB is the Language constant for Ruby ERB templates (.erb). Grammar uses block form <%# ... %> to catch mid-line ERB comments. Known limitation: %> also appears on expression-output lines like <%= value %> — those lines are mis-classified as Comment (Policy α YAGNI).` (line 104-108)
+  - `// LangJinja is the Language constant for Jinja2 templates (.j2, .jinja, .jinja2).` (line 109-111)
+  - `// LangLiquid is the Language constant for Liquid templates (.liquid).` (line 112-113)
+  - `// LangMustache is the Language constant for Mustache and Handlebars templates (.mustache, .hbs). Handlebars is a Mustache superset sharing the same comment syntax; one constant follows the existing pattern of grouping closely-related variants (Shell groups sh/bash/zsh/fish).` (line 114-118)
+  Confirmed by `mage lint`: `0 issues.`
+
+#### Attack 10 — README alphabetical order for 12 new entries
+  
+- **Severity:** concern (REFUTED)
+- **Where:** `README.md:122`
+- **Counterexample / hypothesis:** Any of the 12 new entries (ERB, Jinja, JSX, LESS, Liquid, Mustache/Handlebars, Sass, SCSS, Svelte, Templ, TSX, Vue) may be out of alphabetical position or break the paragraph form.
+- **Mitigation accepted:** REFUTED. README:122 reads: `"C, C++, C#, CMakeLists.txt, CSS, Dart, Dockerfile, Elixir, ERB, F#, Go, Haskell, HTML, Java, JavaScript, Jinja, JSON, JSX, Kotlin, LESS, Liquid, Lua, Makefile, Markdown, Mustache/Handlebars, PHP, Python, R, Ruby, Rust, Sass, Scala, SCSS, Shell (sh/bash/zsh/fish), SQL, Svelte, Swift, Templ, TOML, TSX, TypeScript, Vue, XML, YAML, Zig."` Verifying case-insensitive ordering at each insertion point:
+  - `Elixir, ERB, F#`: E-l < E-r < F (correct)
+  - `Java, JavaScript, Jinja, JSON, JSX`: j-a-v-a-(end) < j-a-v-a-s < j-i < j-s-o < j-s-x (correct)
+  - `Kotlin, LESS, Liquid, Lua`: K < l-e < l-i < l-u (correct)
+  - `Markdown, Mustache/Handlebars, PHP`: m-a < m-u < P (correct)
+  - `Rust, Sass, Scala, SCSS, Shell`: R < s-a < s-c-a < s-c-s < s-h (correct)
+  - `SQL, Svelte, Swift`: s-q < s-v-e < s-w (correct)
+  - `Swift, Templ, TOML, TSX, TypeScript`: s-w < t-e < t-o < t-s < t-y (correct)
+  - `TypeScript, Vue, XML`: t-y < V < X (correct)
+  All 12 new entries correctly placed alphabetically. Paragraph form held at 45 entries (still readable; A.5 will convert to a comma-separated list at 50+ per A.1's locked decision).
+
+#### Attack 11 — `mage lint` cleanliness post-D.1 fix
+  
+- **Severity:** blocker (REFUTED)
+- **Where:** repo-wide
+- **Counterexample / hypothesis:** A.3 might introduce a `mage lint` violation (missing doc comment, unused var, staticcheck issue). Also: prior A.2 round flagged a pre-existing `internal/lister` lint failure (commit 13ac39a should have fixed it).
+- **Mitigation accepted:** REFUTED. `mage lint` from `main/`: `0 issues.` — full repo clean. D.1's `cancel function is not used on all paths` lister regression has been fixed; A.3 introduces no new violations.
+
+#### Attack 12 — `{{!` linePrefix vs `{{!--` blockOpen ordering in Split
+  
+- **Severity:** concern (REFUTED)
+- **Where:** `internal/lang/split.go:241-263`, `internal/lang/split_test.go:775-795`
+- **Counterexample / hypothesis:** `{{!` is a string-prefix of `{{!--`. If `Split` evaluated linePrefix before blockOpen, the block form would never fire — `{{!--` would always match linePrefix first and the state machine wouldn't initialize the multi-line block. Result: multi-line Mustache block comments would only count the open and close lines as Comment via linePrefix, and middle lines would be Code.
+- **Mitigation accepted:** REFUTED. Split check order (split.go:241-263) is: (a) inBlockComment carry-over, (b) blockOpen contained, (c) blockClose contained, (d) linePrefix prefix, (e) linePrefix2 prefix. blockOpen fires BEFORE linePrefix. For `{{!-- ... --}}` (single-line) — Contains `{{!--` → Comment via blockOpen. For `{{!--\n  body\n--}}\n` — line 1 Contains `{{!--` → Comment + state-machine sets inBlockComment=true; line 2 → inBlockComment=true → Comment; line 3 Contains `--}}` → Comment + state-machine closes. Test `mustache multiline block comment` (split_test.go:790-795) asserts `{Comment: 3, Code: 1}` — matches state-machine trace.
+
+#### Attack 13 — State-machine corruption on `<%= %>`-only ERB lines
+  
+- **Severity:** concern (REFUTED)
+- **Where:** `internal/lang/split.go:272-288`
+- **Counterexample / hypothesis:** For ERB grammar (`blockOpen: "<%#"`, `blockClose: "%>"`), a line `<%= @title %>` contains `%>` but no `<%#`. The state-machine pass searches both: openIdx = -1, closeIdx = N. The "else" branch fires: `inBlockComment = false`. If the prior line had legitimately opened a block (`<%# ...`), would this `<%= %>` line falsely close it?
+- **Mitigation accepted:** REFUTED with caveat. The state-machine update only runs for `g.blockOpen != ""` (split.go:272). For ERB: openIdx=-1, closeIdx=N → inBlockComment is set to false. This means a `<%# ...` block legitimately opened on a prior line WOULD be falsely closed by a subsequent `<%= %>` line. **However**, this is the same Policy α YAGNI documented in PLAN.md ERB grammar trade-off section — ERB's overlapping markers make state-machine accuracy impossible without sub-parsing. The trade-off is acknowledged in two test cases + grammar docstring + function docstring + PLAN.md notes. No new finding — this is the documented limitation.
+
+#### Attack 14 — `.tsx` vs `.ts` distinct mapping (Acceptance #4)
+  
+- **Severity:** blocker (REFUTED)
+- **Where:** `internal/lang/lang.go:165 (.ts), 190 (.tsx)`, `internal/lang/lang_test.go:419-422`
+- **Counterexample / hypothesis:** `.tsx` and `.ts` are exact-string distinct keys but a test might miss the regression-guard on `.ts → LangTS`.
+- **Mitigation accepted:** REFUTED. lang.go:165 `.ts → LangTS`, lang.go:190 `.tsx → LangTSX` — distinct keys. lang_test.go:420 `{"app.tsx", LangTSX}` + lang_test.go:422 `{"types.ts", LangTS}` (explicit regression guard). Acceptance #4 satisfied with positive + negative test.
+
+#### Attack 15 — JSON / XML / HTML regression from A.3
+  
+- **Severity:** blocker (REFUTED)
+- **Where:** `internal/lang/lang.go:148-167`, `internal/lang/split.go:117-123`
+- **Counterexample / hypothesis:** Adding 15 new extension entries might accidentally clobber `.json`, `.xml`, `.html`, `.htm` mappings.
+- **Mitigation accepted:** REFUTED. Pre-A.3 entries `.htm → LangHTML` (line 148), `.html → LangHTML` (line 149), `.json → LangJSON` (line 152), `.xml → LangXML` (line 166) all present and unchanged. grammarTable LangHTML (line 118), LangXML (line 119), LangMarkdown (line 120) entries untouched. No regression.
+
+#### Attack 16 — Sass grammar over-classification documented
+  
+- **Severity:** nit (REFUTED)
+- **Where:** `internal/lang/split.go:170-174`, `internal/lang/lang.go:90-93`, `internal/lang/split_test.go:614-617`
+- **Counterexample / hypothesis:** Indented Sass rarely uses `/* */` blocks. Assigning C-family grammar to Sass may over-classify some lines. Should be documented.
+- **Mitigation accepted:** REFUTED. Documented in three places: const docstring (lang.go:90-93 mentions Policy α YAGNI), grammar inline comment (split.go:170-172), suite docstring (split_test.go:614-617 mentions Sass Policy α YAGNI). Documentation is thorough. Test `sass line comment` asserts `{Comment: 1, Code: 2}` for `// comment\n.foo\n  color: red\n` — exercises the common-case line-comment path.
+
+#### Attack 17 — `index.html.erb` filename quirk
+  
+- **Severity:** nit (REFUTED)
+- **Where:** `internal/lang/lang.go:255` (`filepath.Ext`), `internal/lang/lang_test.go:434`
+- **Counterexample / hypothesis:** `index.html.erb` is the conventional Rails template filename. `filepath.Ext` returns only the last extension (`.erb`). Test should exercise the realistic Rails filename, not just `foo.erb`.
+- **Mitigation accepted:** REFUTED. lang_test.go:434 row `{"index.html.erb", LangERB}` uses the canonical Rails name. `filepath.Ext("index.html.erb")` returns `.erb` → `extensionTable[".erb"] → LangERB`. Correct.
+
+### Informational notes (not counterexamples against A.3)
+
+- **Templ HTML-comment limitation lock-in test gap** (Attack 5): three layers of documentation cover the limitation but no dedicated test asserts `Split(LangTempl, "<!-- html -->")` → Comment=0. Vue has an analogous lock-in test (Attack 3); templ doesn't. Non-blocking — documentation is thorough and A.3 acceptance criteria don't require this specific test. Future maintainer attention only.
+- **`{%- comment -%}` Liquid whitespace-trim form** is not detected (grammar requires literal `{% comment %}`). Not in A.3's stated scope, no PLAN.md mention. Acceptable — files using the trim form would have those lines classified as Code rather than Comment. Future PR if requested.
+- **ERB state-machine false-close** (Attack 13): a `<%= %>` line after a legitimate `<%# ...` block-open will falsely close the block. Documented as Policy α YAGNI in PLAN.md + grammar docstring + test docstrings. Not new.
+- **PLAN.md A.3 state**: PLAN.md (line 147) currently shows `**State:** done` for Unit A.3. Worklog says builder set it to `in_progress` pending mage permission grant (line 71). PLAN.md says done; worklog says in_progress pre-test-run. This is a worklog/PLAN.md drift bookkeeping nit — not a finding against the code. `mage test` and `mage lint` now pass, so the `done` state in PLAN.md matches verified reality.
+
+### Summary
+
+17 attack vectors evaluated. 16 REFUTED, 1 PARTIALLY CONFIRMED non-blocking (Attack 5 — templ HTML-comment limitation has docstring documentation but no test lock-in; routed to future-maintainer attention, not back to builder; A.3 acceptance criteria don't mandate this). No blocker counterexamples. Extension table collision-free across all 15 new entries. ERB and Vue Policy α limitations are explicitly locked in by test assertions. Mustache `{{!` / `{{!--` ordering verified correct against state-machine semantics. `mage test` passes all 8 packages including `internal/lang` with `-race`; `mage lint` clean (0 issues). README alphabetical and naming-consistent across 12 new entries. **PASS.**
+
+### Hylla Feedback
+
+N/A — review touched only Go source files inside `internal/lang` (lang.go, split.go, lang_test.go, split_test.go) and non-Go README.md / PLAN.md / BUILDER_WORKLOG.md / BUILDER_QA_FALSIFICATION.md. Hylla was not the load-bearing evidence source — falsification axes (extension-key collision checks, doc-comment formatting, alphabetical ordering, grammar correctness, state-machine traces, lock-in test presence) are all local to small self-contained map literals and table-driven tests where `Read` on the full file is both faster and more authoritative than block summaries. None — Hylla answered everything needed at the structural level and was not required for the within-package A.3 review.

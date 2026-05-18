@@ -90,3 +90,79 @@ None. PASS with no findings.
 ### Hylla Feedback
 
 None — Hylla answered everything needed. Verification used direct `Read` of the changed Go files (`lang.go`, `split.go`, `lang_test.go`, `split_test.go`) plus `README.md`, and `mage test` / `mage build` execution. The diff was small and well-localized; no committed-state symbol cross-referencing through Hylla was required for this round.
+
+## Unit A.3 — Round 1
+
+**Verdict:** PASS
+
+All 10 acceptance criteria from `PLAN.md` Unit A.3 are satisfied by the committed code (commit `ad3a458 feat(lang): add templ jsx tsx scss sass less vue svelte erb jinja liquid mustache`). Twelve new templating / frontend-variant constants are declared with Go doc comments, mapped from 15 extensions, given correct grammar entries, exercised by table-driven detection + split tests (including the four call-out cases: `.hbs`→Mustache, `.tsx`→TSX vs `.ts`→TS regression, Vue `<!--`, Jinja `{# #}`, Mustache `{{!-- --}}`, ERB mid-line `<%# %>`), and listed alphabetically in the README. `mage build` passes; the `internal/lang` package's `mage test` run is green.
+
+### Acceptance trace
+
+| # | Criterion | Evidence |
+|---|---|---|
+| 1 | `mage test` passes | `internal/lang` package passes (`ok github.com/evanmschultz/rak/internal/lang (cached)`). A whole-tree `mage test` from `main/` currently FAILS in `cmd/rak/integration_test.go` ("errors" and "fmt" imported and not used) — but `git blame` shows lines 6-7 are uncommitted local edits ("Not Committed Yet 2026-05-17") from a concurrent stream (likely D / `--files-from` per recent commit `1200f4f fix(lister): defer cancel in filesfromlister context test`). A.3's commit `ad3a458` did NOT touch `cmd/rak/integration_test.go` (verified via `git show --stat ad3a458`). Acceptance #1 is therefore satisfied for Unit A.3 in isolation — the `cmd/rak` breakage is outside this unit's scope and concern. Orchestrator must be aware before drop-end `mage ci`. |
+| 2 | `Detect` on each new extension returns the correct `Language` constant | `TestDetect_Templating` at `lang_test.go:408-458` is a 16-row table covering all 15 new extensions + the `.ts`/`.tsx` regression guard: `.templ`→LangTempl, `.jsx`→LangJSX, `.tsx`→LangTSX, `.ts`→LangTS, `.scss`→LangSCSS, `.sass`→LangSass, `.less`→LangLESS, `.vue`→LangVue, `.svelte`→LangSvelte, `.erb`→LangERB, `.j2`/`.jinja`/`.jinja2`→LangJinja, `.liquid`→LangLiquid, `.mustache`/`.hbs`→LangMustache. Backed by `extensionTable` rows at `lang.go:187-203`. |
+| 3 | `.hbs` resolves to `LangMustache` (not `LangUnknown`) | `lang.go:202` `".hbs": LangMustache`. Asserted by `TestDetect_Templating` row at `lang_test.go:443` (`{"view.hbs", LangMustache}`). |
+| 4 | `.tsx` resolves to `LangTSX`, distinct from `.ts` → `LangTS` | `lang.go:190` `".tsx": LangTSX` (vs existing `lang.go:165` `".ts": LangTS`). Asserted side-by-side in `TestDetect_Templating` at `lang_test.go:420-422` (`app.tsx`→LangTSX and `types.ts`→LangTS). Independent subtests with `t.Parallel()` — would fail individually if either mapping regressed. |
+| 5 | `Split` with `LangVue` on `<!-- comment -->` counts 1 Comment line | `split.go:181` `LangVue: {blockOpen: "<!--", blockClose: "-->"}`. Asserted by `TestSplit_Templating/vue_html_comment_(Acceptance_#5)` at `split_test.go:690-694` with input `"<!-- comment -->\n<template>\n  <div/>\n</template>\n"` expecting `LineCounts{Comment: 1, Code: 3}` — first line is the asserted Comment. |
+| 6 | `Split` with `LangJinja` on `{# comment #}` counts 1 Comment line | `split.go:196` `LangJinja: {blockOpen: "{#", blockClose: "#}"}`. Asserted by `TestSplit_Templating/jinja_comment_(Acceptance_#6)` at `split_test.go:749-754` with input `"{# comment #}\n{{ variable }}\n"` expecting `LineCounts{Comment: 1, Code: 1}`. |
+| 7 | `Split` with `LangMustache` on `{{!-- comment --}}` counts 1 Comment line | `split.go:206` `LangMustache: {linePrefix: "{{!", blockOpen: "{{!--", blockClose: "--}}"}`. Asserted by `TestSplit_Templating/mustache_block_comment_{{!--_--}}_(Acceptance_#7)` at `split_test.go:783-788` with input `"{{!-- comment --}}\n{{name}}\n"` expecting `LineCounts{Comment: 1, Code: 1}`. |
+| 8 | `Split` with `LangERB` on `<%# note %>` mid-line counts 1 Comment line | `split.go:193` `LangERB: {blockOpen: "<%#", blockClose: "%>"}` — **block form** per PLAN.md trade-off. `strings.Contains` (split.go:250-251) catches `<%#` anywhere on the line. Asserted by `TestSplit_Templating/erb_mid-line_comment_(Acceptance_#8_—_block_form_catches_it)` at `split_test.go:728-734` with input `"<%= val %> <%# note %>\n"` expecting `LineCounts{Comment: 1}`. The accompanying `erb_expression-output_line_is_Comment_(Policy_α_known_limitation)` subtest at `split_test.go:735-746` locks in the documented `%>` over-classification limitation. |
+| 9 | README lists 12 new languages alphabetically | `README.md:122` lists: `ERB, ..., Jinja, ..., JSX, ..., LESS, Liquid, ..., Mustache/Handlebars, ..., Sass, ..., SCSS, ..., Svelte, ..., Templ, ..., TSX, ..., Vue`. All 12 present; case-insensitive alphabetical position preserved across the whole list. |
+| 10 | `mage build` passes | `mage build` from `main/` returned exit 0 (no output). Production-code compilation for the lang package is verified end-to-end. |
+
+### Implementation matches Scope
+
+- **12 new `Language` constants** declared at `lang.go:79-118`, each with a Go doc comment starting with the identifier name per project naming rule 11. Doc comments are substantive — Vue/Svelte/Templ ones reference the single-grammar limitation; ERB documents the Policy α `%>` trade-off; Mustache notes the Handlebars-grouping rationale. Values are all lowercase single-word strings.
+- **15 extension-table entries** added at `lang.go:188-202`. Both Mustache aliases (`.mustache`, `.hbs`) and all three Jinja aliases (`.j2`, `.jinja`, `.jinja2`) map to the same constant. No collisions with existing keys; the existing `.ts` mapping at `lang.go:165` is untouched (regression guard for Acceptance #4).
+- **12 grammar-table entries** added at `split.go:160-206`. Each matches the PLAN spec exactly:
+  - Go-style Templ (`split.go:163`), JS-family JSX/TSX (`split.go:166-167`), and CSS-family SCSS/Sass/LESS (`split.go:173-175`): `linePrefix: "//"`, `blockOpen: "/*"`, `blockClose: "*/"`.
+  - HTML-level Vue/Svelte (`split.go:181-182`): `blockOpen: "<!--"`, `blockClose: "-->"` only.
+  - **ERB block form** (`split.go:193`): `blockOpen: "<%#"`, `blockClose: "%>"` — confirms the documented trade-off (not `linePrefix: "<%#"`).
+  - Jinja (`split.go:196`): `blockOpen: "{#"`, `blockClose: "#}"`.
+  - Liquid (`split.go:199`): `blockOpen: "{% comment %}"`, `blockClose: "{% endcomment %}"`.
+  - Mustache (`split.go:206`): `linePrefix: "{{!"`, `blockOpen: "{{!--"`, `blockClose: "--}}"`.
+
+### Doc-comment audit
+
+All 12 new `Lang*` constants at `lang.go:79-118` have Go doc comments that:
+
+1. Begin with the identifier name (e.g. `// LangTempl is the Language constant for ...`).
+2. Specify which extensions map to the constant.
+3. Where relevant, call out the v0.2.0 Policy α YAGNI limitation (ERB `%>` mis-classification, Vue/Svelte/Templ single-grammar policy, Sass `/* */` over-classification).
+
+Verified line-by-line: LangTempl 79-81, LangJSX 82-83, LangTSX 84-86, LangSCSS 87-89, LangSass 90-93, LangLESS 94-95, LangVue 96-100, LangSvelte 101-103, LangERB 104-108, LangJinja 109-111, LangLiquid 112-113, LangMustache 114-118.
+
+### ERB grammar verification (block form, NOT linePrefix)
+
+`split.go:184-193` clearly documents the trade-off in source comments. The actual struct literal at line 193 is `LangERB: {blockOpen: "<%#", blockClose: "%>"}` — block form, no `linePrefix` field set. This is the form PLAN.md required:
+
+- `strings.Contains(line, g.blockOpen)` at `split.go:250-251` catches mid-line `<%# note %>` cases. Asserted by `TestSplit_Templating/erb_mid-line_comment` (Acceptance #8 evidence).
+- A `linePrefix: "<%#"` form would have used `strings.HasPrefix(trimmed, prefix)` at `split.go:258-263`, missing mid-line cases.
+
+The accepted limitation (`%>` on `<%= value %>` lines is mis-classified as Comment) is explicitly tested at `split_test.go:735-746` (the `erb_expression-output_line` subtest) — non-vacuous test that locks in the Policy α behavior.
+
+### Test quality
+
+- `TestDetect_Templating` (`lang_test.go:408-458`) — 16-row table, all rows non-vacuous. Subtests use `t.Parallel()` and unique paths → race-safe. The `.ts` vs `.tsx` rows (lines 420-422) sit side-by-side in the same test; either regression independently fails.
+- `TestSplit_Templating` (`split_test.go:598-810`) — 21-row table covering all 12 grammars. Notable cases:
+  - **Vue script-as-Code** (`split_test.go:702-706`) — explicit lock-in test for the single-grammar limitation; a JS `// comment` inside a `<script>` block is asserted as Code, not Comment. Non-vacuous: would fail if Vue grammar were silently extended to include JS comments.
+  - **Mustache linePrefix** (`split_test.go:776-781`) — exercises `{{! inline comment }}` which uses `linePrefix: "{{!"`. Confirms the dual linePrefix-plus-block-form Mustache grammar works correctly.
+  - **Liquid block tag** (`split_test.go:764-771`) — multi-line `{% comment %} ... {% endcomment %}` walks the `inBlockComment` state machine across 3 lines; would catch any regression in block-open / block-close ordering.
+  - **ERB expression-output limitation** (`split_test.go:735-746`) — locks in the documented `%>` over-classification trade-off; a future fix to ERB grammar would need to delete this test row deliberately, surfacing the behavior change.
+- All subtests use `t.Parallel()`; race detector (`mage test -race`) is implicit per `main/CLAUDE.md`.
+
+### Findings
+
+None. PASS with no findings.
+
+### Notes for orchestrator
+
+The `cmd/rak/integration_test.go` build failure visible in a whole-tree `mage test` is **unrelated to Unit A.3** — verified via `git blame` (lines 6-7 are uncommitted local edits dated 2026-05-17) and `git show --stat ad3a458` (A.3 commit touched only `internal/lang/*`, `README.md`, and the drop directory). The failure is concurrent stream pollution (likely Drop D `--files-from`). Orchestrator should resolve before the drop-end `mage ci` gate per WORKFLOW.md Phase 6, but it does not block A.3's per-unit pass per WORKFLOW.md Phase 5's per-unit verification rule ("builder runs `mage build` + `mage test` for the touched packages").
+
+The worklog at line 72 reports `mage build` and `mage test` as "(pending — awaiting Bash permission grant)" — yet the commit landed. Builder appears to have committed before running the verifications. The verifications post-hoc are: `mage build` passes (re-run here, exit 0); `internal/lang` package's `mage test` slice passes (visible in the whole-tree `mage test` output: `ok github.com/evanmschultz/rak/internal/lang (cached)`). Recommend the builder update the worklog to reflect the verified state for the audit trail.
+
+### Hylla Feedback
+
+None — Hylla answered everything needed. Verification used direct `Read` of the changed Go files (`lang.go`, `split.go`, `lang_test.go`, `split_test.go`) plus `README.md`, `git show --stat`, `git blame`, and `mage build` / `mage test` execution. No committed-state symbol cross-referencing through Hylla was required for this round.
