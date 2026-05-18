@@ -158,7 +158,7 @@ func newRootCmd() *cobra.Command {
 		&flags.noGitignore,
 		"no-gitignore",
 		false,
-		"disable .gitignore-based filtering during the walk",
+		"inside a git repo: hard error (rak uses git-tracked enumeration; this flag is meaningless). Outside a git repo: disable .gitignore filtering. Single-file invocations: silent no-op.",
 	)
 	cmd.Flags().BoolVar(
 		&flags.binary,

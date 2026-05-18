@@ -127,7 +127,7 @@ Today `rak /dev/null` or `rak <socket>` fails with the obscure error `Lister: de
 
 ### Unit E.3 — `--no-gitignore` help-text nudge
 
-**State:** todo
+**State:** done
 **Paths:** `cmd/rak/root.go`
 **Packages:** `cmd/rak`
 **Blocked by:** E.1 (E.1 also edits `cmd/rak/root.go`; bundle the help-text tweak in same touch to avoid serial root.go conflicts)
@@ -179,7 +179,7 @@ Add GoReleaser config + GitHub Actions workflow that fires on tag push (`v*.*.*`
 
 ### Unit E.5 — Hero gif regen (TOON then --human)
 
-**State:** todo
+**State:** done
 **Paths:** `docs/tapes/default-toon.tape`, `docs/default-toon.gif`
 **Packages:** — (docs only)
 **Blocked by:** —

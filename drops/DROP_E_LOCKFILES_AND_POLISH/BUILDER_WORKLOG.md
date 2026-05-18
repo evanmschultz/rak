@@ -31,6 +31,20 @@ Append a `## Unit N.M — Round K` section per build attempt. See `main/drops/WO
   - `runDirectoryOpts.includeLockfiles` carries the flag through the existing data-flow chain (`rootFlags` → `runDirectoryOpts` → `walkAndCount`). Both the `--files-from` path and the positional-arg path in `runRoot` receive the flag — lockfile filtering applies in both modes.
   - Integration tests use `--files-from` with real temp files (not testdata/tree which has no lockfiles) to avoid git dependency. MapFS-based tests in `root_test.go` cover the filter at the `runTreeFS` layer.
 
+## Unit E.3 — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-17
+- **Files touched:**
+  - `cmd/rak/root.go` (`--no-gitignore` flag description updated)
+  - `drops/DROP_E_LOCKFILES_AND_POLISH/PLAN.md` (state flip `todo` → `done` for E.3)
+- **Mage targets run:** `mage build` (pass), `mage test` (pass, 9/9 packages)
+- **Notes:**
+  - Pure description string change. The prior text was `"disable .gitignore-based filtering during the walk"` — a short placeholder, not the fuller context-sensitive description spec'd in PLAN.md E.3.
+  - Updated to the full spec'd string: `"inside a git repo: hard error (rak uses git-tracked enumeration; this flag is meaningless). Outside a git repo: disable .gitignore filtering. Single-file invocations: silent no-op."`
+  - No behavior change; no new tests needed (the behavior under test is unchanged).
+  - `mage test` ran `cmd/rak` fresh (1.362s, not cached) confirming all existing flag tests pass against the updated description.
+
 ## Hylla Feedback
 
 The task involved creating a new package and wiring a new flag — mostly net-new code. Hylla was used to look up existing Go code patterns in the repo.
