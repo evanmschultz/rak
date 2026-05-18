@@ -42,3 +42,51 @@ None. PASS with no findings.
 ### Hylla Feedback
 
 N/A — QA Proof did not query Hylla for this round (verification was a direct `Read` of the changed Go files plus README and `mage test` execution; Hylla querying was unnecessary given the small, well-localized diff).
+
+## Unit A.2 — Round 1
+
+**Verdict:** PASS
+
+All 7 acceptance criteria from `PLAN.md` Unit A.2 are satisfied by the committed code. Ten new programming-language constants (C#, Dart, Elixir, F#, Haskell, Lua, R, Scala, SQL, Zig) are declared with Go doc comments, mapped from 14 extensions, given correct grammar entries, exercised by table-driven detection + split tests, and listed alphabetically in the README. `mage test` and `mage build` both pass.
+
+### Acceptance trace
+
+| # | Criterion | Evidence |
+|---|---|---|
+| 1 | `mage test` passes | `mage test` (from `main/`) → `ok github.com/evanmschultz/rak/internal/lang (cached)` plus green status on all 8 packages (`cmd/rak`, `counting`, `fileset`, `ignore`, `lang`, `lister`, `render`, `summary`). No failures, no skips. |
+| 2 | Each of the 10 new extensions resolves to the correct `Language` constant via `Detect` | `TestDetect_ProgrammingLanguages` at `lang_test.go:330-376` is a table-driven test with 14 rows covering all 14 extensions: `.cs`→LangCSharp, `.dart`→LangDart, `.ex`/`.exs`→LangElixir, `.fs`/`.fsi`/`.fsx`→LangFSharp, `.hs`/`.lhs`→LangHaskell, `.lua`→LangLua, `.r`/`.R`→LangR, `.scala`→LangScala, `.sql`→LangSQL, `.zig`→LangZig. Backed by `extensionTable` rows at `lang.go:128-142`. |
+| 3 | `Split` returns correct Comment classification for each grammar (≥1 assertion per grammar entry) | `TestSplit_ProgrammingLanguages` at `split_test.go:438-596` is a 19-row table covering each of the 10 new grammars with at least one comment-line case (C-family `//` + `/* */`, ANSI SQL `--` + `/* */`, Lua `--` + `--[[ ]]`, Elixir `#`, Zig `//` incl. `///` doc-comment, R `#`, F# `//` + `(* *)`, Haskell `--` + `{- -}`). |
+| 4 | `LangR` detection: both `analysis.R` and `script.r` return `LangR` | `Detect` at `lang.go:195` calls `strings.ToLower(filepath.Ext(...))`, lowercasing `.R` → `.r`; `extensionTable[".r"]: LangR` at `lang.go:139`. `TestDetect_ProgrammingLanguages` includes both rows `{"script.r", LangR}` and `{"analysis.R", LangR}` at `lang_test.go:354-355`. Both subtests are subject to `t.Parallel()` and would fail independently if the lowercase normalization regressed. |
+| 5 | Lua block-comment limitation documented in test: `--[[ comment ]]` is Comment | `TestSplit_ProgrammingLanguages/lua_block_comment_single-line_(Acceptance_#5)` at `split_test.go:510-514` asserts `LineCounts{Comment: 1, Code: 1}` for `"--[[ comment ]]\nlocal y = 2\n"`. Comment in the test rows at `split_test.go:499-502` explicitly names the Policy α `]]` table-index limitation. Backed by `LangLua: {linePrefix: "--", blockOpen: "--[[", blockClose: "]]"}` at `split.go:140`. |
+| 6 | README lists the 10 new languages alphabetically | `README.md:122` reads: `C, C++, C#, CMakeLists.txt, CSS, Dart, Dockerfile, Elixir, F#, Go, Haskell, HTML, Java, JavaScript, JSON, Kotlin, Lua, Makefile, Markdown, PHP, Python, R, Ruby, Rust, Scala, Shell (sh/bash/zsh/fish), SQL, Swift, TOML, TypeScript, XML, YAML, Zig.` All 10 (C#, Dart, Elixir, F#, Haskell, Lua, R, Scala, SQL, Zig) are present and in case-insensitive alphabetical position. |
+| 7 | `mage build` passes | `mage build` from `main/` returned exit 0 (no output). Compilation of `internal/lang` is also implicitly proven by `mage test` succeeding on that package. |
+
+### Implementation matches Scope
+
+- **10 new `Language` constants** declared at `lang.go:53-76`, each with a Go doc comment starting with the identifier name per project convention (rule 11 in `main/CLAUDE.md` § "Project Structure"). Values are all lowercase single-word strings (`"csharp"`, `"fsharp"`, etc.), matching the naming-convention note in PLAN.md.
+- **14 extension-table entries** added at `lang.go:128-142`. All keys lowercase with leading dot, matching `filepath.Ext` output. No collisions with existing keys (verified by reading the full table).
+- **10 grammar-table entries** added at `split.go:125-156`. Each matches the PLAN spec exactly:
+  - C-family (`LangCSharp`, `LangDart`, `LangScala`) at `split.go:128-130`: `linePrefix: "//"`, `blockOpen: "/*"`, `blockClose: "*/"`.
+  - ANSI SQL (`LangSQL`) at `split.go:133`: `linePrefix: "--"`, `blockOpen: "/*"`, `blockClose: "*/"`.
+  - Lua (`LangLua`) at `split.go:140`: `linePrefix: "--"`, `blockOpen: "--[["`, `blockClose: "]]"`.
+  - Elixir (`LangElixir`) at `split.go:143`: `linePrefix: "#"` only.
+  - Zig (`LangZig`) at `split.go:147`: `linePrefix: "//"` only.
+  - R (`LangR`) at `split.go:150`: `linePrefix: "#"` only.
+  - F# (`LangFSharp`) at `split.go:153`: `linePrefix: "//"`, `blockOpen: "(*"`, `blockClose: "*)"`.
+  - Haskell (`LangHaskell`) at `split.go:156`: `linePrefix: "--"`, `blockOpen: "{-"`, `blockClose: "-}"`.
+
+### Test quality
+
+- `TestDetect_ProgrammingLanguages` (`lang_test.go:330-376`) is non-vacuous: every row exercises `Detect` on a freshly-built `fstest.MapFS` and asserts the returned `Language` against an expected constant. Any extension-table regression (wrong constant, missing key, leading-dot omission) would fail the corresponding subtest.
+- The `.R` uppercase case is a real regression guard for Acceptance #4 — it would fail if `Detect` were ever changed to drop the `strings.ToLower(filepath.Ext(...))` normalization at `lang.go:195`.
+- `TestSplit_ProgrammingLanguages` (`split_test.go:438-596`) covers each grammar with at least one comment-line assertion. Block-comment multi-line state machine is verified for Lua (`split_test.go:516-520`), Haskell (`split_test.go:576-580`), F# (`split_test.go:562-567`), C# (`split_test.go:455-459`), Scala (`split_test.go:467-472`), Dart (`split_test.go:481-485`), SQL (`split_test.go:493-498`).
+- Zig `////` doc-comment case (`split_test.go:542-547`) verifies the implicit claim that `///` lines satisfy `strings.HasPrefix(trimmed, "//")` and therefore classify as Comment under the Zig grammar — non-trivial since Zig has no block form.
+- All subtests use `t.Parallel()` and would still pass under the race detector (`mage test` runs `-race` unconditionally per `main/CLAUDE.md`).
+
+### Findings
+
+None. PASS with no findings.
+
+### Hylla Feedback
+
+None — Hylla answered everything needed. Verification used direct `Read` of the changed Go files (`lang.go`, `split.go`, `lang_test.go`, `split_test.go`) plus `README.md`, and `mage test` / `mage build` execution. The diff was small and well-localized; no committed-state symbol cross-referencing through Hylla was required for this round.
