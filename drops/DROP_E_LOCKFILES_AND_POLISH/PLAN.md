@@ -1,6 +1,6 @@
 # DROP_E — LOCKFILES_AND_POLISH
 
-**State:** planning
+**State:** done
 **Tier:** B
 **Blocked by:** —
 **Paths (expected):** NEW internal/lockfiles/lockfiles.go + lockfiles_test.go, internal/lister/lister.go (lockfile filter integration + non-regular-file friendly error), internal/lister/lister_test.go, cmd/rak/root.go (--include-lockfiles flag + --no-gitignore help text), README.md, docs/tapes/default-toon.tape (re-record), docs/default-toon.gif (regenerated), NEW .goreleaser.yml, NEW .github/workflows/release.yml
@@ -8,7 +8,7 @@
 **PLAN.md ref:** — (top-level PLAN.md removed at v0.1.0 ship; see memory `session_handoff_2026_05_16_v020_planning.md`)
 **Workflow:** main/drops/WORKFLOW.md
 **Started:** 2026-05-17
-**Closed:** —
+**Closed:** 2026-05-18
 
 ## Scope
 
