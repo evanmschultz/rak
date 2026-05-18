@@ -156,3 +156,104 @@ Not E.3's bug; not E.3's responsibility to fix. Flagging because the spawn promp
 ### Hylla Feedback
 
 N/A — Unit E.3 touched only a cobra flag description string literal in `cmd/rak/root.go`; the diff is non-semantic from Hylla's perspective. Hylla was not queried; `Read` + `git show` + `git diff` covered the verification surface directly. No miss.
+
+## Unit E.2 — Round 1
+
+- **Reviewer:** go-qa-falsification-agent
+- **Started:** 2026-05-17
+- **Verdict:** PASS for E.2 (no CONFIRMED counterexample against the unit). One drop-level finding (F3) re-flagged — `mage ci` red on `TestRootCmd_Version` due to uncommitted `cmd/rak/main.go` v0.2.0-dev bump (already documented under Unit E.3; orthogonal to E.2 but blocks Phase 6).
+- **Commit under review:** `31dfa0e fix(lister): friendly error for non-regular non-directory paths`
+- **Files reviewed:**
+  - `internal/lister/lister.go` (sentinel decl line 38-43 + guard placement in `Detect` lines 84-86)
+  - `internal/lister/lister_test.go` (`TestDetect_NotRegularFile_FriendlyError` lines 540-563 + pre-existing v0.1.4 regression tests)
+  - `git diff HEAD~3 -- internal/lister/` to isolate E.2's actual delta from E.1/E.3/E.5
+- **Mage targets run:** `mage test` (lister package PASS cached; full repo FAIL on unrelated `TestRootCmd_Version` per Finding F3).
+
+### Attack 1 — Sentinel correctness (`ErrFoo` shape, package scope, doc comment)
+
+REFUTED. `ErrNotRegularFileOrDirectory` is declared at package scope (`lister.go:43`), capital `E` prefix per Go convention, with a four-line doc comment that names the identifier first (`// ErrNotRegularFileOrDirectory is returned by Detect when the resolved path is …`). Doc comment matches the `ErrNoGitignoreInRepo` sibling shape (lines 30-36) — consistent with package style. Declared via `errors.New("not a regular file or directory")`, lowercase message, no trailing punctuation per Go error-string convention. `go vet` + `golangci-lint` clean on the lister package.
+
+### Attack 2 — Guard placement (post-EvalSymlinks/Stat, pre-git-probe; correct mode predicate)
+
+REFUTED. Order of operations in `Detect` (lister.go:57-86):
+
+1. `filepath.Abs` (line 58).
+2. `filepath.EvalSymlinks` (line 66) — resolves symlinks before mode inspection.
+3. `os.Stat(absRoot)` (line 75) — single `Stat` call, `statErr` reused.
+4. Regular-file fast-path (lines 76-78): returns `SingleFileLister`.
+5. **Non-regular non-directory guard (lines 84-86)**: `statErr == nil && !info.Mode().IsDir()` → returns wrapped `ErrNotRegularFileOrDirectory`.
+6. Git probe (`exec.LookPath` line 90, `cmd.Output` line 97).
+
+Guard fires AFTER both `EvalSymlinks` and `Stat` resolve, and BEFORE any git invocation. Mode predicate is correct: by step 5 a regular file has already returned at step 4, so `IsRegular() == false` is implicit; the explicit `!IsDir()` excludes directories, leaving devices/sockets/pipes/irregular to fall through. PLAN-spec wording was `IsRegular() == false AND IsDir() == false`; the implementation collapses this to `!IsDir()` by relying on the step-4 short-circuit. Operationally identical given current code, but worth noting that the predicate is order-dependent — if the step-4 fast-path were removed or reordered, the guard could fire spuriously on regular files. Latent fragility, not a counterexample today.
+
+### Attack 3 — `%w` enables `errors.Is`
+
+REFUTED. Wrap is `fmt.Errorf("lister: detect: %s: %w", absRoot, ErrNotRegularFileOrDirectory)` (line 85). The `%w` verb is correctly applied to the sentinel (not the path), so `errors.Is(err, lister.ErrNotRegularFileOrDirectory)` walks the wrap chain and matches. Test directly verifies (`lister_test.go:554-556`):
+
+```go
+if !errors.Is(err, lister.ErrNotRegularFileOrDirectory) {
+    t.Errorf("errors.Is(err, ErrNotRegularFileOrDirectory) = false; got: %v", err)
+}
+```
+
+The format string interpolates `absRoot` via `%s` (safe — string, not error) and the sentinel via `%w` (one `%w` per `fmt.Errorf` per Go 1.20+ rule; satisfied).
+
+### Attack 4 — Test coverage (`/dev/null`, message contains "not a regular file or directory", excludes "fork/exec")
+
+REFUTED. `TestDetect_NotRegularFile_FriendlyError` (lister_test.go:540-563) implements all PLAN-spec assertions:
+- Skip-guard if `/dev/null` not stat-able (line 542-544): platform-safe.
+- `err != nil` (line 548-550): friendly error returned.
+- `got == nil` (line 551-553): no lister leaked through.
+- `errors.Is(err, lister.ErrNotRegularFileOrDirectory)` (line 554-556): sentinel match.
+- `strings.Contains(msg, "not a regular file or directory")` (line 557-559): user-visible message correct.
+- `!strings.Contains(msg, "fork/exec")` (line 560-562): regression guard against the v0.1.4 obscure-error case.
+
+All six checks named in the spawn-prompt attack #4 reproduced in the test. `/dev/null` is the canonical character-device fixture per PLAN design decision 4.
+
+### Attack 5 — Regression guard (existing v0.1.4 tests still pass)
+
+REFUTED. `mage test` of `./internal/lister/...` returns `ok` (cached; cache key includes `lister.go` source — cache hit means the package passed under the new code). Tracing each existing test through the new guard:
+- `TestDetect_SingleFile` (line 209): regular file → step-4 fast-path returns; guard never reached.
+- `TestDetect_SymlinkedFile` (line 232): symlink → regular file → step-4 returns; guard never reached.
+- `TestDetect_SymlinkedDir` (line 260): symlink → git dir → step-4 false (`IsRegular() == false`), step-5 false (`!IsDir() == false`); falls through to git probe; returns `GitLister`. Guard correctly inactive.
+- `TestDetect_BrokenSymlink` (line 298): `EvalSymlinks` fails at step 2; guard unreachable.
+- `TestDetect_InsideRepo` / `TestDetect_OutsideRepo` / `TestDetect_BareRepo` / `TestDetect_InsideGitDir` / `TestDetect_NoGitignoreInRepo_ReturnsSentinel` / `TestDetect_BareRepo_WithDisableGitignore` / `TestDetect_InsideGitDir_WithDisableGitignore`: all directory cases; `IsDir() == true` makes `!IsDir()` false; guard inactive.
+
+No existing test path collides with the new guard.
+
+### Attack 6 — Symlink-to-regular-file ordering (EvalSymlinks resolves before mode check)
+
+REFUTED. Flow: `Abs` → `EvalSymlinks` → `Stat`. `EvalSymlinks` returns the resolved target, which is then `Stat`-ed. For symlink-to-regular-file, `info.Mode().IsRegular()` is true on the target, so step-4 returns `SingleFileLister` before the guard runs. `TestDetect_SymlinkedFile` (line 232) confirms end-to-end. No counterexample.
+
+What about a symlink to a character device (e.g. `ln -s /dev/null fakelink` → `rak fakelink`)? `EvalSymlinks` resolves `fakelink` → `/dev/null`, `Stat` reports `ModeCharDevice`, step-4 short-circuits on `IsRegular() == false`, step-5 guard fires on `!IsDir() == true`, friendly error returned. Identical behavior to direct `rak /dev/null`. No spec violation.
+
+### Attack 7 — Named pipe / socket / block-device coverage via mode-check (not test)
+
+REFUTED. Test fixture is `/dev/null` (character device) only. But the guard predicate `!info.Mode().IsDir()` (after the regular-file fast-path) catches every non-directory mode:
+- `os.ModeDevice` (block device): guard fires.
+- `os.ModeCharDevice` (char device, includes `/dev/null`): guard fires — directly tested.
+- `os.ModeNamedPipe` (FIFO): guard fires.
+- `os.ModeSocket`: guard fires.
+- `os.ModeIrregular`: guard fires.
+
+The implementation is mode-family-agnostic: anything reaching step 5 with `!IsDir()` triggers the friendly error. So while only `/dev/null` is in the test table, the production code path for FIFO / socket / block-device is the same single branch (lister.go:84-86). Risk of a per-mode regression is structurally zero — there is no per-mode logic to break. PLAN.md flagged the optional `syscall.Mkfifo` test as "Unix only; guard with build tag if needed"; the builder skipped it because the structural argument makes it redundant. Reasonable trade.
+
+### Attack 8 — `mage ci` clean
+
+CONFIRMED-counterexample-against-drop-not-E.2 (see Finding F3). `mage ci` fails at `mage test` because `TestRootCmd_Version` (cmd/rak/root_test.go:1192-1195) asserts the `--version` output contains `"v0.1.4"`, but `cmd/rak/main.go` was bumped to `var version = "v0.2.0-dev"` in an uncommitted working-tree edit (`git status -s cmd/rak/main.go` → ` M cmd/rak/main.go`). E.2's own diff touches only `internal/lister/*` — the lister package itself passes cleanly. This finding was previously flagged under Unit E.3 Round 1; persists at the E.2 review window. Blocks Phase 6 drop-end gate but does NOT block per-unit attribution for E.2.
+
+### Finding F3 (re-flag from Unit E.3 — drop-level, not E.2-attributable)
+
+Already documented in the Unit E.3 § "Out-of-scope observation routed to orchestrator". Re-flagging here because Attack 8 above lands on the same artifact:
+
+- Uncommitted edit: `const version = "v0.1.4"` → `var version = "v0.2.0-dev"` in `cmd/rak/main.go` (also const → var for ldflags injection).
+- `cmd/rak/root_test.go:1193` still asserts the literal string `"v0.1.4"`.
+- Recommended fix paths unchanged from E.3 review: (a) stash the bump until E.4 lands, OR (b) commit the bump together with `TestRootCmd_Version` updated to read from the live `version` variable / `strings.HasPrefix(got, "rak version v")` for forward-compatibility.
+
+### Verdict
+
+**PASS for Unit E.2.** All 8 spawn-prompt attack angles applied. Angles 1–7 REFUTED with concrete trace through the code. Angle 8 (`mage ci`) confirms the drop-level F3 contamination — orthogonal to E.2's diff, blocks Phase 6, routed to orchestrator (already known from E.3 review). One latent fragility noted under Attack 2 (guard predicate `!IsDir()` is order-dependent on the step-4 IsRegular short-circuit); non-blocking.
+
+### Hylla Feedback
+
+N/A — E.2 review was a surgical 2-file inspection (`lister.go` ~126 LOC + `lister_test.go` ~610 LOC). `Read` + `git diff HEAD~3` were the right primary tools; no Hylla query was attempted (integration points were named explicitly in the spawn prompt + visible in the diff). No miss to report.
