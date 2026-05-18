@@ -116,6 +116,42 @@ const (
 	// comment syntax; one constant follows the existing pattern of grouping
 	// closely-related variants (Shell groups sh/bash/zsh/fish).
 	LangMustache Language = "mustache"
+
+	// Unit A.4 — Config and data formats.
+
+	// LangINI is the Language constant for INI configuration files (.ini).
+	// INI uses ";" as the primary line-comment prefix and "#" as a secondary.
+	LangINI Language = "ini"
+	// LangEnv is the Language constant for dotenv environment files (.env).
+	// filepath.Ext(".env") returns ".env" so standalone dotfiles match correctly.
+	LangEnv Language = "env"
+	// LangEditorConfig is the Language constant for EditorConfig files
+	// (.editorconfig). Uses "#" for line comments per the EditorConfig spec.
+	LangEditorConfig Language = "editorconfig"
+	// LangProperties is the Language constant for Java .properties files
+	// (.properties). Uses "#" as primary and "!" as secondary line-comment prefix.
+	LangProperties Language = "properties"
+	// LangHCL is the Language constant for HashiCorp Configuration Language files
+	// (.tf, .tfvars, .hcl). HCL supports "#", "//", and "/* */" comment forms.
+	LangHCL Language = "hcl"
+	// LangNix is the Language constant for Nix expression language files (.nix).
+	// Uses "#" for line comments and "/* */" for block comments.
+	LangNix Language = "nix"
+	// LangProto is the Language constant for Protocol Buffer definition files
+	// (.proto). Uses "//" for line comments and "/* */" for block comments.
+	LangProto Language = "proto"
+	// LangGraphQL is the Language constant for GraphQL schema definition files
+	// (.graphql, .gql). "#" is the only comment form in GraphQL SDL.
+	LangGraphQL Language = "graphql"
+	// LangCSV is the Language constant for Comma-Separated Values files (.csv).
+	// CSV has no comment syntax; all non-blank lines are classified as Code.
+	LangCSV Language = "csv"
+	// LangTSV is the Language constant for Tab-Separated Values files (.tsv).
+	// TSV has no comment syntax; all non-blank lines are classified as Code.
+	LangTSV Language = "tsv"
+	// LangJSONL is the Language constant for JSON Lines files (.jsonl, .ndjson).
+	// JSON Lines has no comment syntax; all non-blank lines are classified as Code.
+	LangJSONL Language = "jsonl"
 )
 
 // specialFilenames maps exact lowercased basenames to languages. Lookup is
@@ -185,21 +221,38 @@ var extensionTable = map[string]Language{
 	".zig":   LangZig,
 
 	// Unit A.3 — Templating and frontend variants.
-	".templ":   LangTempl,
-	".jsx":     LangJSX,
-	".tsx":     LangTSX,
-	".scss":    LangSCSS,
-	".sass":    LangSass,
-	".less":    LangLESS,
-	".vue":     LangVue,
-	".svelte":  LangSvelte,
-	".erb":     LangERB,
-	".j2":      LangJinja,
-	".jinja":   LangJinja,
-	".jinja2":  LangJinja,
-	".liquid":  LangLiquid,
+	".templ":    LangTempl,
+	".jsx":      LangJSX,
+	".tsx":      LangTSX,
+	".scss":     LangSCSS,
+	".sass":     LangSass,
+	".less":     LangLESS,
+	".vue":      LangVue,
+	".svelte":   LangSvelte,
+	".erb":      LangERB,
+	".j2":       LangJinja,
+	".jinja":    LangJinja,
+	".jinja2":   LangJinja,
+	".liquid":   LangLiquid,
 	".mustache": LangMustache,
-	".hbs":     LangMustache,
+	".hbs":      LangMustache,
+
+	// Unit A.4 — Config and data formats.
+	".ini":          LangINI,
+	".env":          LangEnv,
+	".editorconfig": LangEditorConfig,
+	".properties":   LangProperties,
+	".tf":           LangHCL,
+	".tfvars":       LangHCL,
+	".hcl":          LangHCL,
+	".nix":          LangNix,
+	".proto":        LangProto,
+	".graphql":      LangGraphQL,
+	".gql":          LangGraphQL,
+	".csv":          LangCSV,
+	".tsv":          LangTSV,
+	".jsonl":        LangJSONL,
+	".ndjson":       LangJSONL,
 }
 
 // shebangsTable maps interpreter basenames to languages. For

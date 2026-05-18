@@ -119,7 +119,7 @@ Mutually exclusive: `--human`, `--json`, `--toon` (cobra rejects more than one).
 
 ## Languages detected
 
-C, C++, C#, CMakeLists.txt, CSS, Dart, Dockerfile, Elixir, ERB, F#, Go, Haskell, HTML, Java, JavaScript, Jinja, JSON, JSX, Kotlin, LESS, Liquid, Lua, Makefile, Markdown, Mustache/Handlebars, PHP, Python, R, Ruby, Rust, Sass, Scala, SCSS, Shell (sh/bash/zsh/fish), SQL, Svelte, Swift, Templ, TOML, TSX, TypeScript, Vue, XML, YAML, Zig. Detection priority: special filename → extension → shebang → content heuristic. Files whose language can't be detected appear in counts but are excluded from `--lang` filtering and the `total_by_lang` block.
+C, C++, C#, CMakeLists.txt, CSV, CSS, Dart, Dockerfile, dotenv, EditorConfig, Elixir, ERB, F#, Go, GraphQL, Haskell, HCL/Terraform, HTML, INI, Java, JavaScript, Jinja, JSON, JSONL, JSX, Kotlin, LESS, Liquid, Lua, Makefile, Markdown, Mustache/Handlebars, Nix, PHP, Properties, Protobuf, Python, R, Ruby, Rust, Sass, Scala, SCSS, Shell (sh/bash/zsh/fish), SQL, Svelte, Swift, Templ, TOML, TSV, TSX, TypeScript, Vue, XML, YAML, Zig. Detection priority: special filename → extension → shebang → content heuristic. Files whose language can't be detected appear in counts but are excluded from `--lang` filtering and the `total_by_lang` block.
 
 > **v0.2.0 behavior change:** `.xml` files previously appeared as `html` in `total_by_lang`. They now appear as `xml`. This is an intentional split — XML and HTML are distinct languages.
 

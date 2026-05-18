@@ -204,6 +204,37 @@ var grammarTable = map[Language]grammar{
 	// Note: "{{!" is a prefix of "{{!--" so the linePrefix fires first on
 	// single-line {{! comments; the blockOpen fires on {{!-- block opens.
 	LangMustache: {linePrefix: "{{!", blockOpen: "{{!--", blockClose: "--}}"},
+
+	// Unit A.4 — Config and data formats.
+
+	// INI: ";" primary line-comment prefix + "#" secondary.
+	LangINI: {linePrefix: ";", linePrefix2: "#"},
+
+	// Dotenv: "#" line only (dotenv standard).
+	LangEnv: {linePrefix: "#"},
+
+	// EditorConfig: "#" line only (editorconfig spec).
+	LangEditorConfig: {linePrefix: "#"},
+
+	// Java .properties: "#" primary + "!" secondary line-comment prefix.
+	LangProperties: {linePrefix: "#", linePrefix2: "!"},
+
+	// HCL/Terraform: all three comment forms — "#" primary, "//" secondary,
+	// "/* */" block. HCL specification supports all three.
+	LangHCL: {linePrefix: "#", linePrefix2: "//", blockOpen: "/*", blockClose: "*/"},
+
+	// Nix expression language: "#" line + "/* */" block.
+	LangNix: {linePrefix: "#", blockOpen: "/*", blockClose: "*/"},
+
+	// Protocol Buffers: "//" line + "/* */" block.
+	LangProto: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+
+	// GraphQL SDL: "#" is the only comment form.
+	LangGraphQL: {linePrefix: "#"},
+
+	// LangCSV, LangTSV, LangJSONL intentionally absent from grammarTable:
+	// CSV, TSV, and JSON Lines have no comment syntax — all non-blank lines
+	// classify as Code via the zero-grammar fallback in Split.
 }
 
 // Split reads r line by line and classifies each line as Blank, Comment, or

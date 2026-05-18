@@ -810,6 +810,157 @@ func TestSplit_Templating(t *testing.T) {
 	}
 }
 
+// TestSplit_ConfigDataFormats verifies Unit A.4: blank/comment/code
+// classification for the 8 grammar-bearing config/data languages and the
+// grammar-absent CSV/TSV/JSONL formats (all non-blank lines = Code).
+//
+// Grammar-less formats (LangCSV, LangTSV, LangJSONL): absent from grammarTable,
+// so Split uses the zero grammar — all non-blank lines classify as Code.
+// Acceptance #9 requires one assertion per grammar-less lang.
+//
+// INI uses ";" as primary line-comment prefix and "#" as secondary.
+// Properties uses "#" as primary and "!" as secondary.
+// HCL accepts "#", "//", and "/* */".
+func TestSplit_ConfigDataFormats(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		lang  Language
+		input string
+		want  LineCounts
+	}{
+		// LangINI — ";" primary + "#" secondary (Acceptance #6).
+		{
+			name:  "ini semicolon comment (Acceptance #6)",
+			lang:  LangINI,
+			input: "; comment\n[section]\nkey=value\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 2},
+		},
+		{
+			name:  "ini hash secondary comment",
+			lang:  LangINI,
+			input: "# comment\nkey=value\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		// LangEnv — "#" line only.
+		{
+			name:  "env hash comment",
+			lang:  LangEnv,
+			input: "# comment\nFOO=bar\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		// LangEditorConfig — "#" line only.
+		{
+			name:  "editorconfig hash comment",
+			lang:  LangEditorConfig,
+			input: "# comment\n[*.go]\nindent_size = 4\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 2},
+		},
+		// LangProperties — "#" primary + "!" secondary (Acceptance #8).
+		{
+			name:  "properties hash comment",
+			lang:  LangProperties,
+			input: "# comment\nkey=value\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "properties exclamation secondary comment (Acceptance #8)",
+			lang:  LangProperties,
+			input: "! comment\nkey=value\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		// LangHCL — "#" primary, "//" secondary, "/* */" block (Acceptance #7).
+		{
+			name:  "hcl hash comment (Acceptance #7)",
+			lang:  LangHCL,
+			input: "# comment\nresource \"aws_s3_bucket\" \"b\" {}\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "hcl slashslash comment (Acceptance #7)",
+			lang:  LangHCL,
+			input: "// comment\nresource \"aws_s3_bucket\" \"b\" {}\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "hcl block comment (Acceptance #7)",
+			lang:  LangHCL,
+			input: "/* open\n * body\n */\nresource \"aws_s3_bucket\" \"b\" {}\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+		// LangNix — "#" line + "/* */" block.
+		{
+			name:  "nix hash comment",
+			lang:  LangNix,
+			input: "# comment\nlet x = 1; in x\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "nix block comment",
+			lang:  LangNix,
+			input: "/* open\n   body\n*/\nlet x = 1; in x\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+		// LangProto — "//" line + "/* */" block.
+		{
+			name:  "proto line comment",
+			lang:  LangProto,
+			input: "// comment\nmessage Foo {}\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		{
+			name:  "proto block comment",
+			lang:  LangProto,
+			input: "/* open\n * doc\n */\nmessage Foo {}\n",
+			want:  LineCounts{Blank: 0, Comment: 3, Code: 1},
+		},
+		// LangGraphQL — "#" line only.
+		{
+			name:  "graphql hash comment",
+			lang:  LangGraphQL,
+			input: "# comment\ntype Query { hello: String }\n",
+			want:  LineCounts{Blank: 0, Comment: 1, Code: 1},
+		},
+		// Grammar-absent formats: all non-blank lines = Code (Acceptance #9).
+		// LangCSV: no comment syntax; all lines are Code.
+		{
+			name:  "csv all code (Acceptance #9)",
+			lang:  LangCSV,
+			input: "a,b,c\n1,2,3\n\n",
+			want:  LineCounts{Blank: 1, Comment: 0, Code: 2},
+		},
+		// LangTSV: no comment syntax; all lines are Code.
+		{
+			name:  "tsv all code (Acceptance #9)",
+			lang:  LangTSV,
+			input: "a\tb\tc\n1\t2\t3\n",
+			want:  LineCounts{Blank: 0, Comment: 0, Code: 2},
+		},
+		// LangJSONL: no comment syntax (JSON Lines); all lines are Code.
+		{
+			name:  `jsonl all code (Acceptance #9)`,
+			lang:  LangJSONL,
+			input: "{\"key\":\"value\"}\n{\"a\":1}\n",
+			want:  LineCounts{Blank: 0, Comment: 0, Code: 2},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := Split(strings.NewReader(tc.input), tc.lang)
+			if err != nil {
+				t.Fatalf("Split: unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %+v; want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestSplit_Swift verifies that Swift uses "//" for line comments and
 // "/* */" for block comments. Nested block comments are not tracked (Policy α,
 // YAGNI v0.1.0): the flat open/close scan is acceptable.

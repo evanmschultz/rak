@@ -80,3 +80,26 @@ N/A — task touched non-Go files (README.md, PLAN.md, BUILDER_WORKLOG.md) via `
 ## Hylla Feedback (Unit A.3)
 
 None — Hylla answered everything needed at the structural level. For Go files, `Read` was used for implementation-detail inspection (map literals, struct field names) as expected — Hylla indexes block-level summaries. Non-Go files (README.md, PLAN.md, BUILDER_WORKLOG.md) read via `Read` tool directly (correct: Hylla is Go-only today).
+
+## Unit A.4 — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-17
+- **Files touched:**
+  - `internal/lang/lang.go` — added 11 `Language` constants (LangINI, LangEnv, LangEditorConfig, LangProperties, LangHCL, LangNix, LangProto, LangGraphQL, LangCSV, LangTSV, LangJSONL) with doc comments under `// Unit A.4 — Config and data formats.`; added 15 extension entries (.ini, .env, .editorconfig, .properties, .tf, .tfvars, .hcl, .nix, .proto, .graphql, .gql, .csv, .tsv, .jsonl, .ndjson) to `extensionTable`.
+  - `internal/lang/split.go` — added 7 grammar entries (LangINI, LangEnv, LangEditorConfig, LangProperties, LangHCL, LangNix, LangProto, LangGraphQL) to `grammarTable`; LangCSV, LangTSV, LangJSONL intentionally absent (no comment syntax — all non-blank lines are Code via zero-grammar fallback).
+  - `internal/lang/lang_test.go` — added `TestDetect_ConfigDataFormats` table-driven test with 16 cases covering all 11 new extensions (including `.env` dotfile, `.editorconfig` dotfile, `.tf`/`.tfvars`/`.hcl` → LangHCL, `.graphql`/`.gql` → LangGraphQL, `.jsonl`/`.ndjson` → LangJSONL).
+  - `internal/lang/split_test.go` — added `TestSplit_ConfigDataFormats` table-driven test with 17 subtests: INI `;` primary and `#` secondary, Env `#`, EditorConfig `#`, Properties `#` primary and `!` secondary, HCL `#`/`//`/`/* */`, Nix `#`/`/* */`, Proto `//`/`/* */`, GraphQL `#`, CSV/TSV/JSONL all-Code assertions.
+  - `README.md` — updated "Languages detected" comma-separated list: inserted 11 entries (CSV, dotenv, EditorConfig, GraphQL, HCL/Terraform, INI, JSONL, Nix, Properties, Protobuf, TSV) alphabetically; list now at 56 entries.
+  - `drops/DROP_A_LANG_EXPANSION/PLAN.md` — state `todo` → `done` for Unit A.4.
+- **Mage targets run:** `mage build` (pass, no output), `mage test` (all 8 packages pass; `internal/lang` 1.513s).
+- **TDD discipline:** Tests written first → `mage test` RED (compile error, 10+ undefined constants) → production code added → `mage test` GREEN. Per-function red-green-refactor cycle complete.
+- **Notes:**
+  - All 11 acceptance criteria satisfied.
+  - Grammar design: LangHCL is the most expressive entry (three comment forms: `#`, `//`, `/* */`) — the existing `linePrefix2` field in the `grammar` struct handles this cleanly.
+  - CSV/TSV/JSONL absence from grammarTable is intentional — the zero-grammar fallback in `Split` makes all non-blank lines Code.
+  - README list grew from 45 to 56 entries. Paragraph form retained per PLAN.md (A.4 builders may keep it); A.5 builder must switch format.
+
+## Hylla Feedback (Unit A.4)
+
+N/A — task touched non-Go files (README.md, PLAN.md, BUILDER_WORKLOG.md) via `Read` tool directly (correct: Hylla is Go-only). For Go files, implementation details required `Read` on lang.go, split.go, and test files (expected — Hylla indexes block-level summaries, not raw map literals). No misses to report.

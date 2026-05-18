@@ -226,7 +226,7 @@ README "Languages detected": append the 12 new names alphabetically.
 
 ### Unit A.4 — Config and data formats
 
-**State:** todo
+**State:** done
 
 **Paths:**
 - `internal/lang/lang.go`

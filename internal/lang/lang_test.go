@@ -402,6 +402,59 @@ func TestDetect_HTML_Regression(t *testing.T) {
 	}
 }
 
+// TestDetect_ConfigDataFormats verifies Unit A.4: all 11 new config and data
+// format language constants resolve correctly from their extensions via Detect.
+// Covers Acceptance criteria 2–5.
+func TestDetect_ConfigDataFormats(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		path string
+		want Language
+	}{
+		// LangINI — .ini
+		{"config.ini", LangINI},
+		// LangEnv — .env (filepath.Ext(".env") = ".env" for a dotfile basename)
+		{".env", LangEnv},
+		{"development.env", LangEnv},
+		// LangEditorConfig — .editorconfig
+		{".editorconfig", LangEditorConfig},
+		// LangProperties — .properties
+		{"app.properties", LangProperties},
+		// LangHCL — .tf, .tfvars, .hcl (Acceptance #2: all three map to LangHCL)
+		{"main.tf", LangHCL},
+		{"terraform.tfvars", LangHCL},
+		{"config.hcl", LangHCL},
+		// LangNix — .nix
+		{"default.nix", LangNix},
+		// LangProto — .proto
+		{"service.proto", LangProto},
+		// LangGraphQL — .graphql and .gql (Acceptance #3)
+		{"schema.graphql", LangGraphQL},
+		{"query.gql", LangGraphQL},
+		// LangCSV — .csv
+		{"data.csv", LangCSV},
+		// LangTSV — .tsv
+		{"data.tsv", LangTSV},
+		// LangJSONL — .jsonl and .ndjson (Acceptance #4)
+		{"events.jsonl", LangJSONL},
+		{"events.ndjson", LangJSONL},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.path, func(t *testing.T) {
+			t.Parallel()
+			fsys := fstest.MapFS{tc.path: &fstest.MapFile{Data: []byte("content")}}
+			f := newTestFile(fsys, tc.path)
+			got := Detect(f)
+			if got != tc.want {
+				t.Errorf("Detect(%q) = %q; want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestDetect_Templating verifies Unit A.3: all 12 new templating and frontend
 // language constants resolve correctly from their extensions via Detect.
 // Covers Acceptance criteria 2, 3, and 4.
