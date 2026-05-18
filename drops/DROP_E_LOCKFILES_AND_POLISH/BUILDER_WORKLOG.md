@@ -111,3 +111,27 @@ N/A — task was a surgical edit to an existing Go file; `Read` was the correct 
 ## Hylla Feedback (Unit E.4)
 
 N/A — task touched only non-Go files (.goreleaser.yml, .github/workflows/release.yml, README.md) and one 1-token Go change (const → var). Hylla is Go-only today; `Read` was the correct primary tool for all file inspection. No Hylla miss to report.
+
+## Polish bundle — 2026-05-18
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-18
+- **Files touched:**
+  - `cmd/rak/root.go` (Fix 1: hoist `isSingleFile` type assertion before the walk loop; bypass lockfile filter when `isSingleFile`)
+  - `cmd/rak/root_test.go` (Fix 1: new `TestRootCmd_SingleFileLockfile_Counted`; Fix 2: extended `TestRootCmd_HelpContainsExamples` + 3 example assertions + updated docstring count 8→11; Fix 3: updated `TestRootCmd_Version` docstring to reference "live version variable" instead of stale "v0.1.4")
+  - `.goreleaser.yml` (Fix 4: `{{.Version}}` → `{{.Tag}}` for v-prefix preservation; Fix 5: `format: tar.gz` → `formats: ["tar.gz"]`, `builds: [rak]` → `ids: [rak]`)
+  - `README.md` (Fix 4: `rak version v0.2.0` → `rak version v0.2.0-dev` with parenthetical about release binaries)
+- **Mage targets run:**
+  - `mage test` (RED: `TestRootCmd_SingleFileLockfile_Counted` — empty output, lockfile bypassed single-file intent)
+  - `mage test` (GREEN: all 9 packages pass after Fix 1)
+  - `mage ci` (PASS: gofumpt clean, 0 lint issues, all 9 packages green, coverage 87.9% > 70% floor)
+- **Notes:**
+  - Fix 1 design: `isSingleFile` type assertion hoisted before the `for` loop (source is immutable across iterations) so the check is O(1) per walk rather than O(n). `*lister.SingleFileLister` is exported so the type assertion is legal across packages.
+  - Fix 2: the `wantCmds` slice was silently missing 3 of 11 cobra `Example:` entries added in Drops D and E. The test still passed because it used `strings.Contains` and no assertion covered the new lines. Added: `rg --files | rak --files-from -`, `git ls-files '*.go' | rak --files-from -`, `rak --include-lockfiles .` — exact strings confirmed from `root.go` lines 100/103/106.
+  - Fix 3: docstring at `TestRootCmd_Version` referenced `"v0.1.4"` (old hardcoded version); test body already used the `version` variable correctly. Only the comment was stale.
+  - Fix 4: GoReleaser `{{.Version}}` strips the leading `v` (it's the semver without prefix); `{{.Tag}}` is the raw git tag string which preserves `v`. Without this fix, a `v0.2.0` tag would produce `rak version 0.2.0` — no leading `v`, inconsistent with the `v0.2.0-dev` dev default.
+  - Fix 5: GoReleaser v2 renamed `format:` (string) to `formats:` (array of strings) in v2.6, and `builds:` to `ids:` in the archives section in v2.8. Old names still work but emit deprecation warnings. Both renames are backward-compat at the GoReleaser level.
+
+## Hylla Feedback (Polish bundle)
+
+N/A — task touched non-Go files (.goreleaser.yml, README.md) and Go files that were read directly via `Read` (small files, direct-read threshold). Hylla is Go-only today and was used for pattern reference only. No miss to report.

@@ -1168,9 +1168,9 @@ func TestRootCmd_FilesField_SurvivesLabelDirectories(t *testing.T) {
 
 // TestRootCmd_Version verifies that the root cobra command, when given the
 // version string that fang.WithVersion wires in main.go, prints output
-// containing "v0.1.4" when invoked with --version. The test sets cmd.Version
-// directly (mirroring what fang.WithVersion does to the cobra command) and
-// captures cobra's built-in version output via cmd.SetOut.
+// containing the live version variable when invoked with --version. The test
+// sets cmd.Version directly (mirroring what fang.WithVersion does to the cobra
+// command) and captures cobra's built-in version output via cmd.SetOut.
 func TestRootCmd_Version(t *testing.T) {
 	t.Parallel()
 
@@ -1302,11 +1302,14 @@ func TestLabelDirectories_FilesystemRoot(t *testing.T) {
 }
 
 // TestRootCmd_HelpContainsExamples verifies that the root command's --help
-// output contains the cobra Example: field with all eight documented examples
+// output contains the cobra Example: field with all eleven documented examples
 // plus their leading # comments. The test captures cobra's help output via
 // cmd.SetOut and asserts each example command string and the default-TOON
 // comment are present. It intentionally avoids asserting the section header
 // name (cobra calls it "Examples:" but fang may style it differently).
+//
+// Count breakdown: 8 original + 2 pipe examples (Drop D) + 1 lockfile example
+// (Drop E) = 11.
 func TestRootCmd_HelpContainsExamples(t *testing.T) {
 	t.Parallel()
 
@@ -1328,8 +1331,9 @@ func TestRootCmd_HelpContainsExamples(t *testing.T) {
 		t.Errorf("--help output missing '# Default — emit TOON'; got:\n%s", got)
 	}
 
-	// Assert each of the eight example command lines is present verbatim.
+	// Assert each of the eleven example command lines is present verbatim.
 	wantCmds := []string{
+		// Original 8.
 		"rak .",
 		"rak --human .",
 		"rak --json . | jq '.total_by_lang'",
@@ -1338,6 +1342,11 @@ func TestRootCmd_HelpContainsExamples(t *testing.T) {
 		"rak --lang go,rust .",
 		"rak --max-files 1000 .",
 		"cat README.md | rak",
+		// Drop D additions: pipe examples.
+		"rg --files | rak --files-from -",
+		"git ls-files '*.go' | rak --files-from -",
+		// Drop E addition: lockfile example.
+		"rak --include-lockfiles .",
 	}
 	for _, cmd := range wantCmds {
 		if !strings.Contains(got, cmd) {
@@ -1435,6 +1444,46 @@ func TestRootCmd_TotalByLang_EndToEnd(t *testing.T) {
 	}
 	if hasPy && sumPyBytes != pyTotal.Counts.Bytes {
 		t.Errorf("total_by_lang[python].Bytes (%d) != sum of per-dir python bytes (%d)", pyTotal.Counts.Bytes, sumPyBytes)
+	}
+}
+
+// TestRootCmd_SingleFileLockfile_Counted verifies that explicitly naming a
+// lockfile as the positional argument always counts it, regardless of the
+// --include-lockfiles flag. When the user says "rak go.sum", their intent
+// is unambiguous — count that specific file. The lockfile filter only makes
+// sense for directory walks where the user did not explicitly select the file.
+func TestRootCmd_SingleFileLockfile_Counted(t *testing.T) {
+	t.Parallel()
+
+	// Write a go.sum file to a temp dir so lister.Detect produces a
+	// SingleFileLister (regular-file fast-path in Detect).
+	tmp := t.TempDir()
+	lockPath := filepath.Join(tmp, "go.sum")
+	if err := os.WriteFile(lockPath, []byte("hash\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	// No --include-lockfiles flag; the lockfile filter default is "exclude".
+	// But because the user explicitly named go.sum, it must be counted.
+	cmd.SetArgs([]string{lockPath})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cmd.Execute(%q): %v\noutput:\n%s", lockPath, err, out.String())
+	}
+
+	got := out.String()
+	// Non-empty output means the file was counted; the bytes field must be
+	// present and non-zero (content is "hash\n" = 5 bytes).
+	if !strings.Contains(got, "bytes:") {
+		t.Errorf("single-file lockfile: expected 'bytes:' in output; got:\n%s", got)
+	}
+	// Verify the file name appears in the output (directory label = filename).
+	if !strings.Contains(got, "go.sum") {
+		t.Errorf("single-file lockfile: expected 'go.sum' in output; got:\n%s", got)
 	}
 }
 

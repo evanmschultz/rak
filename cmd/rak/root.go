@@ -437,6 +437,11 @@ func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, la
 		}
 	}
 
+	// Determine once before the loop whether the source is a SingleFileLister.
+	// When it is, the lockfile filter is bypassed — the user explicitly named
+	// the file, so their intent overrides the default exclusion policy.
+	_, isSingleFile := source.(*lister.SingleFileLister)
+
 	for f, walkErr := range source.List(ctx) {
 		if walkErr != nil {
 			// Context cancellation terminates the run; wrap and return.
@@ -468,7 +473,9 @@ func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, la
 		// Lockfile filter (v0.2.0): skip machine-generated dependency manifests
 		// by default so counts reflect code your team wrote. Pass
 		// --include-lockfiles to count them alongside regular source files.
-		if !includeLockfiles && lockfiles.IsLockfile(f.RelPath) {
+		// isSingleFile is computed once before the loop; when true, bypass the
+		// filter unconditionally — the user explicitly named this file.
+		if !includeLockfiles && !isSingleFile && lockfiles.IsLockfile(f.RelPath) {
 			continue
 		}
 

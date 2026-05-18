@@ -37,7 +37,7 @@ mage -l        # list all build/test/lint targets
 
 ```text
 $ rak --version
-rak version v0.2.0
+rak version v0.2.0-dev  # local build; release binaries print the tag (e.g. v0.2.0)
 
 $ rak internal/counting
 directories[1|]{path|files|bytes|lines|words|chars}:
