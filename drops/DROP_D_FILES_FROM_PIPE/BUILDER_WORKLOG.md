@@ -97,3 +97,31 @@ None — Hylla answered everything needed. The existing `root.go` symbols were c
 ## Hylla Feedback
 
 None — Hylla answered everything needed. All symbol lookups (`ErrMaxFilesExceeded`, `treeResult`, `dirResult`, `treeExpected*` constants) were confirmed by direct `Read` of committed + recently-modified files. No Hylla queries needed; the relevant files were all changed since last ingest (D.1, D.2 work) so `Read` is the correct evidence source.
+
+## Unit D.4 — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-17
+- **Files touched:**
+  - `docs/tapes/pipe.tape` (NEW — VHS tape script)
+  - `README.md` (Piping section + Common invocations entry + Flags table row + Roadmap update)
+  - `drops/DROP_D_FILES_FROM_PIPE/PLAN.md` (D.4 state: todo → done; drop state: planning → done)
+- **Mage targets run:**
+  - `mage build` — pass (no output; doc-only changes, no Go changes)
+- **Notes:**
+
+  No Go code was changed in this unit. All changes are documentation only.
+
+  **`docs/tapes/pipe.tape`**: new VHS tape script demonstrating `git ls-files '*.go' | rak --files-from -`. Follows the established style of all existing tapes in `docs/tapes/` (Output, Set Shell/FontSize/Width/Height/Theme/TypingSpeed/Padding, Hide/clear/Show, Sleep, Type, Sleep, Enter, Sleep 4s). Output path is `docs/pipe.gif` — consistent with the pattern all other tapes use. The dev must run `vhs main/docs/tapes/pipe.tape` from the repo root to generate the `.gif` binary and commit `docs/pipe.gif`.
+
+  **`README.md` changes:**
+  1. `## Common invocations`: added `git ls-files '*.go' | rak --files-from -` line.
+  2. New `## Piping` section inserted after the sort-files gif, before `## Default behavior`. Contains a 2-sentence narrative, a fenced `sh` code block with all four canonical invocations (`rg --files`, `git ls-files`, `find`, `gh pr diff`), and a gif embed `![rak --files-from demo](docs/pipe.gif)`.
+  3. `## Flags` table: added `--files-from <FILE>` row between `--binary` and `--version`.
+  4. `## Roadmap → v0.2`: updated the `--files-from` bullet from "in development" to "shipped in v0.2.0 (see Piping)".
+
+  **Cobra `Example:` verification**: confirmed present at `cmd/rak/root.go` lines 97-101 (`rg --files | rak --files-from -` and `git ls-files '*.go' | rak --files-from -`). D.2 placed them correctly; no re-addition needed.
+
+## Hylla Feedback
+
+N/A — task touched non-Go files only (`docs/tapes/pipe.tape`, `README.md`, drop PLAN.md and BUILDER_WORKLOG.md). Hylla is Go-only today.

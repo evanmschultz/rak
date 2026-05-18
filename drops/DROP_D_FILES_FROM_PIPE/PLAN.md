@@ -1,6 +1,6 @@
 # DROP_D — FILES_FROM_PIPE
 
-**State:** planning
+**State:** done
 **Tier:** A
 **Blocked by:** —
 **Paths (expected):** NEW internal/lister/filesfrom.go (or extend internal/lister/), internal/lister/lister.go (factory routing), internal/lister/lister_test.go, cmd/rak/root.go, main/docs/tapes/pipe.tape (NEW), main/docs/pipe.gif (NEW), README.md
@@ -400,7 +400,7 @@ Builders must not redefine them — they are in scope.
 
 ### Unit D.4 — Feature trio docs
 
-**State:** todo
+**State:** done
 **Paths:** `main/docs/tapes/pipe.tape` (NEW), `main/docs/pipe.gif` (NEW), `README.md`
 **Packages:** — (no Go packages)
 **Blocked by:** D.3
