@@ -98,6 +98,20 @@ func AddDep(module string) error {
 	return nil
 }
 
+// UpdateDeps bumps all module deps to latest minor/patch within the existing
+// major version. Equivalent to `go get -u all && go mod tidy`. Use sparingly
+// — direct deps should use AddDep for surgical updates. This target is safe to
+// run when you want a broad indirect-dep refresh (e.g. before a release cut).
+func UpdateDeps() error {
+	if err := sh.RunV("go", "get", "-u", "all"); err != nil {
+		return fmt.Errorf("mage updateDeps: go get -u all: %w", err)
+	}
+	if err := sh.RunV("go", "mod", "tidy"); err != nil {
+		return fmt.Errorf("mage updateDeps: go mod tidy: %w", err)
+	}
+	return nil
+}
+
 // Run executes `go run ./cmd/rak` for local smoke testing from source.
 //
 // Two invocation patterns are supported:
