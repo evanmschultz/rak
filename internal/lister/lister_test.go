@@ -529,6 +529,40 @@ func TestFilesFromLister_ContextCancel(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// TestDetect_NotRegularFile_FriendlyError verifies that Detect returns a
+// friendly error when the root argument is a non-regular, non-directory file
+// (e.g. a character device). The error message must contain
+// "not a regular file or directory" and must NOT contain "fork/exec".
+//
+// /dev/null is always present on macOS and Linux and is a character device,
+// making it the canonical test input for this case without requiring any
+// platform-specific syscall (e.g. syscall.Mkfifo).
+func TestDetect_NotRegularFile_FriendlyError(t *testing.T) {
+	const devNull = "/dev/null"
+	if _, err := os.Stat(devNull); err != nil {
+		t.Skipf("/dev/null not available on this platform: %v", err)
+	}
+
+	ctx := t.Context()
+	got, err := lister.Detect(ctx, devNull, fileset.WalkOptions{})
+	if err == nil {
+		t.Fatalf("Detect returned nil error for %s, want a friendly error (lister: %T)", devNull, got)
+	}
+	if got != nil {
+		t.Errorf("Detect returned non-nil lister for %s, want nil", devNull)
+	}
+	if !errors.Is(err, lister.ErrNotRegularFileOrDirectory) {
+		t.Errorf("errors.Is(err, ErrNotRegularFileOrDirectory) = false; got: %v", err)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "not a regular file or directory") {
+		t.Errorf("error message does not contain %q: %s", "not a regular file or directory", msg)
+	}
+	if msg := err.Error(); strings.Contains(msg, "fork/exec") {
+		t.Errorf("error message must not contain %q but got: %s", "fork/exec", msg)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // TestSingleFileLister_List (original, not FilesFromLister)
 // ---------------------------------------------------------------------------
 

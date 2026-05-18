@@ -35,6 +35,13 @@ type FileLister interface {
 // never string-match the message.
 var ErrNoGitignoreInRepo = errors.New("rak: --no-gitignore has no effect when run inside a git repository. rak counts git-tracked files in this mode. To count untracked files, run rak outside the repository")
 
+// ErrNotRegularFileOrDirectory is returned by Detect when the resolved path is
+// neither a regular file nor a directory (e.g. a character device, named pipe,
+// or socket). Callers branch on this condition via
+// errors.Is(err, lister.ErrNotRegularFileOrDirectory); never string-match the
+// message.
+var ErrNotRegularFileOrDirectory = errors.New("not a regular file or directory")
+
 // Detect resolves the concrete FileLister for root. It resolves root to an
 // absolute path, then probes whether root sits inside a git work tree by
 // running "git rev-parse --is-inside-work-tree" and inspecting stdout. The
@@ -64,12 +71,18 @@ func Detect(ctx context.Context, root string, opts fileset.WalkOptions) (FileLis
 
 	// Single-file fast-path: if the resolved path is a regular file, return a
 	// SingleFileLister immediately — before any git operations (git cannot
-	// chdir into a file path). Non-regular non-directory entries (sockets,
-	// devices, named pipes) fall through to the git probe, which will error
-	// naturally if cmd.Dir is not a directory.
+	// chdir into a file path).
 	info, statErr := os.Stat(absRoot)
 	if statErr == nil && info.Mode().IsRegular() {
 		return newSingleFileLister(absRoot), nil
+	}
+
+	// Non-regular, non-directory guard: sockets, devices, and named pipes are
+	// not walk roots and cannot be passed to git. Return a friendly error before
+	// the git probe runs (which would produce an obscure "fork/exec: not a
+	// directory" failure).
+	if statErr == nil && !info.Mode().IsDir() {
+		return nil, fmt.Errorf("lister: detect: %s: %w", absRoot, ErrNotRegularFileOrDirectory)
 	}
 
 	// Fast-path: if git is not installed, skip the probe and fall back to the
