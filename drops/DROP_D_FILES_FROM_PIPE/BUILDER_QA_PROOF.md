@@ -78,3 +78,77 @@ All six are behavior-asserting; none are vacuous.
 ### Hylla Feedback
 
 N/A — `FilesFromLister` and its tests are newly committed Go code in this round; verification leaned on `Read` of the source + tests (already on disk in this checkout) + mage runs. No Hylla query attempted, no fallback needed.
+
+## Unit D.2 — Round 1
+
+**Verdict:** PASS
+
+All 9 PLAN.md "What to build" steps implemented and verified against `cmd/rak/root.go` (commit `1fddc72 feat(cmd): wire --files-from flag with stdin sentinel`). All bulleted acceptance criteria check out. `mage build` and `mage test` pass on the `cmd/rak` package; the unrelated `internal/lang` test-file failures are uncommitted in-flight work from a parallel builder (per task prompt: skip those).
+
+### Evidence (per "What to build" step)
+
+| Step | Spec | Evidence (file:line) | Status |
+|---|---|---|---|
+| 1 | `filesFrom string` field added to `rootFlags` | `cmd/rak/root.go:40` — `filesFrom   string // path to a newline-delimited file list, or "-" for stdin` | OK |
+| 2 | `--files-from` flag registered with usage string | `cmd/rak/root.go:200-205` — `cmd.Flags().StringVar(&flags.filesFrom, "files-from", "", "read newline-separated file paths from FILE (use - for stdin)")` | OK |
+| 3a | `PersistentPreRunE` signature has `args []string` (not `_`) | `cmd/rak/root.go:103` — `PersistentPreRunE: func(_ *cobra.Command, args []string) error {` | OK |
+| 3b | Guard A — positional + `--files-from` conflict | `cmd/rak/root.go:107-109` — `if flags.filesFrom != "" && len(args) > 0 { return fmt.Errorf("cannot combine --files-from with a positional path argument") }` | OK |
+| 3c | Guard B — `--no-gitignore` + `--files-from` conflict | `cmd/rak/root.go:110-112` — `if flags.filesFrom != "" && flags.noGitignore { return fmt.Errorf("--no-gitignore is meaningless with --files-from: the caller controls which files are listed") }` | OK |
+| 4 | Two cobra `Example:` entries added | `cmd/rak/root.go:97-101` — `# Pipe a file list from ripgrep / rg --files | rak --files-from -` and `# Count only tracked Go files / git ls-files '*.go' | rak --files-from -`. Confirmed visible in `mage run -- --help` output. | OK |
+| 5a | `openFilesFrom(value, stdin) (io.Reader, func(), error)` helper exists with exact signature | `cmd/rak/root.go:306` — `func openFilesFrom(value string, stdin io.Reader) (io.Reader, func(), error)` | OK |
+| 5b | `-` returns stdin + noop closer | `cmd/rak/root.go:307-309` — `if value == "-" { return stdin, func() {}, nil }` | OK |
+| 5c | Otherwise opens file + Close closer | `cmd/rak/root.go:310-314` — `f, err := os.Open(value); ... return f, func() { _ = f.Close() }, nil`. Error wrapped with `--files-from: %w`. | OK |
+| 6a | Third branch in `runRoot` exists, executes BEFORE `len(args)==1` | `cmd/rak/root.go:248-268` — `if flags.filesFrom != "" { ... }` precedes the `if len(args) == 1` block at line 270. | OK |
+| 6b | Uses `lister.NewFilesFromLister(r)` | `cmd/rak/root.go:254` — `source := lister.NewFilesFromLister(r)` | OK |
+| 6c | `rootLabel = "<stdin>"` when value is `-`, else value itself | `cmd/rak/root.go:255-258` — `rootLabel := flags.filesFrom; if flags.filesFrom == "-" { rootLabel = "<stdin>" }` | OK |
+| 7 | `--no-gitignore` + `--files-from` returns Guard B error (hard error) | See step 3c above; the guard fires in `PersistentPreRunE`, returning before any walk happens. | OK |
+| 8 | `--depth` + `--files-from` is silent no-op (`listerOpts` not called) | `cmd/rak/root.go:248-268` — the `--files-from` branch passes individual fields to `runDirectoryOpts`; `listerOpts(flags)` (line 271, only invoked in `len(args)==1` branch) is bypassed entirely. `flags.depth` is not read in this branch, so it has no effect. | OK |
+| 9 | `--max-files` applies (passed through `runDirectoryOpts.maxFiles`) | `cmd/rak/root.go:265` — `maxFiles:  flags.maxFiles,` inside the `--files-from` branch's `runDirectoryOpts` literal. Wires to `walkAndCount` which enforces `ErrMaxFilesExceeded` at line 501-503. | OK |
+
+### Acceptance criteria bullets
+
+| Bullet (PLAN.md `### Unit D.2 — Acceptance criteria`) | Evidence | Status |
+|---|---|---|
+| `mage build` passes | Ran clean, silent exit 0. | OK |
+| `mage test ./cmd/rak/...` passes (existing tests must not regress) | `mage test` output: `ok github.com/evanmschultz/rak/cmd/rak 1.362s`. (The `internal/lang` build-failed line is from uncommitted parallel-builder work in `internal/lang/lang_test.go` + `split_test.go`; out of scope per task prompt.) | OK |
+| `rak --help` shows `--files-from` flag with correct usage string | `mage run -- --help` shows `--files-from   Read newline-separated file paths from FILE (use - for stdin)`. | OK |
+| `rak --help` shows the two new `Example:` entries | `mage run -- --help` shows `# Pipe a file list from ripgrep / rg --files | rak --files-from -` and `# Count only tracked Go files / git ls-files '*.go' | rak --files-from -` in the EXAMPLES block. | OK |
+| `rak --files-from - .` returns error containing `"cannot combine"` | Guard A at `cmd/rak/root.go:107-109` — runtime not exercised (D.3 covers via `TestRootCmd_Integration_FilesFrom_PositionalArgConflict`), but the literal string `"cannot combine --files-from with a positional path argument"` is present at line 108. | OK by code inspection |
+| `rak --files-from /nonexistent/path.txt` returns error wrapping `os.Open` failure | `openFilesFrom` at `cmd/rak/root.go:310-313` — `os.Open(value)` failure wrapped via `fmt.Errorf("--files-from: %w", err)`. | OK by code inspection |
+| `rak --files-from - --no-gitignore` returns error containing `"--no-gitignore"` | Guard B at `cmd/rak/root.go:110-112` — error string `"--no-gitignore is meaningless with --files-from: the caller controls which files are listed"`. | OK by code inspection |
+| Rendered TOON output for `rak --files-from -` shows `path: <stdin>` not `path: -` | `cmd/rak/root.go:255-258` — `rootLabel` is set to `"<stdin>"` when `filesFrom == "-"`, then passed to `runDirectory` → `labelDirectories` → renderer. Runtime not exercised here (D.3 covers); branch logic verified. | OK by code inspection |
+| `runRoot` branch order: `--files-from` first, then `len(args)==1`, then bare-stdin fallback | `cmd/rak/root.go:248-298` — branch order: `--files-from` (line 248) → `len(args)==1` (line 270) → fallthrough to `counting.Count(c.InOrStdin())` (line 290). Correct precedence. | OK |
+
+### Trace coverage
+
+- **`--files-from <FILE>` branch**: Guard A skipped (no positional), Guard B skipped (no `--no-gitignore`) → `openFilesFrom("<FILE>", stdin)` opens the file with `os.Open` → `lister.NewFilesFromLister(file)` → `rootLabel = "<FILE>"` (literal, not `<stdin>`) → `runDirectory(...)` → close deferred via the returned closer. Verified by lines 248-268 + 306-315.
+- **`--files-from -` branch**: same as above, but `openFilesFrom("-", stdin)` returns stdin + no-op closer → `rootLabel = "<stdin>"`. Verified by line 256-258 + 307-309.
+- **Guard A trip (positional + `--files-from`)**: `cmd --files-from x .` enters `PersistentPreRunE`; `len(args) == 1` and `flags.filesFrom != ""` both true → error returned BEFORE `RunE` runs. Verified by lines 107-109.
+- **Guard B trip (`--no-gitignore` + `--files-from`)**: `cmd --files-from x --no-gitignore` enters `PersistentPreRunE`; sort key valid, Guard A skipped (no args), Guard B fires → error returned. Verified by lines 110-112.
+- **`--depth` + `--files-from` no-op**: `--depth` field is set in `flags.depth` but never read inside the `--files-from` branch — `listerOpts(flags)` (the only consumer of `flags.depth`) is only called in the `len(args)==1` branch at line 271. Verified by inspection.
+- **`--max-files` + `--files-from`**: `flags.maxFiles` is passed to `runDirectoryOpts.maxFiles` at line 265 → `runDirectory` → `walkAndCount` → enforcement at lines 501-503 with wrapped `ErrMaxFilesExceeded`. Verified.
+- **Branch precedence**: a user with both `--files-from` AND no positional arg gets the `--files-from` branch (line 248); a user with no `--files-from` and one positional gets the walk branch (line 270); a user with neither gets bare-stdin counting (line 290). All three paths exclusive and ordered correctly.
+
+### `mage build` / `mage test` summary
+
+- `mage build` — silent success, exit 0. The `cmd/rak` package compiles cleanly with the new flag, field, guards, helper, and branch.
+- `mage test` — `cmd/rak` passes: `ok github.com/evanmschultz/rak/cmd/rak 1.362s`. The full-suite run reports a `FAIL` on `internal/lang` (build-failed due to undefined `LangTempl`, `LangJSX`, etc. in `lang_test.go`) — `git status` confirms this is uncommitted in-flight work in `internal/lang/lang_test.go` + `internal/lang/split_test.go` by a parallel builder, unrelated to D.2. Task prompt explicitly green-lit ignoring parallel-builder failures.
+- `mage run -- --help` — output confirms the `--files-from` flag and both `Example:` entries are visible in `rak --help`.
+
+### Findings
+
+None blocking. One observation:
+
+- **Observation (not a finding):** D.2's acceptance bullets reference runtime behaviors (`rak --files-from -`, `rak --files-from /nonexistent/path.txt`, etc.) that the unit's own code change does not exercise — D.3 is the unit that adds the integration tests covering those runtime paths. The verdict here treats those bullets as `OK by code inspection`. This matches the planner's intent (D.2 is the wiring unit, D.3 is the tests unit).
+
+### Verification commands run
+
+- `Read` of `cmd/rak/root.go` (full file, 613 lines) — confirms all 9 build steps.
+- `git diff HEAD~1 -- cmd/rak/root.go` — confirms the commit's diff matches the spec exactly (+60 / -2 lines on root.go only; no other files touched in this commit).
+- `mage build` — pass (exit 0, silent).
+- `mage test` — `cmd/rak` ok; `internal/lang` failure is unrelated parallel-builder work (verified via `git status` showing uncommitted `internal/lang/lang_test.go` and `internal/lang/split_test.go`).
+- `mage run -- --help` — confirms `--files-from` flag visible with correct usage, both new `Example:` entries visible.
+
+### Hylla Feedback
+
+N/A — D.2 modified only `cmd/rak/root.go`; the file is post-last-ingest and reading the current source via the `Read` tool is the correct path per `main/CLAUDE.md` § "Code Understanding Rules" rule 2 ("Changed since last ingest: use `git diff`. Hylla is stale for those files until reingest"). No Hylla query was attempted; no fallback miss to log.

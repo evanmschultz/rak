@@ -113,3 +113,131 @@ Implementation is correct against every PLAN.md acceptance criterion. `mage test
 ### Hylla Feedback
 
 N/A — Unit D.1 implementation is freshly-committed; Hylla indexes the previous baseline. All evidence gathered from `Read` against the working tree. No Hylla query was warranted (the file hasn't been ingested yet).
+
+## Unit D.2 — Round 1
+
+**Verdict:** PASS
+
+Twelve targeted attacks attempted against the orchestrator-supplied angle list. Zero CONFIRMED counterexamples. Two doc / cosmetic nits (non-blocking) and one design-pinned consistency observation. `mage build` passes; `mage test ./cmd/rak/...` is green (`ok github.com/evanmschultz/rak/cmd/rak 1.508s`). The pre-existing `internal/lang` build failure (undefined `LangJSX`, `LangTSX`, …) is unrelated to D.2 and was explicitly excluded from this round per orchestrator directive.
+
+### Counterexamples / Attacks
+
+#### Attack 1 — Branch order: `--files-from` must execute BEFORE `len(args) == 1`
+
+- **Severity:** none (REFUTED)
+- **Where:** `cmd/rak/root.go:248–268` (files-from branch) vs `cmd/rak/root.go:270–288` (positional branch)
+- **Counterexample attempt:** `rak --files-from - .` — `PersistentPreRunE` Guard A fires first and short-circuits before `runRoot` is reached, so the branch-order question is moot for that input. For `rak --files-from foo.txt` (no positional), `runRoot` is entered with `args=[]`, so `len(args)==1` is false regardless of ordering. The "wrong-branch" scenario requires `filesFrom != "" && len(args) == 1`, which Guard A blocks at PreRunE — impossible to reach `runRoot` with both set.
+- **Verification:** `runRoot` line 248's `if flags.filesFrom != ""` is the first conditional after `renderer := resolveRenderer(flags)`. The `if len(args) == 1` at line 270 is structurally second. The bare-stdin fallthrough at line 290 is third. Order matches spec step 5.
+- **Mitigation accepted:** Spec-conformant. REFUTED.
+
+#### Attack 2 — Guard ordering in `PersistentPreRunE` (Guard A vs Guard B independence)
+
+- **Severity:** none (REFUTED)
+- **Where:** `cmd/rak/root.go:104–112`
+- **Counterexample attempts:**
+  - `rak --files-from - --no-gitignore .` (both conditions): Guard A (positional) fires first because the conditional sits above Guard B (line 107 < line 110). Both errors are reachable, but only one fires per call. Either error satisfies the user-visible contract.
+  - `rak --files-from -` (no positional, no `--no-gitignore`): both guards skipped via the `flags.filesFrom != ""` short-circuit AND because the inner condition is false. CORRECT.
+  - `rak --no-gitignore .` (no `--files-from`): both guards skipped because the leading `flags.filesFrom != ""` is false. Walk proceeds normally with `--no-gitignore` honored. CORRECT.
+  - `rak --files-from -` with `--no-gitignore` UNSET, `args=[]`: both guards skipped. CORRECT.
+- **Mitigation accepted:** Each guard is independently gated on `flags.filesFrom != ""` AND its specific second condition. Neither incorrectly fires when only the other's preconditions hold. REFUTED.
+
+#### Attack 3 — `openFilesFrom("-")` closer accidentally closes stdin
+
+- **Severity:** none (REFUTED)
+- **Where:** `cmd/rak/root.go:307–308`
+- **Counterexample attempt:** Inspected the closer body: `func() {}` — empty function, no `stdin.Close()`, no reference to `os.Stdin`. The reader returned IS `stdin` (the value passed in, normally `c.InOrStdin()`), but the closer does NOT call any method on it.
+- **Mitigation accepted:** Closer is a true no-op. Stdin remains process-owned. REFUTED.
+
+#### Attack 4 — `openFilesFrom(path)` failure path returns `(nil, nil, err)` causing nil-deref on `defer closer()`
+
+- **Severity:** none (REFUTED)
+- **Where:** `cmd/rak/root.go:249–253` (caller) and `cmd/rak/root.go:310–313` (callee)
+- **Counterexample attempt:** When `os.Open` fails, line 312 returns `(nil, nil, fmt.Errorf("--files-from: %w", err))`. Caller at line 249–252:
+  ```go
+  r, closer, err := openFilesFrom(flags.filesFrom, c.InOrStdin())
+  if err != nil {
+      return err
+  }
+  defer closer()
+  ```
+  The `if err != nil { return err }` check (line 250–252) executes BEFORE `defer closer()` is registered (line 253). A nil `closer` is never invoked because control returns before the defer statement. NO nil-deref.
+- **Mitigation accepted:** Caller order is correct. The convention "always-call-closer" only applies when `err == nil`, at which point `closer` is guaranteed non-nil (either `func(){}` for `"-"` or `func(){ _ = f.Close() }` for the file path). REFUTED.
+
+#### Attack 5 — `rootLabel` for `"-"` must be literally `"<stdin>"` (angle-bracketed)
+
+- **Severity:** none (REFUTED)
+- **Where:** `cmd/rak/root.go:256–258`
+- **Counterexample attempt:** Inspected literal: `rootLabel = "<stdin>"` — angle-bracketed, lowercase. Matches PLAN.md § Notes Q3 RESOLVED line 510 and acceptance criterion line 275 verbatim.
+- **Mitigation accepted:** REFUTED.
+
+#### Attack 6 — `rootLabel` for a file path (e.g. `/home/user/files.txt`) renders verbatim
+
+- **Severity:** nit (design-pinned)
+- **Where:** `cmd/rak/root.go:255` (`rootLabel := flags.filesFrom`)
+- **Counterexample attempt:** `rak --files-from /home/user/myproject/files.txt` would set `rootLabel = "/home/user/myproject/files.txt"`. `labelDirectories` (line 582) then calls `path.Clean(rootLabel)` and uses it as the prefix for any `Path == "."` directory and as the join base for sub-directories. The rendered TOON output for a per-directory bucket would read `dir: /home/user/myproject/files.txt` or `dir: /home/user/myproject/files.txt/sub`, which is semantically odd (the LIST file is not a directory). The PLAN.md § Notes "Absolute paths" line 484–488 explicitly addresses this: *"when a line in the list is an absolute path … the file is grouped under `filepath.Dir(absPath)` in the per-directory rollup. The `rootLabel` is unused for absolute paths."*
+- **Mitigation accepted:** When all list entries are absolute paths, the per-directory bucket key is `filepath.Dir(absPath)`, NOT `"."`, so `labelDirectories` does NOT rewrite them with `rootLabel`. They render under their true parent directory. Only entries whose `dirKey` resolves to `"."` (files in CWD, fed as relative paths) would surface the awkward `dir: <files.txt>` rendering. This is design-pinned by Q3 line 510 (*"use `flags.filesFrom` (the filename) otherwise"*). NOT a counterexample.
+
+#### Attack 7 — `--include` / `--exclude` / `--depth` silently pass through to filter in files-from branch
+
+- **Severity:** none (REFUTED)
+- **Where:** `cmd/rak/root.go:248–268` (no `listerOpts(flags)` call in this branch)
+- **Counterexample attempt:** Traced the `--files-from` branch. `runDirectoryOpts` struct (line 319–327) declares only `rootLabel`, `binary`, `langs`, `sortKey`, `sortAsc`, `maxFiles`, `renderer`. No `Includes`, `Excludes`, `Depth`, `IncludeHidden`, `DisableGitignore` fields. The `FilesFromLister` constructed at line 254 receives only the `io.Reader` — no filter options. `walkAndCount` (called by `runDirectory`) does not consult any glob / depth state. `--include` / `--exclude` / `--depth` / `--hidden` / `--no-gitignore` cannot affect the files-from path.
+- **Verification:** Compared to `len(args) == 1` branch (line 270–288) which DOES call `listerOpts(flags)`. Branches are correctly bifurcated.
+- **Mitigation accepted:** REFUTED. Silent ignoring is the documented Q1/Q2 behavior (PLAN.md line 498–508).
+
+#### Attack 8 — Guard A error message contains literal `"cannot combine"`
+
+- **Severity:** none (REFUTED)
+- **Where:** `cmd/rak/root.go:108`
+- **Counterexample attempt:** Literal: `return fmt.Errorf("cannot combine --files-from with a positional path argument")` — substring `"cannot combine"` present. Acceptance criterion line 269 satisfied.
+- **Mitigation accepted:** REFUTED.
+
+#### Attack 9 — Guard B error message contains literal `"--no-gitignore"`
+
+- **Severity:** none (REFUTED)
+- **Where:** `cmd/rak/root.go:111`
+- **Counterexample attempt:** Literal: `return fmt.Errorf("--no-gitignore is meaningless with --files-from: the caller controls which files are listed")` — substring `"--no-gitignore"` present at start. Acceptance criterion line 272 satisfied.
+- **Mitigation accepted:** REFUTED.
+
+#### Attack 10 — `--files-from foo.txt --include '*.go'` is NOT a hard error
+
+- **Severity:** none (REFUTED)
+- **Where:** `cmd/rak/root.go:103–113` (PersistentPreRunE)
+- **Counterexample attempt:** Enumerated `PersistentPreRunE` guards: (1) sort key, (2) Guard A (positional + filesFrom), (3) Guard B (noGitignore + filesFrom). No guard against `--include` / `--exclude` / `--depth` / `--lang` / `--hidden` combined with `--files-from`. So `rak --files-from foo.txt --include '*.go'` reaches `runRoot` cleanly, enters the files-from branch, ignores `--include` silently. Matches spec Q1 (--include silent no-op) and the broader principle that only `--no-gitignore` is a hard error.
+- **Mitigation accepted:** REFUTED. Behavior matches PLAN.md § Notes Q1 line 498–503.
+
+#### Attack 11 — `os.Open(path)` error wrap mentions the path
+
+- **Severity:** none (REFUTED)
+- **Where:** `cmd/rak/root.go:310–312`
+- **Counterexample attempt:** `os.Open` returns a `*fs.PathError` whose `Error()` is `"open <path>: <syscall err>"`. Line 312 wraps as `fmt.Errorf("--files-from: %w", err)`. Final error string: `"--files-from: open /nonexistent/path.txt: no such file or directory"`. Path IS surfaced via the wrapped `*PathError`. `errors.As(err, &pathErr)` would extract `pathErr.Path == "/nonexistent/path.txt"`. Acceptance criterion line 271 (*"non-nil error wrapping the `os.Open` failure"*) satisfied — `%w` is the wrap verb, not `%v` or `%s`.
+- **Mitigation accepted:** REFUTED.
+
+#### Attack 12 — Cobra flag ordering: `--files-from` appears in `rak --help`
+
+- **Severity:** none (REFUTED)
+- **Where:** `cmd/rak/root.go:200–205`
+- **Counterexample attempt:** Ran `mage run -- --help`. Output includes in the FLAGS section:
+  ```
+  --files-from          Read newline-separated file paths from FILE (use - for stdin)
+  ```
+  Alphabetically ordered between `--exclude` and `-h --help`. The two new Example entries (`rg --files | rak --files-from -` and `git ls-files '*.go' | rak --files-from -`) also appear in the EXAMPLES section.
+- **Mitigation accepted:** REFUTED. Acceptance criteria lines 264–266 satisfied.
+
+### Additional observations (not counterexamples)
+
+- **`--hidden` flag in files-from mode (consistency note)**: PLAN.md § D.2 step 8 lists `--include` / `--exclude` / `--depth` as silent no-ops; `--hidden` is not enumerated but is also silently ignored (same mechanism — `listerOpts` not called, `IncludeHidden` not in `runDirectoryOpts`). Consistent with the design principle that the caller's pipeline is the filter, but worth documenting alongside the other silent no-ops if a future doc pass tightens the README.
+- **`--files-from` with `--toon` / `--human` / `--json`**: orthogonal — `MarkFlagsMutuallyExclusive("human","json","toon")` handles renderer selection independently. Tested mentally; no conflict.
+- **`cobra.MaximumNArgs(1)` interaction**: with `rak --files-from foo a b c`, cobra rejects "max 1 arg" before `PersistentPreRunE` runs, so Guard A never sees the multi-arg case. Single positional + `--files-from` IS caught by Guard A as intended.
+- **D.2 ships no NEW tests**: PLAN.md acceptance criterion line 261–262 explicitly defers test coverage to D.3 (*"existing tests must not regress; D.3 adds new tests"*). cmd/rak suite passed 1.508s, no regression. Acceptable per spec.
+
+### Summary
+
+- 12 attack vectors attempted across orchestrator-supplied angles.
+- 0 CONFIRMED counterexamples; 11 REFUTED; 1 design-pinned (Attack 6 rootLabel for file path — explicitly per Q3 Notes).
+- `mage build` passes; `mage test ./cmd/rak/...` green (1.508s). The pre-existing `internal/lang` failure (`undefined: LangJSX` etc.) is unrelated to D.2 and explicitly excluded per orchestrator directive.
+- Unit D.2 is GO-FOR-CLOSE. Move to D.3.
+
+### Hylla Feedback
+
+Hylla queried for `files-from` returned only pre-D.2 baseline symbols (Counts, Walker.Walk, WalkOptions, Detect, etc.) — expected because D.2's changes are uncommitted/recent. Fell back to `Read` against `cmd/rak/root.go` directly. Not a Hylla miss — Hylla indexes committed state, and the file is uncommitted. No suggestion.
