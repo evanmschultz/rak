@@ -241,3 +241,133 @@ Twelve targeted attacks attempted against the orchestrator-supplied angle list. 
 ### Hylla Feedback
 
 Hylla queried for `files-from` returned only pre-D.2 baseline symbols (Counts, Walker.Walk, WalkOptions, Detect, etc.) — expected because D.2's changes are uncommitted/recent. Fell back to `Read` against `cmd/rak/root.go` directly. Not a Hylla miss — Hylla indexes committed state, and the file is uncommitted. No suggestion.
+
+## Unit D.3 — Round 1
+
+**Verdict:** PASS
+
+Ten targeted attacks attempted against the orchestrator-supplied angle list, plus three coverage-gap attacks added during review. Zero CONFIRMED counterexamples; eight REFUTED outright; two are minor single-field-assertion nits (Tests 2, 4); three are coverage gaps queued for follow-up. `mage test` (full suite, with `-race`) green: `ok github.com/evanmschultz/rak/cmd/rak 1.383s`. `mage ci` green at 87.8% coverage; `internal/lister/filesfrom.go::List` at 80% (uncovered branches are the `os.Getwd` and `scanner.Err` mid-stream paths flagged already in D.1 Round 1, not new D.3 surface).
+
+### Counterexamples / Attacks
+
+#### Attack 1 — Test 2 (EmptyStdin) vacuity: does it assert `parsed.Total.Bytes == 0`?
+
+- **Severity:** none (REFUTED with minor nit)
+- **Where:** `cmd/rak/integration_test.go:320–322`
+- **Counterexample attempt:** Inspected literal: `if parsed.Total.Bytes != 0 { t.Errorf(...) }`. Assertion is real. Test 2 ALSO asserts `err == nil` (line 311) and that the JSON parses cleanly (line 316). Three real checks, not vacuous.
+- **Nit:** asserts only `Total.Bytes`, not `Lines/Words/Chars`. A regression that produced `{Bytes:0, Lines:42, Words:0, Chars:0}` would pass this test. Real-world likelihood of such a regression is essentially nil (`runDirectory` aggregates field-wise from `walkAndCount`; if zero files counted, all four fields are zero by construction), but a defensive `parsed.Total != (counting.Counts{})` would close the gap.
+- **Mitigation accepted:** REFUTED on vacuity. Single-field-assertion nit only.
+
+#### Attack 2 — Test 7 (MaxFiles) sentinel check: `errors.Is` or string-match?
+
+- **Severity:** none (REFUTED)
+- **Where:** `cmd/rak/integration_test.go:481`
+- **Counterexample attempt:** Inspected literal: `if !errors.Is(err, ErrMaxFilesExceeded)`. Uses `errors.Is` against the exported sentinel `ErrMaxFilesExceeded` declared in `cmd/rak/root.go:46` (same package, in-scope). NOT string-match. Matches the F45 / CLAUDE.md "Errors" rule: *"Inspect with `errors.Is` (sentinel match) ... Never string-match an error."*
+- **Mitigation accepted:** REFUTED. Sentinel-based check is the canonical pattern.
+
+#### Attack 3 — Test 5 (PositionalArgConflict) substring assertion strength
+
+- **Severity:** none (REFUTED)
+- **Where:** `cmd/rak/integration_test.go:417–422`
+- **Counterexample attempt:** Test asserts `err != nil` AND `strings.Contains(err.Error(), "cannot combine")`. The substring `"cannot combine"` is a 14-char specific phrase appearing only in Guard A's error literal (`root.go:108`: `"cannot combine --files-from with a positional path argument"`). No other cobra or rak error in the codebase emits this phrase (verified via Hylla + read of root.go). Cobra's own positional-arg violations (`MaximumNArgs`) emit different phrases. A regression that removed Guard A but somehow still returned an error would fail this assertion unless that error coincidentally contained `"cannot combine"` — vanishingly unlikely.
+- **Mitigation accepted:** REFUTED.
+
+#### Attack 4 — Test 6 (NoGitignoreHardErrors) substring assertion strength + ambiguity with `ErrNoGitignoreInRepo`
+
+- **Severity:** none (REFUTED)
+- **Where:** `cmd/rak/integration_test.go:442–444`
+- **Counterexample attempt:** Test asserts `err != nil` AND `strings.Contains(err.Error(), "--no-gitignore")`. The substring `"--no-gitignore"` also appears in `lister.ErrNoGitignoreInRepo`'s message. Could Test 6 spuriously pass if Guard B were removed and `ErrNoGitignoreInRepo` fired instead? Traced: with args `["--files-from", "-", "--no-gitignore"]`, cobra parses both flags; `args` to PreRunE is empty. Guard A skipped (`len(args)==0`). If Guard B were removed, `runRoot` enters with `filesFrom="-"`, taking the files-from branch — which does NOT call `lister.Detect`. So `ErrNoGitignoreInRepo` cannot fire on this input. Test 6's substring would only match Guard B's message in practice.
+- **Defensive observation:** if Guard B's message were rewritten to drop the literal `"--no-gitignore"` substring (e.g. shortened to "files-from controls listing; gitignore flag is meaningless"), Test 6 would fail correctly. The substring assertion is appropriately bound.
+- **Mitigation accepted:** REFUTED.
+
+#### Attack 5 — Test 4 (HashFileWorks) real file on disk via `t.TempDir()` + `os.WriteFile`?
+
+- **Severity:** none (REFUTED with minor nit)
+- **Where:** `cmd/rak/integration_test.go:367–399`
+- **Counterexample attempt:** Inspected literals: `tmp := t.TempDir()`, `hashFile := filepath.Join(tmp, "#draft.md")`, `os.WriteFile(hashFile, content, 0o644)`. Real file created on real filesystem with the literal name `#draft.md`. Fed absolute path through stdin. Asserts `parsed.Total.Bytes == 8` (length of `"# draft\n"`). A regression that filtered out `#`-prefixed paths would produce `Total.Bytes == 0`, failing the test cleanly.
+- **Nit:** only `Total.Bytes` asserted, not Lines/Words/Chars or `parsed.Directories[0].Path == "#draft.md"`. If the lister silently renamed the file but still counted some other file with 8 bytes, the test would falsely pass. Tempdir is otherwise empty, so no other 8-byte file exists in that scope — practical false-pass risk is nil.
+- **Mitigation accepted:** REFUTED. Single-field nit only.
+
+#### Attack 6 — `t.Parallel()` race: shared resources between tests?
+
+- **Severity:** none (REFUTED)
+- **Where:** all seven new tests (`integration_test.go:268, 302, 332, 367, 407, 429, 453`)
+- **Counterexample attempts:**
+  - **Shared CWD?** No test calls `os.Chdir`. Process CWD is the package directory `cmd/rak/` for the entire test binary. `FilesFromLister.List` calls `os.Getwd()` once per iteration — concurrent `os.Getwd` is safe (read-only kernel state).
+  - **Shared fixture files?** Tests 1, 3 read `testdata/tree/a.txt` and `testdata/tree/sub/nested.txt` concurrently. `os.Stat` and `os.Open` against the same file from multiple goroutines are kernel-safe (no in-process mutex; read-only access).
+  - **Shared `t.TempDir()`?** Tests 4 and 7 each get their own per-test `t.TempDir()` (Go testing pkg guarantees per-test isolation). No cross-test interference.
+  - **Shared cobra command state?** Each test creates a fresh `cmd := newRootCmd()`. The `flags := &rootFlags{}` allocation inside `newRootCmd` is closure-local — every command instance owns isolated flag state. No package-level `rootFlags`.
+- **Mitigation accepted:** REFUTED. `mage test` runs `-race` (verified at `magefile.go:34–40`) and passes clean.
+
+#### Attack 7 — `-race` actually exercises these new tests?
+
+- **Severity:** none (REFUTED)
+- **Where:** `magefile.go:34–40`
+- **Counterexample attempt:** Verified literal `sh.RunV("go", "test", "-race", "./...")`. The race detector is on for `./...` which includes `cmd/rak/`. Full `mage test` run completed without race output: `ok github.com/evanmschultz/rak/cmd/rak 1.383s`. New D.3 tests are inside `cmd/rak/integration_test.go` (same package), so they execute under `-race`.
+- **Mitigation accepted:** REFUTED.
+
+#### Attack 8 — Path resolution via CWD: test relies on `cmd/rak/` CWD invariant?
+
+- **Severity:** none (REFUTED)
+- **Where:** `cmd/rak/integration_test.go:270, 333` (Tests 1, 3 use relative paths `testdata/tree/a.txt`)
+- **Counterexample attempt:** `FilesFromLister.List` calls `os.Getwd()` inside the iterator (`filesfrom.go:66`). Go's testing convention sets CWD = package directory for each test binary, so when `go test ./cmd/rak/...` runs, CWD = `cmd/rak/`. Relative path `testdata/tree/a.txt` resolves to `<repo>/cmd/rak/testdata/tree/a.txt`. The fixture file exists there (verified `wc -c -l -w` on both files; matches the constants). No test calls `os.Chdir`. If someone introduced `os.Chdir` mid-suite, the relative-path tests would break — but no such call exists.
+- **Mitigation accepted:** REFUTED. Tests rely on the Go testing convention, which is the standard idiom.
+
+#### Attack 9 — Cobra command isolation: state leak between tests?
+
+- **Severity:** none (REFUTED)
+- **Where:** `cmd/rak/root.go:60–61` (`newRootCmd` factory) + every test's `cmd := newRootCmd()`
+- **Counterexample attempt:** `newRootCmd` allocates `flags := &rootFlags{}` inside the function. All `cmd.Flags().XxxVar(&flags.field, ...)` calls bind to this closure-local pointer. Each test gets a fresh `*rootFlags`. Cobra's command tree itself has no package-level singletons in rak (`rootCmd` is never module-global). Tests cannot leak `--files-from` value, `--no-gitignore` value, or any other flag state into each other.
+- **Mitigation accepted:** REFUTED. Test isolation is structural, not coincidental.
+
+#### Attack 10 — JSON struct shape: `treeResult` vs `counting.Counts`
+
+- **Severity:** none (REFUTED)
+- **Where:** `cmd/rak/root_test.go:236–245` (`treeResult` / `dirResult` definitions) + `integration_test.go:282, 314, 345, 389` (parse sites)
+- **Counterexample attempt:** Tests use `var parsed treeResult` for all four `--files-from` JSON parses. `treeResult` is the tree-envelope shape (`Directories []dirResult`, `Total counting.Counts`, `Errors []string`) matching `jsonRenderer.RenderTree`'s `treeJSON` (line 105 of `render/json.go`). NOT `counting.Counts` (flat shape) used by `jsonRenderer.Render` for stdin-counting. The `--files-from` branch in `runRoot` always calls `runDirectory` → `RenderTree`, so the tree envelope is correct.
+- **Mitigation accepted:** REFUTED. Struct selection matches the actual code path.
+
+#### Attack 11 — Coverage gap: no test for `--files-from FILE` (real file path, not `-`)
+
+- **Severity:** nit (coverage gap)
+- **Where:** `cmd/rak/root.go:307–314` (`openFilesFrom` non-stdin branch)
+- **Counterexample:** All seven D.3 tests use `--files-from -`. None exercises `openFilesFrom(value)` with `value != "-"`, where `value` is a real file path the lister should open. The branch is small (4 lines: `os.Open`, error wrap, return file + close closure) but unexercised by D.3. A regression that mangled the `os.Open` call or returned `(file, nil_closer, nil)` (leaking the file handle) would not be caught.
+- **Mitigation accepted:** PLAN.md acceptance criterion (line 270–271) calls out `rak --files-from /nonexistent/path.txt` as a behavior to verify. No D.3 test covers it either way (success or failure). Nit only — suggest adding `TestFilesFrom_FileNotFound` and `TestFilesFrom_RealFile` in a future polish pass; not a Round 2 blocker because `mage test` is green and the build is functionally correct.
+
+#### Attack 12 — Coverage gap: no test for `--lang` interaction with `--files-from`
+
+- **Severity:** nit (coverage gap)
+- **Where:** N/A (no test exists)
+- **Counterexample:** PLAN.md § Notes Q1 (line 498–503) RESOLVED: *"`--lang` applies (it is a post-listing filter in `walkAndCount`)"*. No D.3 test verifies this — e.g., `--files-from - --lang go` against a list of Go + non-Go files should count only the Go files. If a future refactor moved the lang filter out of `walkAndCount`, no D.3 test would catch the regression in the `--files-from` path.
+- **Mitigation accepted:** Nit only — `internal/lister` tests + `walkAndCount` unit tests indirectly cover the lang-filter mechanism. A direct `--files-from + --lang` integration test would be belt-and-suspenders. Not blocking.
+
+#### Attack 13 — Coverage gap: no test for `--files-from /nonexistent.txt` (os.Open failure path)
+
+- **Severity:** nit (coverage gap; PLAN-pinned)
+- **Where:** `cmd/rak/root.go:310–312`
+- **Counterexample:** PLAN.md acceptance line 270 calls out `rak --files-from /nonexistent/path.txt` must return an error wrapping `os.Open` failure. No D.3 test covers it. The error path is straightforward (`fmt.Errorf("--files-from: %w", err)`), but a regression that swallowed or replaced the wrap would slip past.
+- **Mitigation accepted:** Nit only. Same suggested follow-up as Attack 11.
+
+### Additional observations (not counterexamples)
+
+- **Test 1 does not assert `len(parsed.Directories) == 1`**: both files yield `dirKey == "."` (because `FilesFromLister` yields `RelPath = base`), and `labelDirectories` rewrites `.` to `<stdin>`. Single bucket expected. The total-only assertion is strictly weaker than checking the bucket count, but a regression that mis-routed files into multiple buckets would inflate or mis-distribute counts and likely still surface a total mismatch via `Total.Bytes`. Acceptable.
+- **No human-renderer integration test for `--files-from`**: D.3 covers JSON only. The human and TOON renderers exercise `--files-from` only indirectly via `runDirectory`. Acceptable per the Test 1–7 scope; renderer-specific behavior is pinned in `internal/render` tests.
+- **Tests 1 and 3 share the same `treeExpected*` constants**: if those constants drifted (e.g. someone edited `a.txt` content), both tests would fail in lockstep. Acceptable — that's the point of named constants.
+- **Test 4 file content is `"# draft\n"` (8 bytes including trailing newline)**: `len(content)` is 8, matches the assertion `Total.Bytes == 8`. Verified.
+
+### Summary
+
+- 13 attack vectors attempted (10 from orchestrator angle list + 3 coverage-gap attacks).
+- 0 CONFIRMED counterexamples; 10 REFUTED; 3 coverage-gap nits (Attacks 11, 12, 13).
+- 2 single-field-assertion nits (Tests 2, 4 use `Total.Bytes` only) — acceptable practically because the surrounding code makes a multi-field discrepancy impossible without other tests also failing.
+- `mage test` green with `-race` (`ok cmd/rak 1.383s`). `mage ci` green at 87.8% coverage. `internal/lister/filesfrom.go::List` at 80% line coverage; uncovered branches are D.1's unchanged residue (`os.Getwd` failure, `scanner.Err` mid-stream), not D.3's new surface.
+- Unit D.3 is GO-FOR-CLOSE. Move to D.4 (feature trio docs).
+
+### Hylla Feedback
+
+- **Query**: `hylla_search` for `ErrNoGitignoreInRepo error message text`.
+- **Missed because**: returned only `mage` Lint/Build/Format func nodes — completely unrelated. Even narrowing fields to `["docstring", "content"]` didn't surface the sentinel. Likely cause: lower-ranked match because the sentinel's docstring doesn't contain enough of the query terms verbatim.
+- **Worked via**: knowing the sentinel exists in `internal/lister` (from CLAUDE.md project structure) + Attack 4's logical analysis of the `--files-from` runtime path proved the test cannot ambiguously match `ErrNoGitignoreInRepo`'s message. Skipped the read.
+- **Suggestion**: keyword search on a fully-qualified symbol name (e.g. `ErrNoGitignoreInRepo`) should rank exact-tail-symbol matches first. The `id_search_mode=tail_symbol` default appeared not to do so on this query.
+
+Also: `treeResult` / `dirResult` could not be found via Hylla because they live in `_test.go` files and `test_mode=hide_tests` is the default. Found them via `Read` of `cmd/rak/root_test.go`. Not a miss — expected behavior — but worth noting that QA reviews of test code routinely need the `test_mode=include_tests` override.

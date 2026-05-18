@@ -152,3 +152,75 @@ None blocking. One observation:
 ### Hylla Feedback
 
 N/A — D.2 modified only `cmd/rak/root.go`; the file is post-last-ingest and reading the current source via the `Read` tool is the correct path per `main/CLAUDE.md` § "Code Understanding Rules" rule 2 ("Changed since last ingest: use `git diff`. Hylla is stale for those files until reingest"). No Hylla query was attempted; no fallback miss to log.
+
+## Unit D.3 — Round 1
+
+**Verdict:** PASS
+
+All 7 named tests required by PLAN.md `### Unit D.3` are present in `cmd/rak/integration_test.go`, each asserts the documented behavior, and `mage test` passes on `cmd/rak` (the full-suite `internal/lang` failure is uncommitted parallel-builder DROP_A work, confirmed unrelated — same pattern as D.2 Round 1).
+
+### Evidence — 7 required tests
+
+| # | Test (PLAN.md spec) | Location (file:line) | Documented behavior asserted | Status |
+|---|---|---|---|---|
+| 1 | `TestRootCmd_Integration_FilesFrom_StdinList` — totals B=20, L=2, W=4, C=20 via `parsed.Total` | `cmd/rak/integration_test.go:267-295` | Feeds `"testdata/tree/a.txt\ntestdata/tree/sub/nested.txt\n"` via `cmd.SetIn(strings.NewReader(list))` + `--json --files-from -`; unmarshals `treeResult`; asserts `parsed.Total.Bytes == treeExpectedTotalBytes` (20), `.Lines == 2`, `.Words == 4`, `.Chars == 20`. | OK |
+| 2 | `TestRootCmd_Integration_FilesFrom_EmptyStdin` — empty stdin → no panic, no error, zero totals | `cmd/rak/integration_test.go:301-323` | `cmd.SetIn(strings.NewReader(""))` + `--json --files-from -`; asserts `cmd.Execute()` returns `nil`; unmarshals output; asserts `parsed.Total.Bytes == 0`. | OK |
+| 3 | `TestRootCmd_Integration_FilesFrom_SkipsEmptyLines` — blank lines interspersed → same totals as Test 1 | `cmd/rak/integration_test.go:330-358` | Feeds `"\ntestdata/tree/a.txt\n\ntestdata/tree/sub/nested.txt\n\n"` (leading, mid, trailing blanks); asserts identical `treeExpectedTotal*` constants as Test 1. | OK |
+| 4 | `TestRootCmd_Integration_FilesFrom_HashFileWorks` — temp `#draft.md` is counted (non-zero bytes) | `cmd/rak/integration_test.go:366-400` | Creates `t.TempDir()/#draft.md` with `os.WriteFile`, content `"# draft\n"` (8 bytes); feeds absolute path via stdin; asserts `parsed.Total.Bytes == int64(len(content))` (8). Proves `#` prefix is not filtered. | OK |
+| 5 | `TestRootCmd_Integration_FilesFrom_PositionalArgConflict` — error contains `"cannot combine"` | `cmd/rak/integration_test.go:406-423` | `cmd.SetArgs([]string{"--files-from", "-", "."})`; asserts `err != nil` AND `strings.Contains(err.Error(), "cannot combine")`. | OK |
+| 6 | `TestFlags_FilesFromNoGitignoreHardErrors` — error contains `"--no-gitignore"` | `cmd/rak/integration_test.go:428-445` | `cmd.SetArgs([]string{"--files-from", "-", "--no-gitignore"})`; asserts `err != nil` AND `strings.Contains(err.Error(), "--no-gitignore")`. | OK |
+| 7 | `TestFilesFrom_MaxFiles` — `errors.Is(err, ErrMaxFilesExceeded)` true | `cmd/rak/integration_test.go:452-484` | Creates 3 real temp files via `os.WriteFile`; feeds all 3 absolute paths via stdin with `--max-files 1`; asserts `err != nil` AND `errors.Is(err, ErrMaxFilesExceeded)`. Sentinel is package-level in `cmd/rak/root.go` (wrapped at line 502 via `fmt.Errorf("rak: file count exceeded --max-files %d: %w", ...)`). | OK |
+
+### Acceptance criteria
+
+| Bullet (PLAN.md `### Unit D.3 — Acceptance criteria`) | Evidence | Status |
+|---|---|---|
+| `mage test ./cmd/rak/...` passes with `-race` | Stashed unrelated DROP_A in-flight `internal/lang/*` work and re-ran `mage test`; all packages pass with `-race` (the magefile invokes `go test -race ./...`). `cmd/rak`: `ok 1.372s`. | OK |
+| Test 1 asserts `parsed.Total` fields matching tree fixture constants | Lines 287-294 — explicit comparison of all four (Bytes/Lines/Words/Chars) against `treeExpectedTotal*`. | OK |
+| Test 2 verifies empty stdin: no panic, no error, zero totals | Lines 311-322 — `cmd.Execute()` checked for nil; `parsed.Total.Bytes == 0` asserted. | OK |
+| Test 3 same totals as Test 1 (empty lines skipped) | Lines 350-357 — identical `treeExpectedTotal*` comparison. | OK |
+| Test 4 proves `#`-prefixed filenames are counted normally | Lines 396-399 — `parsed.Total.Bytes == int64(len(content))` where content is `"# draft\n"` (8 bytes). | OK |
+| Test 5 error message contains `"cannot combine"` | Lines 420-422 — `strings.Contains(err.Error(), "cannot combine")`. | OK |
+| Test 6 error message references `"--no-gitignore"` | Lines 442-444 — `strings.Contains(err.Error(), "--no-gitignore")`. | OK |
+| Test 7 `ErrMaxFilesExceeded` fires under `--files-from` | Lines 481-483 — `errors.Is(err, ErrMaxFilesExceeded)`. | OK |
+| Existing integration tests in `integration_test.go` continue to pass | Existing tests (`TestRootCmd_Integration_HumanFormat`, `TestRootCmd_Integration_JSONFormat`, `TestRootCmd_Integration_PathArg_HumanFormat`, `TestRootCmd_Integration_PathArg_JSONFormat`) intact at lines 48-258; `mage test` (with parallel DROP_A stashed) reports `ok cmd/rak`. | OK |
+
+### Test non-vacuity audit
+
+Each new test asserts a concrete observable beyond "no error":
+
+- **Test 1**: asserts all four `Total.*` fields against fixture constants (not just non-nil).
+- **Test 2**: asserts BOTH `err == nil` AND `parsed.Total.Bytes == 0` — proves empty stdin is silently OK, not an error path.
+- **Test 3**: asserts identical totals to Test 1, proving the skip-empty-lines path is semantically equivalent (not just non-erroring).
+- **Test 4**: asserts `Total.Bytes == int64(len(content))` — concrete byte count proves the file was counted, not just discovered.
+- **Test 5**: asserts BOTH `err != nil` AND substring `"cannot combine"` — proves the specific Guard A path fires (not some other error like file-not-found).
+- **Test 6**: asserts BOTH `err != nil` AND substring `"--no-gitignore"` — proves Guard B fires.
+- **Test 7**: asserts BOTH `err != nil` AND `errors.Is(err, ErrMaxFilesExceeded)` — uses sentinel inspection (not string match), the idiom mandated by `main/CLAUDE.md` § "Errors".
+
+All seven are behavior-asserting; none are vacuous.
+
+### Trace coverage
+
+- **`--files-from -` happy path**: Test 1 covers relative-path resolution via CWD (test runs from `cmd/rak/`, so `testdata/tree/a.txt` resolves correctly). Test 4 covers absolute-path resolution. Together they exercise both branches of D.1's `filepath.IsAbs` check.
+- **Empty stdin**: Test 2 covers the path where `bufio.Scanner.Scan()` returns false on the very first call → iterator exits cleanly with zero yields.
+- **Empty-line skip path**: Test 3 exercises D.1's `if line == "" { continue }` branch with leading, mid, and trailing blanks.
+- **Hash-prefix path**: Test 4 proves D.1's scanner loop does not filter `#`-prefixed lines (no `strings.HasPrefix(line, "#")` branch exists).
+- **Guard A (`PersistentPreRunE` — positional + `--files-from`)**: Test 5 exercises `cmd/rak/root.go:107-109`; the error is returned before `RunE` runs.
+- **Guard B (`PersistentPreRunE` — `--no-gitignore` + `--files-from`)**: Test 6 exercises `cmd/rak/root.go:110-112`.
+- **`--max-files` wired through `runDirectoryOpts.maxFiles`**: Test 7 exercises the full chain: `--files-from` branch (root.go:248-268) → `runDirectoryOpts.maxFiles = flags.maxFiles` (root.go:265) → `walkAndCount` (root.go:501-503) → `ErrMaxFilesExceeded` wrapped via `%w`. The `errors.Is` check confirms wrap-chain integrity.
+- **Stdin sentinel `"-"` opening**: All 7 tests use `"-"` (or implicitly via `cmd.SetIn`); `openFilesFrom("-", stdin)` returns stdin + no-op closer (root.go:307-309). The fact that tests with `cmd.SetIn(strings.NewReader(...))` succeed proves the helper returns the cobra-managed stdin reader, not `os.Stdin`.
+
+### Findings
+
+None blocking.
+
+### Verification commands run
+
+- `Read` of `cmd/rak/integration_test.go` (lines 1-484, full file) — confirms all 7 named tests, signatures, and body assertions.
+- `Read` of `cmd/rak/root.go` lines 490-520 — confirms `ErrMaxFilesExceeded` is wrapped at line 502, accessible to test via package-level declaration.
+- `mage test` (full repo) — `cmd/rak` reports `ok`. The full-suite run reports `FAIL` on `internal/lang` (build-failed in `lang_test.go` + `split_test.go`). `git status` confirms `internal/lang/lang.go`, `internal/lang/lang_test.go`, `internal/lang/split_test.go`, and `drops/DROP_A_LANG_EXPANSION/BUILDER_QA_PROOF.md` are uncommitted — this is the parallel DROP_A builder's in-flight work, unrelated to D.3 (matches the D.2 Round 1 pattern; task prompt green-lights ignoring parallel-builder failures).
+- `git stash push internal/lang/` + `mage test` + `git stash pop` — with DROP_A stashed, `mage test` is fully green across all packages. Stash restored after verification; working tree unchanged.
+
+### Hylla Feedback
+
+N/A — D.3 added only `cmd/rak/integration_test.go` tests (post-last-ingest, in-progress local file). Reading the current source via `Read` is correct per `main/CLAUDE.md` § "Code Understanding Rules" rule 2. No Hylla query was attempted; no fallback miss to log.
