@@ -354,3 +354,157 @@ N/A — review touched only Go source files already fully resolvable via direct 
 ### Hylla Feedback
 
 N/A — review touched only Go source files inside `internal/lang` (lang.go, split.go, lang_test.go, split_test.go) and non-Go README.md / PLAN.md / BUILDER_WORKLOG.md / BUILDER_QA_FALSIFICATION.md. Hylla was not the load-bearing evidence source — falsification axes (extension-key collision checks, doc-comment formatting, alphabetical ordering, grammar correctness, state-machine traces, lock-in test presence) are all local to small self-contained map literals and table-driven tests where `Read` on the full file is both faster and more authoritative than block summaries. None — Hylla answered everything needed at the structural level and was not required for the within-package A.3 review.
+
+## Unit A.4 — Round 1
+
+**Verdict:** FAIL (one CONFIRMED counterexample against Acceptance #10 — README alphabetical ordering)
+
+Falsification surveys the 10 specific attack angles from the spawn prompt plus opportunistic adjacent angles. One CONFIRMED ordering bug found in README; all other angles REFUTED. The bug is a docs-only fix (single token swap) and does not touch Go code, grammar, or tests.
+
+### Counterexamples / Attacks
+
+#### Attack 1 — Extension collisions with existing entries
+
+- **Severity:** blocker (REFUTED)
+- **Where:** `internal/lang/lang.go:172-256` (extensionTable)
+- **Hypothesis:** Any of the 15 new keys (`.ini`, `.env`, `.editorconfig`, `.properties`, `.tf`, `.tfvars`, `.hcl`, `.nix`, `.proto`, `.graphql`, `.gql`, `.csv`, `.tsv`, `.jsonl`, `.ndjson`) accidentally collides with a pre-existing or A.1–A.3 entry, silently re-binding an extension.
+- **Mitigation accepted:** REFUTED. Reviewed `extensionTable` end-to-end. Pre-existing + A.1–A.3 keys (`.bash`, `.c`, `.cc`, `.cpp`, `.css`, `.cxx`, `.fish`, `.gemspec`, `.go`, `.h`, `.hpp`, `.htm`, `.html`, `.java`, `.js`, `.json`, `.kt`, `.kts`, `.md`, `.php`, `.phtml`, `.py`, `.rake`, `.rb`, `.rs`, `.sh`, `.swift`, `.toml`, `.ts`, `.xml`, `.yaml`, `.yml`, `.zsh`, `.cs`, `.dart`, `.ex`, `.exs`, `.fs`, `.fsi`, `.fsx`, `.hs`, `.lhs`, `.lua`, `.r`, `.scala`, `.sql`, `.zig`, `.templ`, `.jsx`, `.tsx`, `.scss`, `.sass`, `.less`, `.vue`, `.svelte`, `.erb`, `.j2`, `.jinja`, `.jinja2`, `.liquid`, `.mustache`, `.hbs`) form a disjoint set from the 15 new A.4 keys. No silent re-bind. Verified by inspection; `mage test` would also fail-fast on a Go map literal duplicate key (compile-time error).
+- **Subtle adjacent check:** `.tf` is sometimes a typo target for `.tsx` users — but `.tsx → LangTSX` and `.tf → LangHCL` are separate keys; no overlap.
+
+#### Attack 2 — HCL three-form grammar struct compatibility
+
+- **Severity:** blocker (REFUTED)
+- **Where:** `internal/lang/split.go:53-67` (grammar struct), `internal/lang/split.go:224` (LangHCL entry), `internal/lang/split.go:281-294` (Split decision tree)
+- **Hypothesis:** The grammar struct supports either `linePrefix` + `linePrefix2` OR `blockOpen` + `blockClose`, but not all four simultaneously — so HCL's `{linePrefix: "#", linePrefix2: "//", blockOpen: "/*", blockClose: "*/"}` would silently drop one form.
+- **Mitigation accepted:** REFUTED. The grammar struct (split.go:53-67) declares all four fields independently. `Split` (split.go:281-294) evaluates each branch with its own `if !isComment && g.X != ""` guard — no early-exit short-circuit between the four. The block-comment state-machine (split.go:303-319) only runs `if g.blockOpen != ""`, leaving line-prefix handling intact for any prior decision. All four conditions can fire simultaneously. Confirmed empirically by `TestSplit_ConfigDataFormats` at split_test.go:875-891 (`hcl hash comment`, `hcl slashslash comment`, `hcl block comment` all PASS).
+
+#### Attack 3 — Properties `!` linePrefix2 firing
+
+- **Severity:** blocker (REFUTED)
+- **Where:** `internal/lang/split.go:220` (LangProperties entry), `internal/lang/split.go:292-294` (linePrefix2 branch in Split)
+- **Hypothesis:** `linePrefix2` could be ignored when `linePrefix` is also set, silently dropping `!` detection for Java `.properties` files.
+- **Mitigation accepted:** REFUTED. Test at `split_test.go:867-872` (`properties exclamation secondary comment`) explicitly asserts `! comment\nkey=value\n` → `{Blank: 0, Comment: 1, Code: 1}` and PASSES. Split branch at split.go:292-294 fires `linePrefix2` independently from `linePrefix` per the `if !isComment && g.linePrefix2 != "" && strings.HasPrefix(trimmed, g.linePrefix2)` guard. Both `#` and `!` are detected.
+
+#### Attack 4 — CSV/TSV/JSONL absent grammar fallback
+
+- **Severity:** blocker (REFUTED)
+- **Where:** `internal/lang/split.go:235-237` (intentional comment), `internal/lang/split.go:256` (zero-grammar fallback)
+- **Hypothesis:** Calling `Split(reader, LangCSV)` when CSV is absent from grammarTable could panic or return wrong counts.
+- **Mitigation accepted:** REFUTED. `g := grammarTable[lang]` on Go map miss returns the zero value of `grammar{}` — all fields empty strings. Every subsequent `g.X != ""` guard fails → no condition fires → all non-blank lines fall through to `lc.Code++`. Tests at `split_test.go:927-946` (CSV, TSV, JSONL) all PASS with all-Code assertions. Behavior matches PLAN.md Acceptance #9.
+
+#### Attack 5 — `.env` extension special case
+
+- **Severity:** blocker (REFUTED)
+- **Where:** `internal/lang/lang.go:242` (extensionTable key `.env`), `internal/lang/lang.go:308` (`filepath.Ext` call in Detect)
+- **Hypothesis:** Go's `filepath.Ext(".env")` semantics could return `""` for basename-only dotfiles, causing the extension lookup to be skipped and Detect to return LangUnknown.
+- **Mitigation accepted:** REFUTED. Go stdlib `path/filepath.Ext` returns the suffix beginning at the final dot in the final path element. For `.env`, the final element is `.env`, the final dot is at byte 0, and the returned suffix is `.env`. The PLAN.md note (line 411) and lang.go:127 docstring both confirm this. Test rows at `lang_test.go:418-421` exercise `{".env", LangEnv}`, `{"development.env", LangEnv}`, `{".editorconfig", LangEditorConfig}` and ALL PASS. Verified empirically by `mage test` green.
+
+#### Attack 6 — GraphQL `#`-only grammar
+
+- **Severity:** nit (REFUTED)
+- **Where:** `internal/lang/split.go:233` (LangGraphQL entry)
+- **Hypothesis:** GraphQL grammar entry might accidentally include block-comment fields, leading to false positives on `/*` in schema descriptions.
+- **Mitigation accepted:** REFUTED. Entry is `LangGraphQL: {linePrefix: "#"}` — only `linePrefix` set, no `linePrefix2`/`blockOpen`/`blockClose`. Matches GraphQL SDL spec.
+
+#### Attack 7 — HCL acceptance #7 (all three forms classify as Comment)
+
+- **Severity:** blocker (REFUTED)
+- **Where:** `internal/lang/split_test.go:875-891`
+- **Hypothesis:** PLAN.md Acceptance #7 requires `Split` on `# comment`, `// comment`, AND `/* block */` to each classify as Comment for LangHCL. The test could omit one form.
+- **Mitigation accepted:** REFUTED. Three explicit subtests cover all three: `hcl hash comment (Acceptance #7)`, `hcl slashslash comment (Acceptance #7)`, `hcl block comment (Acceptance #7)`. All three assert `Comment: 1` (line-form) or `Comment: 3` (block multi-line). All PASS.
+
+#### Attack 8 — README alphabetical ordering of 11 new entries
+
+- **Severity:** **blocker (CONFIRMED COUNTEREXAMPLE)**
+- **Where:** `main/README.md:122`
+- **Counterexample:** PLAN.md Acceptance #10 + scope section require new entries inserted alphabetically. The list at README.md:122 reads `..., CMakeLists.txt, CSV, CSS, Dart, ...`. Case-insensitive alphabetic order places `CSS` BEFORE `CSV` (positions 0-1 both `c`, `s`; position 2: `s`=0x73 < `v`=0x76, so `css` < `csv`). The current order `CSV, CSS` is inverted.
+- **Reproduction:** Open `main/README.md` line 122. Read tokens 5-6 after the leading `C, C++, C#, CMakeLists.txt,`: they are `CSV, CSS,`. Should be `CSS, CSV,`.
+- **Fix:** Swap the two tokens. One-character diff: `CSV, CSS` → `CSS, CSV`.
+- **Why this lands:** A.4 builder claimed "list now at 56 entries" and "11 entries (CSV, dotenv, EditorConfig, GraphQL, HCL/Terraform, INI, JSONL, Nix, Properties, Protobuf, TSV) alphabetically" (BUILDER_WORKLOG.md line 93). The 11 NEW entries are individually in alphabetical position; the bug is that inserting `CSV` directly before the pre-existing `CSS` failed to preserve the global alphabetical invariant — CSS should precede CSV. Acceptance #10 says "README lists the 11 new language names" — true at the level of presence, but the list-wide alphabetical invariant from the PLAN.md scope ("alphabetical, with one entry per language or alias group, sorted case-insensitively") is broken at exactly that insertion point. Reviewer position: docs-only, non-functional, but a counterexample to the stated acceptance criterion.
+- **Other ordering checks (REFUTED):** Exhaustively walked the rest of the list (dotenv/EditorConfig/Elixir/ERB; Haskell/HCL/Terraform/HTML; INI before J's; Java/JavaScript/Jinja/JSON/JSONL/JSX; Mustache/Nix/PHP/Properties/Protobuf/Python; Sass/Scala/SCSS/Shell/SQL/Svelte/Swift; Templ/TOML/TSV/TSX/TypeScript). Every other adjacent pair is correctly ordered case-insensitively. Only the `CSV, CSS` swap is broken.
+
+#### Attack 9 — Doc comments on 11 new Lang* constants
+
+- **Severity:** nit (REFUTED)
+- **Where:** `internal/lang/lang.go:122-154`
+- **Hypothesis:** Project naming convention requires every exported identifier to have a `// Name …` doc comment. Builder might have skipped one or written non-conforming comments (e.g. starting with something other than the constant name).
+- **Mitigation accepted:** REFUTED. Each of LangINI (line 122), LangEnv (line 125), LangEditorConfig (line 128), LangProperties (line 131), LangHCL (line 134), LangNix (line 137), LangProto (line 140), LangGraphQL (line 143), LangCSV (line 146), LangTSV (line 149), LangJSONL (line 152) has a `// LangFoo …` doc comment starting with the identifier name. 11/11 conforming. `mage lint` (golangci-lint with revive/staticcheck) passes with 0 issues — would flag missing doc comments otherwise.
+
+#### Attack 10 — `mage test` `-race` + `mage lint`
+
+- **Severity:** blocker (REFUTED)
+- **Where:** repo root
+- **Hypothesis:** Tests might pass without `-race` but fail under it; lint might flag style/static-analysis issues introduced by A.4.
+- **Mitigation accepted:** REFUTED. `mage test` (which runs `go test -race ./...` per CLAUDE.md mage discipline) returns all 8 packages OK (cmd/rak, counting, fileset, ignore, lang, lister, render, summary). `mage lint` returns `0 issues.`. Both green.
+
+#### Attack 11 — Empty `linePrefix` + `linePrefix2` set independently
+
+- **Severity:** nit (REFUTED)
+- **Where:** `internal/lang/split.go:289-294`
+- **Hypothesis:** If a grammar sets only `linePrefix2` (e.g. CSS sets `linePrefix: ""` + has no secondary), Split could panic or mis-classify when the empty string matches every trimmed prefix.
+- **Mitigation accepted:** REFUTED. Guards `g.linePrefix != ""` and `g.linePrefix2 != ""` ensure empty strings never reach `strings.HasPrefix`. CSS (split.go:91) has `linePrefix: ""` and the guard correctly skips the linePrefix branch, falling through to blockOpen detection. No A.4 entry sets `linePrefix2` without `linePrefix`, so the worst case here doesn't arise.
+
+#### Attack 12 — `.tf` Terraform vs Tcl `.tcl` aliasing potential
+
+- **Severity:** nit (REFUTED)
+- **Where:** `internal/lang/lang.go:245-247`
+- **Hypothesis:** `.tf` could collide with another binding (e.g. Tcl-adjacent or TerraForm-adjacent extensions).
+- **Mitigation accepted:** REFUTED. `.tf`/`.tfvars`/`.hcl` all map to LangHCL exclusively. No `.tcl` entry exists in tree. PLAN.md groups all three correctly under one LangHCL constant per scope (PLAN.md:248).
+
+#### Attack 13 — JSONL/NDJSON aliasing
+
+- **Severity:** nit (REFUTED)
+- **Where:** `internal/lang/lang.go:254-255`
+- **Hypothesis:** Builder might have given `.jsonl` and `.ndjson` separate constants instead of aliasing.
+- **Mitigation accepted:** REFUTED. Both map to single `LangJSONL` constant per PLAN.md:256. Test rows `{"events.jsonl", LangJSONL}` and `{"events.ndjson", LangJSONL}` at lang_test.go:440-441 confirm alias correctness.
+
+#### Attack 14 — HCL/Nix block-state-machine corruption from `*` in code
+
+- **Severity:** nit (REFUTED — known Policy α YAGNI)
+- **Where:** `internal/lang/split.go:303-319`
+- **Hypothesis:** HCL/Nix code containing `*` could create false block-comment state.
+- **Mitigation accepted:** REFUTED — accepted Policy α F28 trade-off applied uniformly across all C-family + multiline-block languages. Not specific to A.4, not a regression.
+
+#### Attack 15 — Out-of-paths edits
+
+- **Severity:** blocker (REFUTED)
+- **Where:** PLAN.md A.4 Paths declaration (lines 231-237) vs BUILDER_WORKLOG.md lines 87-94
+- **Hypothesis:** Builder touched files outside declared paths without justification.
+- **Mitigation accepted:** REFUTED. Declared paths: `internal/lang/lang.go`, `internal/lang/split.go`, `internal/lang/lang_test.go`, `internal/lang/split_test.go`, `README.md`, plus the drop's `PLAN.md` (state flip). Worklog enumerates the same six files. No out-of-paths edits.
+
+#### Attack 16 — Liquid `{% comment %}` collision with normal `{% if %}` tags
+
+- **Severity:** nit (REFUTED — known Policy α YAGNI)
+- **Where:** Not A.4 — Liquid is A.3. Skipped.
+
+#### Attack 17 — Grammar-less Split returning err for any non-empty reader
+
+- **Severity:** nit (REFUTED)
+- **Where:** `internal/lang/split.go:255-326` (Split function)
+- **Hypothesis:** Split might propagate a scanner error specifically when no grammar applies (CSV/TSV/JSONL path).
+- **Mitigation accepted:** REFUTED. Scanner error path (split.go:322-324) returns `LineCounts{}` + wrapped err only when `scanner.Err()` reports a real I/O / token-size failure — independent of grammar presence. Empty/clean input on `strings.NewReader` produces nil error. Test at split_test.go:927-946 PASSES with no error.
+
+### Informational notes (not counterexamples against A.4)
+
+- **PLAN.md Acceptance #9 wording** lists CSV/TSV/JSONL assertions but uses `\t` rendered literally inside the prose (`a\tb\tc`). The test at split_test.go:937 uses Go-escaped `"a\tb\tc\n1\t2\t3\n"` which is the correct tab-character interpretation. Not a finding; just noting the PLAN.md prose-vs-test-literal mapping.
+- **`.env` PLAN.md alphabetical-positioning vs README form**: PLAN.md spelled the list `(CSV, dotenv, EditorConfig, GraphQL, HCL/Terraform, INI, JSONL, Nix, Properties, Protobuf, TSV)`. README inserted `dotenv` after CSV/CSS — alphabetically correct (`csv`/`css` < `dart` < `dockerfile` < `dotenv`). Single ordering bug is the CSV-vs-CSS swap; new-entry positions otherwise good.
+- **`mage ci` not run for A.4**: PLAN.md only requires `mage build` + `mage test` for A.4; `mage ci` is reserved for A.5 / drop-end per WORKFLOW.md Phase 6. Reviewer ran `mage lint` directly (clean) and `mage test` (green) as a stronger-than-required check — neither revealed lint or test regression.
+
+### Recommended fix for the CONFIRMED counterexample
+
+Single-token swap in `main/README.md:122`:
+
+```
+- ..., CMakeLists.txt, CSV, CSS, Dart, ...
++ ..., CMakeLists.txt, CSS, CSV, Dart, ...
+```
+
+Round-trip: orch dispatches a `go-builder-agent` to make the swap → re-run A.4 build-QA → expected PASS.
+
+### Summary
+
+17 attack vectors evaluated. 16 REFUTED, 1 CONFIRMED (Attack 8 — README list ordering: `CSV, CSS` inverted, should be `CSS, CSV`). Grammar struct correctly supports all four field combinations simultaneously (HCL). All 15 new extension-table keys collision-free vs pre-existing entries. CSV/TSV/JSONL zero-grammar fallback verified end-to-end (no panic, all non-blank lines → Code). `.env` extension semantics verified via Go `filepath.Ext` stdlib contract. Doc comments conform on 11/11 new Lang* constants. `mage test` (with `-race`) green; `mage lint` green (0 issues). **FAIL — one docs-only blocker requires a single-token swap in README.md before A.4 can close.**
+
+### Hylla Feedback
+
+N/A — review touched only Go source files inside `internal/lang` (lang.go, split.go, lang_test.go, split_test.go) and non-Go README.md / PLAN.md / BUILDER_WORKLOG.md / BUILDER_QA_FALSIFICATION.md. Hylla not the load-bearing evidence source — the falsification axes (extension-key collision checks, grammar struct field compatibility, alphabetical ordering, doc-comment formatting, state-machine traces, stdlib semantics) are local to small self-contained map literals where `Read` on the full file is faster and more authoritative than block summaries. None — Hylla answered everything needed at the structural level and was not required for the within-package A.4 review.
