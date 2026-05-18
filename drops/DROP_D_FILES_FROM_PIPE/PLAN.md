@@ -281,7 +281,7 @@ filesystem.
 
 ### Unit D.3 — End-to-end integration tests
 
-**State:** todo
+**State:** done
 **Paths:** `cmd/rak/integration_test.go`
 **Packages:** `cmd/rak` (package `main`)
 **Blocked by:** D.2

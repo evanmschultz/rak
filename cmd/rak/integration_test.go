@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -252,5 +254,231 @@ func TestRootCmd_Integration_PathArg_JSONFormat(t *testing.T) {
 	}
 	if len(parsed.Errors) != 0 {
 		t.Errorf("expected no errors walking the fixture tree; got %v", parsed.Errors)
+	}
+}
+
+// TestRootCmd_Integration_FilesFrom_StdinList verifies that --files-from -
+// reads a newline-separated list of paths from stdin and counts the files it
+// names. The fixture list contains both files from testdata/tree/ — a.txt (12
+// bytes) and sub/nested.txt (8 bytes) — so totals must match the tree fixture
+// constants (Bytes=20, Lines=2, Words=4, Chars=20). Paths are fed as
+// relative-to-CWD strings; FilesFromLister resolves them via os.Getwd() at
+// list time, which returns cmd/rak/ during the test run.
+func TestRootCmd_Integration_FilesFrom_StdinList(t *testing.T) {
+	t.Parallel()
+
+	list := "testdata/tree/a.txt\ntestdata/tree/sub/nested.txt\n"
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetIn(strings.NewReader(list))
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--json", "--files-from", "-"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cmd.Execute: %v", err)
+	}
+
+	var parsed treeResult
+	if err := json.Unmarshal(out.Bytes(), &parsed); err != nil {
+		t.Fatalf("json.Unmarshal(%s): %v", out.String(), err)
+	}
+
+	if parsed.Total.Bytes != treeExpectedTotalBytes ||
+		parsed.Total.Lines != treeExpectedTotalLines ||
+		parsed.Total.Words != treeExpectedTotalWords ||
+		parsed.Total.Chars != treeExpectedTotalChars {
+		t.Errorf("total mismatch: want B=%d L=%d W=%d C=%d, got %+v",
+			treeExpectedTotalBytes, treeExpectedTotalLines,
+			treeExpectedTotalWords, treeExpectedTotalChars, parsed.Total)
+	}
+}
+
+// TestRootCmd_Integration_FilesFrom_EmptyStdin verifies that --files-from -
+// with an empty stdin (equivalent to `echo -n | rak --files-from -`) produces
+// valid JSON with zero totals and does not panic or error. The rendered output
+// must parse cleanly and Total.Bytes must be zero.
+func TestRootCmd_Integration_FilesFrom_EmptyStdin(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--json", "--files-from", "-"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cmd.Execute: %v", err)
+	}
+
+	var parsed treeResult
+	if err := json.Unmarshal(out.Bytes(), &parsed); err != nil {
+		t.Fatalf("json.Unmarshal(%s): %v", out.String(), err)
+	}
+
+	if parsed.Total.Bytes != 0 {
+		t.Errorf("empty stdin: expected Total.Bytes=0, got %+v", parsed.Total)
+	}
+}
+
+// TestRootCmd_Integration_FilesFrom_SkipsEmptyLines verifies that blank lines
+// in the --files-from input are silently skipped and do not affect the count.
+// The input has blank lines before, between, and after the two fixture paths.
+// Totals must match the tree fixture constants (Bytes=20, Lines=2, Words=4,
+// Chars=20) — identical to TestRootCmd_Integration_FilesFrom_StdinList.
+func TestRootCmd_Integration_FilesFrom_SkipsEmptyLines(t *testing.T) {
+	t.Parallel()
+
+	list := "\ntestdata/tree/a.txt\n\ntestdata/tree/sub/nested.txt\n\n"
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetIn(strings.NewReader(list))
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--json", "--files-from", "-"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cmd.Execute: %v", err)
+	}
+
+	var parsed treeResult
+	if err := json.Unmarshal(out.Bytes(), &parsed); err != nil {
+		t.Fatalf("json.Unmarshal(%s): %v", out.String(), err)
+	}
+
+	if parsed.Total.Bytes != treeExpectedTotalBytes ||
+		parsed.Total.Lines != treeExpectedTotalLines ||
+		parsed.Total.Words != treeExpectedTotalWords ||
+		parsed.Total.Chars != treeExpectedTotalChars {
+		t.Errorf("total mismatch (empty lines should be skipped): want B=%d L=%d W=%d C=%d, got %+v",
+			treeExpectedTotalBytes, treeExpectedTotalLines,
+			treeExpectedTotalWords, treeExpectedTotalChars, parsed.Total)
+	}
+}
+
+// TestRootCmd_Integration_FilesFrom_HashFileWorks verifies that a file whose
+// name starts with '#' is counted normally and not silently dropped as a
+// comment. FilesFromLister explicitly does not implement comment syntax (per
+// PLAN.md D.1 design). The file is created in t.TempDir() with a small content
+// payload; its absolute path is fed through --files-from stdin. The total byte
+// count must equal the length of the written content.
+func TestRootCmd_Integration_FilesFrom_HashFileWorks(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	hashFile := filepath.Join(tmp, "#draft.md")
+	content := []byte("# draft\n")
+	if err := os.WriteFile(hashFile, content, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Feed the absolute path through stdin so CWD resolution is irrelevant.
+	list := hashFile + "\n"
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetIn(strings.NewReader(list))
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--json", "--files-from", "-"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cmd.Execute: %v", err)
+	}
+
+	var parsed treeResult
+	if err := json.Unmarshal(out.Bytes(), &parsed); err != nil {
+		t.Fatalf("json.Unmarshal(%s): %v", out.String(), err)
+	}
+
+	// The content "# draft\n" is 8 bytes; a non-zero count proves the file
+	// was not silently dropped due to the '#' prefix.
+	wantBytes := int64(len(content))
+	if parsed.Total.Bytes != wantBytes {
+		t.Errorf("hash-prefixed file: expected Total.Bytes=%d, got %+v", wantBytes, parsed.Total)
+	}
+}
+
+// TestRootCmd_Integration_FilesFrom_PositionalArgConflict verifies that
+// combining --files-from with a positional path argument produces a hard error
+// (Guard A in PersistentPreRunE). The error message must contain "cannot
+// combine".
+func TestRootCmd_Integration_FilesFrom_PositionalArgConflict(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--files-from", "-", "."})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected error combining --files-from with positional arg, got nil")
+	}
+	if !strings.Contains(err.Error(), "cannot combine") {
+		t.Errorf("error must contain %q; got: %v", "cannot combine", err)
+	}
+}
+
+// TestFlags_FilesFromNoGitignoreHardErrors verifies that combining --files-from
+// with --no-gitignore produces a hard error (Guard B in PersistentPreRunE).
+// The error message must reference "--no-gitignore".
+func TestFlags_FilesFromNoGitignoreHardErrors(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--files-from", "-", "--no-gitignore"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected error combining --files-from with --no-gitignore, got nil")
+	}
+	if !strings.Contains(err.Error(), "--no-gitignore") {
+		t.Errorf("error must contain %q; got: %v", "--no-gitignore", err)
+	}
+}
+
+// TestFilesFrom_MaxFiles verifies that --max-files fires correctly in
+// --files-from mode: when the number of accepted files reaches the limit,
+// cmd.Execute returns a non-nil error wrapping ErrMaxFilesExceeded. Three
+// real files are created in t.TempDir(); their absolute paths are fed via
+// stdin with --max-files 1 so the limit is hit after the first file.
+func TestFilesFrom_MaxFiles(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+
+	// Create three real files so FilesFromLister can os.Stat them.
+	var paths []string
+	for i := range 3 {
+		p := filepath.Join(tmp, fmt.Sprintf("file%d.txt", i))
+		if err := os.WriteFile(p, []byte("content\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+		paths = append(paths, p)
+	}
+
+	// Build stdin list with all three absolute paths.
+	list := strings.Join(paths, "\n") + "\n"
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetIn(strings.NewReader(list))
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--json", "--files-from", "-", "--max-files", "1"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("--max-files 1 with 3 files: expected error wrapping ErrMaxFilesExceeded, got nil")
+	}
+	if !errors.Is(err, ErrMaxFilesExceeded) {
+		t.Errorf("expected errors.Is(err, ErrMaxFilesExceeded) true; got: %v", err)
 	}
 }
