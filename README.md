@@ -2,7 +2,17 @@
 
 **rak** is `wc++` for LLM-first consumption. Walk a directory, count bytes/lines/words/chars/files, detect languages, split blank/comment/code, and emit compact TOON output by default — designed to be fed directly to a language model. From Swedish *räkna* ("to count").
 
-![rak default TOON output](docs/default-toon.gif)
+![rak default TOON output then --human](docs/default-toon.gif)
+
+## Download a binary
+
+Pre-built binaries for macOS (amd64/arm64) and Linux (amd64/arm64) are available on the [Releases page](https://github.com/evanmschultz/rak/releases). Download the archive for your platform, extract, and place `rak` on your `$PATH`.
+
+```sh
+# Example for macOS arm64
+curl -L https://github.com/evanmschultz/rak/releases/latest/download/rak_latest_darwin_arm64.tar.gz | tar xz
+sudo mv rak /usr/local/bin/
+```
 
 ## Install
 
@@ -27,7 +37,7 @@ mage -l        # list all build/test/lint targets
 
 ```text
 $ rak --version
-rak version v0.1.4
+rak version v0.2.0-dev  # local build; release binaries print the tag (e.g. v0.2.0)
 
 $ rak internal/counting
 directories[1|]{path|files|bytes|lines|words|chars}:
@@ -68,24 +78,45 @@ Structured output with `total_by_lang` mapped by language name. `omitempty` keep
 ### Common invocations
 
 ```sh
-rak                          # count current dir (TOON, default)
-rak ./internal               # count a specific path
-rak --lang go,rust .         # only count Go and Rust files
-rak --sort files .           # sort directories by file count (desc by default)
-rak --sort path --sort-asc . # alphabetical directory order
-rak --depth 2 .              # limit walk to 2 levels deep
-rak --max-files 1000 .       # abort if more than 1000 files are accepted
-rak --hidden .               # include hidden (dotfile/dotdir) entries
-rak --include '*.go' .       # only files matching the glob
-rak --exclude '*_test.go' .  # exclude files matching the glob
-cat README.md | rak          # wc-parity counts on stdin
-cat data.json | rak --json   # JSON output on stdin
-rak CLAUDE.md                # count a single file (wc-style)
+rak                                      # count current dir (TOON, default)
+rak ./internal                           # count a specific path
+rak --lang go,rust .                     # only count Go and Rust files
+rak --sort files .                       # sort directories by file count (desc by default)
+rak --sort path --sort-asc .             # alphabetical directory order
+rak --depth 2 .                          # limit walk to 2 levels deep
+rak --max-files 1000 .                   # abort if more than 1000 files are accepted
+rak --hidden .                           # include hidden (dotfile/dotdir) entries
+rak --include '*.go' .                   # only files matching the glob
+rak --exclude '*_test.go' .              # exclude files matching the glob
+cat README.md | rak                      # wc-parity counts on stdin
+cat data.json | rak --json               # JSON output on stdin
+rak CLAUDE.md                            # count a single file (wc-style)
+git ls-files '*.go' | rak --files-from - # count only tracked Go files
 ```
 
 **About `--sort`:** the value is a **key** — one of `lines`, `files`, `bytes`, `path` — not a path. Numeric keys (`lines`/`files`/`bytes`) sort descending by default; `path` sorts ascending. Pass `--sort-asc` to flip the default direction. The positional argument (e.g. `.` or `./internal`) is the walk root — separate from the sort key.
 
 ![rak --sort files demo](docs/sort-files.gif)
+
+## Piping
+
+`--files-from <FILE>` composes rak with any tool that emits newline-separated paths — ripgrep, git, find, gh, or anything else in your Unix toolchain. Pass `-` to read from stdin. The source tool controls which files are listed; rak counts them.
+
+```sh
+# Pipe a file list from ripgrep
+rg --files | rak --files-from -
+
+# Count only tracked Go files
+git ls-files '*.go' | rak --files-from -
+
+# Find by name
+find . -name '*.go' | rak --files-from -
+
+# Count files changed in a PR
+gh pr diff 42 --name-only | rak --files-from -
+```
+
+![rak --files-from demo](docs/pipe.gif)
 
 ## Default behavior
 
@@ -93,7 +124,7 @@ rak CLAUDE.md                # count a single file (wc-style)
 - **TOON output by default.** Compact, LLM-friendly format. `--human` for styled terminal output, `--json` for structured piping. `--toon` is an explicit alias for the default.
 - **Hidden files skipped by default.** Pass `--hidden` to include dotfiles and dotdirs.
 - **Binary files skipped by default.** Detected via NUL byte in the first 512 bytes. Pass `--binary` to include them.
-- **Lockfiles counted.** `go.sum`, `package-lock.json`, etc. are tracked by git and counted in v0.1.0. v0.2 may add `--no-lockfiles`.
+- **Lockfiles excluded by default.** `go.sum`, `package-lock.json`, and other machine-generated dep manifests are skipped so counts reflect code your team wrote. Pass `--include-lockfiles` to count them. (v0.2.0 behavior change: v0.1.x counted lockfiles; see [v0.2.0 behavior changes](#v020-behavior-changes).)
 
 ## Flags
 
@@ -112,6 +143,8 @@ rak CLAUDE.md                # count a single file (wc-style)
 | `--exclude <glob>` | none | exclude files matching the glob (repeatable, wins over `--include`) |
 | `--no-gitignore` | off | **inside a git repo: hard error** (rak uses git-tracked enumeration; this flag is meaningless). Outside a git repo: disable `.gitignore` filtering. |
 | `--binary` | off | include binary files in counts |
+| `--files-from <FILE>` | none | read newline-separated file paths from FILE (use `-` for stdin) |
+| `--include-lockfiles` | off | include lockfiles (`go.sum`, `package-lock.json`, etc.) in counts |
 | `--version` | — | print version and exit |
 | `--help` | — | print help and exit |
 
@@ -119,20 +152,35 @@ Mutually exclusive: `--human`, `--json`, `--toon` (cobra rejects more than one).
 
 ## Languages detected
 
-C, C++, CMakeLists.txt, CSS, Dockerfile, Go, HTML (also `.xml`), Java, JavaScript, JSON, Kotlin, Makefile, Markdown, PHP, Python, Ruby, Rust, Shell (sh/bash/zsh/fish), Swift, TOML, TypeScript, YAML. Detection priority: special filename → extension → shebang → content heuristic. Files whose language can't be detected appear in counts but are excluded from `--lang` filtering and the `total_by_lang` block.
+Bazel, C, C++, C#, Caddyfile, CMakeLists.txt, CSS, CSV, Dart, Dockerfile, dotenv, Earthfile, EditorConfig, Elixir, ERB, F#, Go, GraphQL, Groovy, Haskell, HCL/Terraform, HTML, INI, Java, JavaScript, Jinja, JSON, JSONL, JSX, Justfile, Kotlin, LESS, Liquid, Lua, Makefile, Markdown, Mustache/Handlebars, Nix, PHP, Properties, Protobuf, Python, R, Ruby, Rust, Sass, Scala, SCSS, Shell (sh/bash/zsh/fish), SQL, Svelte, Swift, Templ, TOML, TSV, TSX, TypeScript, Vue, XML, YAML, Zig. Detection priority: special filename → extension → shebang → content heuristic. Files whose language can't be detected appear in counts but are excluded from `--lang` filtering and the `total_by_lang` block.
+
+Special-filename detection covers: `Makefile`, `Dockerfile`, `CMakeLists.txt`, `Gemfile`, `Rakefile` (Ruby), `BUILD`, `BUILD.bazel`, `WORKSPACE`, `*.bzl` (Bazel), `Jenkinsfile` (Groovy), `Justfile`/`justfile`, `Earthfile`, `Caddyfile`, `Vagrantfile`/`Brewfile` (Ruby DSLs). `Procfile` is intentionally undetected — those files count as bytes/lines/words but do not appear in `--lang` filtering or `total_by_lang`.
+
+> **v0.2.0 behavior change:** `.xml` files previously appeared as `html` in `total_by_lang`. They now appear as `xml`. This is an intentional split — XML and HTML are distinct languages.
+
+## v0.2.0 behavior changes
+
+> **Lockfiles excluded by default.** v0.1.x counted every git-tracked file including `go.sum`, `package-lock.json`, `yarn.lock`, and other machine-generated dep manifests. v0.2.0 skips them by default so `rak .` answers "how much code did your team write?" not "how large is your dependency graph?". Pass `--include-lockfiles` to restore the v0.1.x behavior.
+
+> **`.xml` files appear as `xml` not `html`.** In `total_by_lang`, `.xml` files are now detected as `xml`. v0.1.x reported them as `html`.
 
 ## Roadmap
 
-rak v0.1.x is deliberately small. Planned for v0.2:
+### v0.2 (in development)
 
-- **Broader polyglot language detection** — v0.1.x covers 22 languages; v0.2 expands toward templating, config, and data-format coverage.
-- **Token counting** (`--tokens`, tiktoken).
-- **Spinner / progress indication.**
-- **Parallel walk.**
-- **`--follow` symlinks.**
+- **Broader polyglot language detection** — v0.1.x covers 22 languages; v0.2 adds ~30 more (programming, templating, config, data, build files).
+- **`--files-from <FILE>`** for pipe composition — shipped in v0.2.0 (see [Piping](#piping)).
+- **Lockfile exclusion by default** with `--include-lockfiles` opt-in — `go.sum`, `package-lock.json`, etc. hidden from counts by default so you see code your team wrote, not machine-generated dep manifests.
 - **GoReleaser binary releases** (v0.1.0 ships via `go install` only).
-- **`--include-untracked`** (opt-out from git-tracked-default).
-- **`--no-lockfiles`** denylist flag.
+
+### v0.3 (planned)
+
+- **Token counting** (`--tokens` via tiktoken `o200k_base`) — see how many LLM tokens your repo would cost.
+- **Parallel walk** (`--workers`) — 2–5× speedup on large repos.
+- **`--follow` symlink traversal** — opt-in symlink-following for monorepo cross-package symlinks.
+- **Cross-platform CI matrix** (Windows + macOS + Linux).
+- **Spinner / progress indication.**
+- **`--include-untracked`** (opt-in to count untracked files inside a git repo).
 
 ## License
 

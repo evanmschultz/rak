@@ -116,10 +116,148 @@ var grammarTable = map[Language]grammar{
 
 	// HTML/XML-family: "<!-- -->" block, no line-comment form.
 	LangHTML:     {blockOpen: "<!--", blockClose: "-->"},
+	LangXML:      {blockOpen: "<!--", blockClose: "-->"},
 	LangMarkdown: {blockOpen: "<!--", blockClose: "-->"},
 
 	// JSON has no comment syntax per spec; all non-blank lines are Code.
 	// LangJSON intentionally absent (zero grammar).
+
+	// Unit A.2 — Programming languages.
+
+	// C-family: "//" line + "/* */" block (same as Go/Rust/Java/etc.).
+	LangCSharp: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+	LangDart:   {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+	LangScala:  {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+
+	// SQL (ANSI): "--" line + "/* */" block.
+	LangSQL: {linePrefix: "--", blockOpen: "/*", blockClose: "*/"},
+
+	// Lua: "--" line + "--[[" / "]]" long-bracket block.
+	// Known limitation (Policy α YAGNI): "]]" also appears as a table-index
+	// operator in Lua code. Lines containing "]]" in code context are
+	// mis-classified as Comment. Additionally, "]]" inside string literals can
+	// corrupt multi-line block-comment state. Accepted under F28 YAGNI.
+	LangLua: {linePrefix: "--", blockOpen: "--[[", blockClose: "]]"},
+
+	// Elixir: "#" line only — Elixir has no block-comment form.
+	LangElixir: {linePrefix: "#"},
+
+	// Zig: "//" line only — Zig has no block-comment form.
+	// "////" doc comments use the same "//" prefix and are detected correctly.
+	LangZig: {linePrefix: "//"},
+
+	// R: "#" line only — R has no block-comment form.
+	LangR: {linePrefix: "#"},
+
+	// F# (ML-style): "//" line + "(* *)" block.
+	LangFSharp: {linePrefix: "//", blockOpen: "(*", blockClose: "*)"},
+
+	// Haskell: "--" line + "{- -}" block.
+	LangHaskell: {linePrefix: "--", blockOpen: "{-", blockClose: "-}"},
+
+	// Unit A.3 — Templating and frontend variants.
+
+	// Go-superset templ: "//" line + "/* */" block (same as Go).
+	// HTML-like <!-- --> comments inside .templ files classify as Code
+	// (single-grammar policy, design principle 2, out of scope v0.2.0).
+	LangTempl: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+
+	// JSX/TSX: JS/TS family "//" line + "/* */" block.
+	LangJSX: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+	LangTSX: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+
+	// CSS preprocessors: "//" line + "/* */" block.
+	// SCSS supports both forms per spec. Sass indented syntax uses // for
+	// line comments; /* */ exists but is less common (Policy α YAGNI).
+	// LESS supports both forms per spec.
+	LangSCSS: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+	LangSass: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+	LangLESS: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+
+	// Vue/Svelte: HTML-level <!-- --> block, no line-comment form.
+	// JS/TS comments inside <script> blocks use JS/TS syntax invisible to
+	// rak's grammar → those lines classify as Code (design principle 2,
+	// one file = one grammar, sub-parsing out of scope for v0.2.0).
+	LangVue:    {blockOpen: "<!--", blockClose: "-->"},
+	LangSvelte: {blockOpen: "<!--", blockClose: "-->"},
+
+	// ERB: block form <%# ... %> rather than linePrefix "<%#".
+	// The linePrefix form (strings.HasPrefix) only matches when "<%#" is at
+	// trimmed-line start. Real ERB files commonly have mid-line comments like
+	// "<%= val %> <%# note %>" where "<%#" is not at line start. The block
+	// form (strings.Contains) catches those. Trade-off: blockClose "%>" also
+	// appears on expression-output lines like "<%= value %>" — those lines are
+	// mis-classified as Comment under Policy α (known limitation, YAGNI F28).
+	// HTML <!-- --> comments inside .erb files are HTML output written to the
+	// browser, not ERB-level comments; they classify as Code (intentional).
+	LangERB: {blockOpen: "<%#", blockClose: "%>"},
+
+	// Jinja2: {# ... #} block comment syntax.
+	LangJinja: {blockOpen: "{#", blockClose: "#}"},
+
+	// Liquid: {% comment %} / {% endcomment %} block tags.
+	LangLiquid: {blockOpen: "{% comment %}", blockClose: "{% endcomment %}"},
+
+	// Mustache/Handlebars: "{{!" line prefix + "{{!--" / "--}}" block.
+	// linePrefix "{{!" catches single-line {{! comment }} style.
+	// blockOpen "{{!--" + blockClose "--}}" catches the multi-line form.
+	// Note: "{{!" is a prefix of "{{!--" so the linePrefix fires first on
+	// single-line {{! comments; the blockOpen fires on {{!-- block opens.
+	LangMustache: {linePrefix: "{{!", blockOpen: "{{!--", blockClose: "--}}"},
+
+	// Unit A.4 — Config and data formats.
+
+	// INI: ";" primary line-comment prefix + "#" secondary.
+	LangINI: {linePrefix: ";", linePrefix2: "#"},
+
+	// Dotenv: "#" line only (dotenv standard).
+	LangEnv: {linePrefix: "#"},
+
+	// EditorConfig: "#" line only (editorconfig spec).
+	LangEditorConfig: {linePrefix: "#"},
+
+	// Java .properties: "#" primary + "!" secondary line-comment prefix.
+	LangProperties: {linePrefix: "#", linePrefix2: "!"},
+
+	// HCL/Terraform: all three comment forms — "#" primary, "//" secondary,
+	// "/* */" block. HCL specification supports all three.
+	LangHCL: {linePrefix: "#", linePrefix2: "//", blockOpen: "/*", blockClose: "*/"},
+
+	// Nix expression language: "#" line + "/* */" block.
+	LangNix: {linePrefix: "#", blockOpen: "/*", blockClose: "*/"},
+
+	// Protocol Buffers: "//" line + "/* */" block.
+	LangProto: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+
+	// GraphQL SDL: "#" is the only comment form.
+	LangGraphQL: {linePrefix: "#"},
+
+	// LangCSV, LangTSV, LangJSONL intentionally absent from grammarTable:
+	// CSV, TSV, and JSON Lines have no comment syntax — all non-blank lines
+	// classify as Code via the zero-grammar fallback in Split.
+
+	// Unit A.5 — Build and task files.
+
+	// Bazel (Starlark): "#" line comment (Python-like hash syntax). No block-comment
+	// form in Starlark.
+	LangBazel: {linePrefix: "#"},
+
+	// Groovy (Jenkinsfile): Java-family "//" line + "/* */" block.
+	LangGroovy: {linePrefix: "//", blockOpen: "/*", blockClose: "*/"},
+
+	// Just (justfile): "#" line comment. Justfile has no block-comment form.
+	LangJust: {linePrefix: "#"},
+
+	// Earth (Earthfile): "#" line comment (Earthly syntax). No block-comment form.
+	LangEarth: {linePrefix: "#"},
+
+	// Caddy (Caddyfile): "#" line comment. Caddyfile has no block-comment form.
+	LangCaddy: {linePrefix: "#"},
+
+	// Vagrantfile and Brewfile are detected as LangRuby (existing entry above).
+	// Procfile is intentionally absent: no Language constant, no grammar
+	// (YAGNI cut, 2026-05-16). Files named Procfile count as bytes/lines/words
+	// but classify all non-blank lines as Code via zero-grammar fallback.
 }
 
 // Split reads r line by line and classifies each line as Blank, Comment, or

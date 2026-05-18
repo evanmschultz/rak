@@ -1,4 +1,4 @@
-Output docs/default-toon.gif
+Output docs/pipe.gif
 
 Set Shell zsh
 Set FontSize 18
@@ -14,14 +14,7 @@ Enter
 Show
 
 Sleep 500ms
-Type "rak internal/counting"
+Type "git ls-files '*.go' | rak --files-from -"
 Sleep 500ms
 Enter
 Sleep 4s
-
-Sleep 2s
-
-Type "rak --human internal/counting"
-Sleep 500ms
-Enter
-Sleep 5s

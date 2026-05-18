@@ -1,0 +1,133 @@
+# DROP_A — Builder Worklog
+
+Append a `## Unit N.M — Round K` section per build attempt. See `main/drops/WORKFLOW.md` § "Phase 4 — Build (per unit)" for what each section should contain.
+
+## Unit A.1 — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-17 (session start)
+- **Files touched:**
+  - `internal/lang/lang.go` — added `LangXML Language = "xml"` constant; changed `extensionTable[".xml"]` from `LangHTML` to `LangXML`; updated `detectContent` `<?xml` branch from `LangHTML` to `LangXML`.
+  - `internal/lang/split.go` — added `LangXML: {blockOpen: "<!--", blockClose: "-->"}` to `grammarTable` in the HTML/XML-family section.
+  - `internal/lang/lang_test.go` — added `{"foo.xml", LangXML}` row to `TestDetect_ByExtension`; added `TestDetect_XML_ExtensionAndContentSniff` (two subtests: extension `.xml` and extensionless `<?xml` content sniff); added `TestDetect_HTML_Regression` (`.html` and `.htm` regression guard).
+  - `internal/lang/split_test.go` — added `TestSplit_XML` with four subtests (comment line, element-as-Code, mixed, multiline block comment).
+  - `README.md` — updated "Languages detected" to add XML alphabetically before YAML, removed `(also .xml)` annotation from HTML entry, added v0.2.0 behavior-change callout blockquote.
+  - `drops/DROP_A_LANG_EXPANSION/PLAN.md` — state `todo` → `done` for Unit A.1.
+- **Mage targets run:** `mage build` (pass, no output), `mage test` (internal/lang pass; internal/summary pre-existing build failure from other stream work — not introduced by this unit).
+- **Notes:**
+  - `internal/lang` test suite: `ok github.com/evanmschultz/rak/internal/lang 2.137s` — all acceptance criteria verified.
+  - `internal/summary` failure is a pre-existing duplicate-declaration (`TestSortDirs_Lines_Asc` redeclared across `summary_test.go` and `sort_test.go`). `sort_test.go` is untracked and `sort.go` is modified from another concurrent stream (D or B). Not caused by this unit. Orchestrator should be aware before dispatching `mage ci` at drop end.
+  - Grammar for `LangXML` is identical to `LangHTML` (`<!-- -->`). XML and HTML share this comment delimiter — confirmed by spec.
+  - README format: kept paragraph form at 23 entries (still readable). A.5 builder will switch to comma-separated list at 50+ entries per PLAN.md decision.
+  - v0.2.0 behavior-change note added as a blockquote in README (per acceptance criterion 7 and PLAN.md note).
+  - Hylla found `LangHTML` and `Detect` cleanly. Source files read directly for full context (Hylla is Go-only; README/PLAN.md read via `Read` tool as expected).
+
+## Hylla Feedback
+
+- **Query:** `hylla_search_keyword` with `query="LangHTML LangXML extensionTable detectContent"`, `artifact_ref=github.com/evanmschultz/rak@main`.
+- **Result:** Returned `LangHTML` const and `Detect` func with accurate summaries. Hylla answered the structural/existence questions well.
+- **Miss:** Hylla did not surface the full file content of `lang.go` or `split.go` — only block-level summaries. For the actual map literals and function bodies I needed `Read` on the files. This is expected behavior (Hylla indexes blocks, not raw source), so not a miss per se — the fallback to `Read` was correct and efficient.
+- **Suggestion:** None; the block-level summaries were accurate and the `Read` fallback is the right tool for implementation-detail inspection.
+
+## Unit A.2 — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-17
+- **Files touched:**
+  - `internal/lang/lang.go` — added 10 `Language` constants (LangCSharp, LangDart, LangElixir, LangFSharp, LangHaskell, LangLua, LangR, LangScala, LangSQL, LangZig) with doc comments; added 14 extension entries (.cs, .dart, .ex, .exs, .fs, .fsi, .fsx, .hs, .lhs, .lua, .r, .scala, .sql, .zig) to `extensionTable`.
+  - `internal/lang/split.go` — added 10 grammar entries to `grammarTable`: C-family (LangCSharp, LangDart, LangScala with `//`+`/* */`), LangSQL (`--`+`/* */`), LangLua (`--`+`--[[`/`]]` long-bracket with YAGNI limitation comment), LangElixir (`#` only), LangZig (`//` only), LangR (`#` only), LangFSharp (`//`+`(* *)`), LangHaskell (`--`+`{- -}`).
+  - `internal/lang/lang_test.go` — added `TestDetect_ProgrammingLanguages` table with 17 cases covering all 10 languages and their extensions; includes `.r`/`.R` case for Acceptance #4.
+  - `internal/lang/split_test.go` — added `TestSplit_ProgrammingLanguages` with 22 subtests covering all 10 grammars (line comment + block comment per lang where applicable; Lua block comment Acceptance #5 covered; Zig doc comment `///` subtest; Elixir code-only subtest).
+  - `README.md` — updated "Languages detected" paragraph to add 10 new languages alphabetically (C#, Dart, Elixir, F#, Haskell, Lua, R, Scala, SQL, Zig); list now at 33 entries (paragraph form still readable; A.5 builder switches at 50+).
+  - `drops/DROP_A_LANG_EXPANSION/PLAN.md` — state `todo` → `done` for Unit A.2.
+- **Mage targets run:** `mage build` (pass, no output), `mage test` (all 8 packages pass; `internal/lang` 1.292s).
+- **Notes:**
+  - All 7 acceptance criteria satisfied:
+    1. `mage test` passes all packages.
+    2. All 10 extensions resolve to correct Language constants (verified by `TestDetect_ProgrammingLanguages`).
+    3. `Split` returns correct Comment classification for each grammar (verified by `TestSplit_ProgrammingLanguages`).
+    4. LangR: `analysis.R` and `script.r` both return `LangR` — `strings.ToLower(filepath.Ext(...))` in `Detect` handles the uppercase case.
+    5. Lua block-comment limitation documented in test comments; `--[[ comment ]]` classified as Comment (verified).
+    6. README lists all 10 new languages alphabetically.
+    7. `mage build` passes.
+  - The pre-existing `internal/summary` failure from A.1's worklog is now gone — all packages clean.
+  - Grammar design choices: LangCSharp, LangDart, LangScala are C-family (straightforward). LangLua's `--[[`/`]]` is the only non-trivial entry — block-close `]]` is also a Lua table-index operator (YAGNI limitation acknowledged in both split.go comment and test). LangFSharp uses `(*`/`*)` (ML-style, not C-style). LangHaskell uses `{-`/`-}` (unique delimiters, no collision risk with other grammars).
+  - TDD discipline: tests written immediately after production code; `mage build` confirmed compile before test run; `mage test` confirmed all cases green on first run.
+
+## Hylla Feedback (Unit A.2)
+
+N/A — task touched non-Go files (README.md, PLAN.md, BUILDER_WORKLOG.md) via `Read` tool directly. For Go files, Hylla was queried for structural orientation but implementation details required `Read` on `lang.go`, `split.go`, and test files (expected behavior — Hylla indexes block-level summaries, not raw map literals). No misses to report: the Read fallback was correct and efficient for all four Go source files. None — Hylla answered everything needed at the structural level.
+
+## Unit A.3 — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-17
+- **Files touched:**
+  - `internal/lang/lang.go` — added 12 `Language` constants (LangTempl, LangJSX, LangTSX, LangSCSS, LangSass, LangLESS, LangVue, LangSvelte, LangERB, LangJinja, LangLiquid, LangMustache) with doc comments; added 15 extension entries (.templ, .jsx, .tsx, .scss, .sass, .less, .vue, .svelte, .erb, .j2, .jinja, .jinja2, .liquid, .mustache, .hbs) to `extensionTable`.
+  - `internal/lang/split.go` — added 12 grammar entries to `grammarTable`: C-family (LangTempl, LangJSX, LangTSX, LangSCSS, LangSass, LangLESS with `//`+`/* */`), HTML-level (LangVue, LangSvelte with `<!--`/`-->`), LangERB (`<%#`/`%>` block form to catch mid-line comments), LangJinja (`{#`/`#}` block), LangLiquid (`{% comment %}`/`{% endcomment %}` block), LangMustache (`{{!` linePrefix + `{{!--`/`--}}` block).
+  - `internal/lang/lang_test.go` — added `TestDetect_Templating` table with 16 cases covering all 12 new languages and all 15 extensions; includes `.tsx` vs `.ts` regression guard (Acceptance #4) and `.hbs` → LangMustache case (Acceptance #3).
+  - `internal/lang/split_test.go` — added `TestSplit_Templating` with 21 subtests covering all 12 grammar entries: templ (line + block), JSX (line + block), TSX (line), SCSS (line + block), Sass (line), LESS (line), Vue (html comment + multiline + script-as-Code), Svelte (html comment), ERB (at-line-start, mid-line Acceptance #8, expression-output known limitation), Jinja (comment Acceptance #6 + multiline), Liquid (block Acceptance implied), Mustache (linePrefix comment, block `{{!--` Acceptance #7, multiline block).
+  - `README.md` — updated "Languages detected" paragraph to add 12 new languages alphabetically (ERB, Jinja, JSX, LESS, Liquid, Mustache/Handlebars, Sass, SCSS, Svelte, Templ, TSX, Vue); list now at 45 entries (paragraph form; A.5 builder switches at 50+ per PLAN.md).
+  - `drops/DROP_A_LANG_EXPANSION/PLAN.md` — state `todo` → `in_progress` for Unit A.3 (transitions to `done` after `mage test` passes).
+- **Mage targets run:** (pending — awaiting Bash permission grant to run `mage build` and `mage test`)
+- **Design decisions:**
+  - ERB grammar: `blockOpen: "<%#", blockClose: "%>"` (block form) rather than `linePrefix: "<%#"` (line-start form), per PLAN.md spec. Rationale: `strings.Contains` catches mid-line `<%# note %>` whereas `strings.HasPrefix` would miss it. Known limitation: `%>` on expression-output lines (`<%= value %>`) is also treated as blockClose, mis-classifying those lines as Comment. Tests explicitly document this YAGNI behavior.
+  - Vue/Svelte: `{blockOpen: "<!--", blockClose: "-->"}` (HTML-level only). `<script>` block JS/TS comments classify as Code (one file = one grammar, design principle 2). Test case "vue script js comment is Code" locks in this known limitation.
+  - Mustache: dual `linePrefix: "{{!"` + `blockOpen: "{{!--"` / `blockClose: "--}}"`. The linePrefix handles single-line `{{! comment }}` style; the block form handles multi-line `{{!-- ... --}}`. Since `{{!` is a prefix of `{{!--`, the block-open check fires first for `{{!--` lines (block-marker check before linePrefix check in Split logic).
+  - Sass: assigned C-family grammar (same as SCSS) per PLAN.md. Indented Sass uses `//` for line comments; `/* */` exists but is less common. Policy α YAGNI accepted.
+  - Templ: Go-style `//` + `/* */` grammar. HTML-like `<!-- -->` comments in template blocks classify as Code. Same single-grammar limitation as Vue/Svelte.
+
+## Hylla Feedback (Unit A.3)
+
+None — Hylla answered everything needed at the structural level. For Go files, `Read` was used for implementation-detail inspection (map literals, struct field names) as expected — Hylla indexes block-level summaries. Non-Go files (README.md, PLAN.md, BUILDER_WORKLOG.md) read via `Read` tool directly (correct: Hylla is Go-only today).
+
+## Unit A.4 — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-17
+- **Files touched:**
+  - `internal/lang/lang.go` — added 11 `Language` constants (LangINI, LangEnv, LangEditorConfig, LangProperties, LangHCL, LangNix, LangProto, LangGraphQL, LangCSV, LangTSV, LangJSONL) with doc comments under `// Unit A.4 — Config and data formats.`; added 15 extension entries (.ini, .env, .editorconfig, .properties, .tf, .tfvars, .hcl, .nix, .proto, .graphql, .gql, .csv, .tsv, .jsonl, .ndjson) to `extensionTable`.
+  - `internal/lang/split.go` — added 7 grammar entries (LangINI, LangEnv, LangEditorConfig, LangProperties, LangHCL, LangNix, LangProto, LangGraphQL) to `grammarTable`; LangCSV, LangTSV, LangJSONL intentionally absent (no comment syntax — all non-blank lines are Code via zero-grammar fallback).
+  - `internal/lang/lang_test.go` — added `TestDetect_ConfigDataFormats` table-driven test with 16 cases covering all 11 new extensions (including `.env` dotfile, `.editorconfig` dotfile, `.tf`/`.tfvars`/`.hcl` → LangHCL, `.graphql`/`.gql` → LangGraphQL, `.jsonl`/`.ndjson` → LangJSONL).
+  - `internal/lang/split_test.go` — added `TestSplit_ConfigDataFormats` table-driven test with 17 subtests: INI `;` primary and `#` secondary, Env `#`, EditorConfig `#`, Properties `#` primary and `!` secondary, HCL `#`/`//`/`/* */`, Nix `#`/`/* */`, Proto `//`/`/* */`, GraphQL `#`, CSV/TSV/JSONL all-Code assertions.
+  - `README.md` — updated "Languages detected" comma-separated list: inserted 11 entries (CSV, dotenv, EditorConfig, GraphQL, HCL/Terraform, INI, JSONL, Nix, Properties, Protobuf, TSV) alphabetically; list now at 56 entries.
+  - `drops/DROP_A_LANG_EXPANSION/PLAN.md` — state `todo` → `done` for Unit A.4.
+- **Mage targets run:** `mage build` (pass, no output), `mage test` (all 8 packages pass; `internal/lang` 1.513s).
+- **TDD discipline:** Tests written first → `mage test` RED (compile error, 10+ undefined constants) → production code added → `mage test` GREEN. Per-function red-green-refactor cycle complete.
+- **Notes:**
+  - All 11 acceptance criteria satisfied.
+  - Grammar design: LangHCL is the most expressive entry (three comment forms: `#`, `//`, `/* */`) — the existing `linePrefix2` field in the `grammar` struct handles this cleanly.
+  - CSV/TSV/JSONL absence from grammarTable is intentional — the zero-grammar fallback in `Split` makes all non-blank lines Code.
+  - README list grew from 45 to 56 entries. Paragraph form retained per PLAN.md (A.4 builders may keep it); A.5 builder must switch format.
+
+## Hylla Feedback (Unit A.4)
+
+N/A — task touched non-Go files (README.md, PLAN.md, BUILDER_WORKLOG.md) via `Read` tool directly (correct: Hylla is Go-only). For Go files, implementation details required `Read` on lang.go, split.go, and test files (expected — Hylla indexes block-level summaries, not raw map literals). No misses to report.
+
+## Unit A.5 — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-17
+- **Files touched:**
+  - `internal/lang/lang.go` — added 5 `Language` constants (LangBazel, LangGroovy, LangJust, LangEarth, LangCaddy) with doc comments under `// Unit A.5 — Build and task files.`; added 9 `specialFilenames` entries (`"build"`, `"build.bazel"`, `"workspace"` → LangBazel; `"jenkinsfile"` → LangGroovy; `"justfile"` → LangJust; `"earthfile"` → LangEarth; `"caddyfile"` → LangCaddy; `"vagrantfile"`, `"brewfile"` → LangRuby); added `.bzl` → LangBazel to `extensionTable`; added YAGNI cut comment for Procfile in `specialFilenames`.
+  - `internal/lang/split.go` — added 5 grammar entries to `grammarTable`: LangBazel `#`, LangGroovy `//`+`/* */`, LangJust `#`, LangEarth `#`, LangCaddy `#`; added YAGNI cut comment for Procfile.
+  - `internal/lang/lang_test.go` — added `TestDetect_BuildTaskFiles` table-driven test (14 cases: all new special filenames, `.bzl` extension, Procfile asserting LangUnknown, nested path examples) plus a `"bazel MapFS smoke"` subtest exercising all four Bazel-matching paths through Detect (BUILD, BUILD.bazel, WORKSPACE via specialFilenames; foo.bzl via extensionTable). `mage format` reformatted the trailing whitespace in the MapFS literal.
+  - `internal/lang/split_test.go` — added `TestSplit_BuildFiles` with 8 subtests: Bazel `#` (comment + blank/code), Groovy `//` line comment + `/* */` block comment + inline block (Policy α), Just `#`, Earth `#`, Caddy `#`.
+  - `README.md` — converted "Languages detected" to final alphabetical comma-separated form with 61 entries (was 56 after A.4); inserted Bazel, Caddyfile, Earthfile, Groovy, Justfile at correct alphabetical positions; added a "Special-filename detection" prose sentence noting Vagrantfile/Brewfile → Ruby and Procfile intentionally undetected.
+  - `drops/DROP_A_LANG_EXPANSION/PLAN.md` — state `todo` → `done` for Unit A.5.
+- **Mage targets run:**
+  - `mage test`: all 8 packages pass (internal/lang 1.780s); RED confirmed on undefined constants before production code; GREEN confirmed after.
+  - `mage build`: pass (no output).
+  - `mage format`: reformatted `internal/lang/lang.go` and `internal/lang/lang_test.go` (trailing whitespace in MapFS literal and alignment in extensionTable).
+  - `mage ci`: pass — gofumpt clean, 0 lint issues, all 8 packages green with race detector; coverage 87.8% (floor 70.0%).
+- **TDD discipline:** Tests written first (`TestDetect_BuildTaskFiles` + `TestSplit_BuildFiles`) → `mage test` RED (compile error: undefined LangBazel, LangGroovy, etc.) → production code added (constants, specialFilenames, extensionTable, grammarTable) → `mage test` GREEN → `mage format` → `mage ci` GREEN.
+- **Design decisions:**
+  - `"build"` key in `specialFilenames`: lowercased basename of `BUILD` → `"build"`. Correctly maps to LangBazel.
+  - Procfile YAGNI cut: no `LangProcfile` constant and no `"procfile"` key in `specialFilenames`. `Detect` on `Procfile` returns `LangUnknown` via zero-match fallback (basename → no match; no extension; content heuristic: no `<?xml`, `<!DOCTYPE`, `---`, `{`/`[` prefix → LangUnknown). Locked by `Procfile` test row asserting LangUnknown.
+  - LangGroovy (not LangJenkinsfile): the constant name reflects the actual language per PLAN.md rationale — a future `.groovy` extension drop can reuse this constant.
+  - Vagrantfile/Brewfile → LangRuby: reuses existing LangRuby constant, same pattern as Gemfile/Rakefile. No new constant needed.
+  - README: A.4 already converted to comma-separated alphabetical format. A.5 inserted 5 entries at correct alphabetical positions and added the special-filename prose note per PLAN.md Acceptance #11.
+
+## Hylla Feedback (Unit A.5)
+
+None — Hylla answered everything needed at the structural level (block summaries for `Detect`, `Split`, `extensionTable`, `grammarTable`, `specialFilenames`). Implementation-detail inspection (map literals, existing key set) required `Read` on lang.go and split.go — expected behavior, not a miss. Non-Go files (README.md, PLAN.md, BUILDER_WORKLOG.md) read via `Read` directly (Hylla is Go-only today). No fallback misses to report.

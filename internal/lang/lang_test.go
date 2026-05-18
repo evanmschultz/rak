@@ -37,6 +37,7 @@ func TestDetect_ByExtension(t *testing.T) {
 		{"foo.cpp", LangCPP},
 		{"foo.cc", LangCPP},
 		{"foo.html", LangHTML},
+		{"foo.xml", LangXML},
 		{"foo.css", LangCSS},
 		{"foo.xyzzy", LangUnknown},
 	}
@@ -289,5 +290,304 @@ func TestDetect_NewLanguages_UnknownNegative(t *testing.T) {
 	got := Detect(f)
 	if got != LangUnknown {
 		t.Errorf("Detect(%q) = %q; want LangUnknown", "foo.unknown", got)
+	}
+}
+
+// TestDetect_XML_ExtensionAndContentSniff verifies Unit A.1: .xml extension
+// maps to LangXML (not LangHTML), and content-sniff on a <?xml declaration
+// also returns LangXML.
+func TestDetect_XML_ExtensionAndContentSniff(t *testing.T) {
+	t.Parallel()
+
+	t.Run("extension .xml", func(t *testing.T) {
+		t.Parallel()
+		fsys := fstest.MapFS{"data.xml": &fstest.MapFile{Data: []byte(`<?xml version="1.0"?>`)}}
+		f := newTestFile(fsys, "data.xml")
+		got := Detect(f)
+		if got != LangXML {
+			t.Errorf("Detect(%q) = %q; want %q", "data.xml", got, LangXML)
+		}
+	})
+
+	t.Run("content sniff <?xml extensionless", func(t *testing.T) {
+		t.Parallel()
+		// File has no extension → extension lookup returns LangUnknown.
+		// Content heuristic sees <?xml prefix → must return LangXML.
+		const relPath = "feed"
+		fsys := fstest.MapFS{relPath: &fstest.MapFile{Data: []byte("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<rss/>\n")}}
+		f := newTestFile(fsys, relPath)
+		got := Detect(f)
+		if got != LangXML {
+			t.Errorf("Detect(%q) = %q; want %q", relPath, got, LangXML)
+		}
+	})
+}
+
+// TestDetect_ProgrammingLanguages verifies Unit A.2: all 10 new language
+// constants resolve correctly from their extensions via Detect.
+// Also covers the LangR case: filepath.Ext lowercases inside Detect via
+// strings.ToLower, so both "analysis.R" and "script.r" return LangR.
+func TestDetect_ProgrammingLanguages(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		path string
+		want Language
+	}{
+		// C# — .cs
+		{"main.cs", LangCSharp},
+		// Dart — .dart
+		{"main.dart", LangDart},
+		// Elixir — .ex, .exs
+		{"app.ex", LangElixir},
+		{"config.exs", LangElixir},
+		// F# — .fs, .fsi, .fsx
+		{"module.fs", LangFSharp},
+		{"iface.fsi", LangFSharp},
+		{"script.fsx", LangFSharp},
+		// Haskell — .hs, .lhs
+		{"Main.hs", LangHaskell},
+		{"Literate.lhs", LangHaskell},
+		// Lua — .lua
+		{"script.lua", LangLua},
+		// R — .r and .R (Acceptance #4: strings.ToLower in Detect lowercases ext)
+		{"script.r", LangR},
+		{"analysis.R", LangR},
+		// Scala — .scala
+		{"Main.scala", LangScala},
+		// SQL — .sql
+		{"schema.sql", LangSQL},
+		// Zig — .zig
+		{"main.zig", LangZig},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.path, func(t *testing.T) {
+			t.Parallel()
+			fsys := fstest.MapFS{tc.path: &fstest.MapFile{Data: []byte("content")}}
+			f := newTestFile(fsys, tc.path)
+			got := Detect(f)
+			if got != tc.want {
+				t.Errorf("Detect(%q) = %q; want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDetect_HTML_Regression verifies that the XML split (Unit A.1) did not
+// break HTML detection: .html and .htm extensions still return LangHTML.
+func TestDetect_HTML_Regression(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		path string
+		want Language
+	}{
+		{"index.html", LangHTML},
+		{"page.htm", LangHTML},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.path, func(t *testing.T) {
+			t.Parallel()
+			fsys := fstest.MapFS{tc.path: &fstest.MapFile{Data: []byte("<!DOCTYPE html>")}}
+			f := newTestFile(fsys, tc.path)
+			got := Detect(f)
+			if got != tc.want {
+				t.Errorf("Detect(%q) = %q; want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDetect_ConfigDataFormats verifies Unit A.4: all 11 new config and data
+// format language constants resolve correctly from their extensions via Detect.
+// Covers Acceptance criteria 2–5.
+func TestDetect_ConfigDataFormats(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		path string
+		want Language
+	}{
+		// LangINI — .ini
+		{"config.ini", LangINI},
+		// LangEnv — .env (filepath.Ext(".env") = ".env" for a dotfile basename)
+		{".env", LangEnv},
+		{"development.env", LangEnv},
+		// LangEditorConfig — .editorconfig
+		{".editorconfig", LangEditorConfig},
+		// LangProperties — .properties
+		{"app.properties", LangProperties},
+		// LangHCL — .tf, .tfvars, .hcl (Acceptance #2: all three map to LangHCL)
+		{"main.tf", LangHCL},
+		{"terraform.tfvars", LangHCL},
+		{"config.hcl", LangHCL},
+		// LangNix — .nix
+		{"default.nix", LangNix},
+		// LangProto — .proto
+		{"service.proto", LangProto},
+		// LangGraphQL — .graphql and .gql (Acceptance #3)
+		{"schema.graphql", LangGraphQL},
+		{"query.gql", LangGraphQL},
+		// LangCSV — .csv
+		{"data.csv", LangCSV},
+		// LangTSV — .tsv
+		{"data.tsv", LangTSV},
+		// LangJSONL — .jsonl and .ndjson (Acceptance #4)
+		{"events.jsonl", LangJSONL},
+		{"events.ndjson", LangJSONL},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.path, func(t *testing.T) {
+			t.Parallel()
+			fsys := fstest.MapFS{tc.path: &fstest.MapFile{Data: []byte("content")}}
+			f := newTestFile(fsys, tc.path)
+			got := Detect(f)
+			if got != tc.want {
+				t.Errorf("Detect(%q) = %q; want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDetect_BuildTaskFiles verifies Unit A.5: special-filename detection for
+// build and task files. Covers Bazel (BUILD, BUILD.bazel, WORKSPACE), Groovy
+// (Jenkinsfile), Just (Justfile, justfile), Earth (Earthfile), Caddy
+// (Caddyfile), Ruby re-use (Vagrantfile, Brewfile), and the .bzl extension.
+//
+// The Procfile row intentionally asserts LangUnknown — Procfile is not given a
+// Language constant (YAGNI cut, PLAN.md § "Unit A.5"). This test locks in that
+// decision so a future builder cannot accidentally add Procfile detection without
+// deliberately updating this assertion.
+//
+// The MapFS smoke at the bottom verifies Bazel detection via the fstest.MapFS
+// helper, exercising all four Bazel-matching paths through Detect in a single
+// parallel subtest.
+func TestDetect_BuildTaskFiles(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		path string
+		want Language
+	}{
+		// Bazel — special filenames (case-insensitive basename match).
+		{"BUILD", LangBazel},
+		{"BUILD.bazel", LangBazel},
+		{"WORKSPACE", LangBazel},
+		// Bazel — .bzl extension (Acceptance #3).
+		{"foo.bzl", LangBazel},
+		// Groovy — Jenkinsfile special filename (Acceptance #4).
+		{"Jenkinsfile", LangGroovy},
+		// Just — both casings (Acceptance #5).
+		{"Justfile", LangJust},
+		{"justfile", LangJust},
+		// Earth — Earthfile special filename.
+		{"Earthfile", LangEarth},
+		// Caddy — Caddyfile special filename.
+		{"Caddyfile", LangCaddy},
+		// Ruby re-use — Vagrantfile and Brewfile map to LangRuby (Acceptance #6, #7).
+		{"Vagrantfile", LangRuby},
+		{"Brewfile", LangRuby},
+		// Procfile is intentionally undetected — returns LangUnknown (Acceptance #8).
+		// YAGNI cut: Procfile has no Language constant. Do not add one without
+		// updating this row and the PLAN.md Notes § "Vagrantfile / Brewfile / Gemfile".
+		{"Procfile", LangUnknown},
+		// Nested path — basename match still works.
+		{"infra/BUILD", LangBazel},
+		{"ci/Jenkinsfile", LangGroovy},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.path, func(t *testing.T) {
+			t.Parallel()
+			fsys := fstest.MapFS{tc.path: &fstest.MapFile{Data: []byte("content")}}
+			f := newTestFile(fsys, tc.path)
+			got := Detect(f)
+			if got != tc.want {
+				t.Errorf("Detect(%q) = %q; want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+
+	// MapFS smoke: verify all four Bazel-matching paths through Detect in one
+	// parallel subtest. BUILD, BUILD.bazel, WORKSPACE → specialFilenames;
+	// foo.bzl → extensionTable. All must return LangBazel.
+	t.Run("bazel MapFS smoke", func(t *testing.T) {
+		t.Parallel()
+		fsys := fstest.MapFS{
+			"BUILD":       &fstest.MapFile{Data: []byte("load('@rules_go//go:def.bzl', 'go_binary')")},
+			"BUILD.bazel": &fstest.MapFile{Data: []byte("go_binary(name='rak')")},
+			"WORKSPACE":   &fstest.MapFile{Data: []byte("workspace(name='rak')")},
+			"foo.bzl":     &fstest.MapFile{Data: []byte("def foo(): pass")},
+		}
+		for _, relPath := range []string{"BUILD", "BUILD.bazel", "WORKSPACE", "foo.bzl"} {
+			relPath := relPath
+			f := newTestFile(fsys, relPath)
+			got := Detect(f)
+			if got != LangBazel {
+				t.Errorf("Detect(%q) = %q; want %q (LangBazel)", relPath, got, LangBazel)
+			}
+		}
+	})
+}
+
+// TestDetect_Templating verifies Unit A.3: all 12 new templating and frontend
+// language constants resolve correctly from their extensions via Detect.
+// Covers Acceptance criteria 2, 3, and 4.
+func TestDetect_Templating(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		path string
+		want Language
+	}{
+		// LangTempl — Go-superset template language (.templ)
+		{"component.templ", LangTempl},
+		// LangJSX — React JSX (.jsx)
+		{"app.jsx", LangJSX},
+		// LangTSX — TypeScript JSX (.tsx); must be distinct from .ts → LangTS (Acceptance #4)
+		{"app.tsx", LangTSX},
+		// .ts still maps to LangTS (regression guard for Acceptance #4)
+		{"types.ts", LangTS},
+		// LangSCSS — (.scss)
+		{"styles.scss", LangSCSS},
+		// LangSass — indented Sass syntax (.sass)
+		{"styles.sass", LangSass},
+		// LangLESS — (.less)
+		{"styles.less", LangLESS},
+		// LangVue — Vue SFC (.vue)
+		{"App.vue", LangVue},
+		// LangSvelte — Svelte component (.svelte)
+		{"App.svelte", LangSvelte},
+		// LangERB — Ruby ERB template (.erb)
+		{"index.html.erb", LangERB},
+		// LangJinja — three Jinja2 extensions
+		{"template.j2", LangJinja},
+		{"template.jinja", LangJinja},
+		{"template.jinja2", LangJinja},
+		// LangLiquid — Liquid template (.liquid)
+		{"page.liquid", LangLiquid},
+		// LangMustache — Mustache (.mustache) and Handlebars (.hbs) — Acceptance #3
+		{"view.mustache", LangMustache},
+		{"view.hbs", LangMustache},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.path, func(t *testing.T) {
+			t.Parallel()
+			fsys := fstest.MapFS{tc.path: &fstest.MapFile{Data: []byte("content")}}
+			f := newTestFile(fsys, tc.path)
+			got := Detect(f)
+			if got != tc.want {
+				t.Errorf("Detect(%q) = %q; want %q", tc.path, got, tc.want)
+			}
+		})
 	}
 }
