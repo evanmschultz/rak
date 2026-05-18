@@ -152,8 +152,8 @@ That's it. Pure description tweak; no behavior change.
 
 ### Unit E.4 — GoReleaser binaries + release workflow
 
-**State:** todo
-**Paths:** NEW `.goreleaser.yml`, NEW `.github/workflows/release.yml`
+**State:** done
+**Paths:** NEW `.goreleaser.yml`, NEW `.github/workflows/release.yml`, `README.md` (binary-download section), `cmd/rak/main.go` (const → var for ldflags injection)
 **Packages:** — (CI config only)
 **Blocked by:** —
 

@@ -4,6 +4,16 @@
 
 ![rak default TOON output then --human](docs/default-toon.gif)
 
+## Download a binary
+
+Pre-built binaries for macOS (amd64/arm64) and Linux (amd64/arm64) are available on the [Releases page](https://github.com/evanmschultz/rak/releases). Download the archive for your platform, extract, and place `rak` on your `$PATH`.
+
+```sh
+# Example for macOS arm64
+curl -L https://github.com/evanmschultz/rak/releases/latest/download/rak_latest_darwin_arm64.tar.gz | tar xz
+sudo mv rak /usr/local/bin/
+```
+
 ## Install
 
 ```sh
@@ -27,7 +37,7 @@ mage -l        # list all build/test/lint targets
 
 ```text
 $ rak --version
-rak version v0.1.4
+rak version v0.2.0
 
 $ rak internal/counting
 directories[1|]{path|files|bytes|lines|words|chars}:

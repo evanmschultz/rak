@@ -87,3 +87,27 @@ None — Hylla answered everything needed for pattern reference. The task was pr
 ## Hylla Feedback (Unit E.2)
 
 N/A — task was a surgical edit to an existing Go file; `Read` was the correct primary tool (lister.go is ~113 lines, well within direct-read threshold). No Hylla miss to report.
+
+## Unit E.4 — Round 1
+
+- **Builder:** go-builder-agent
+- **Started:** 2026-05-17
+- **Files touched:**
+  - NEW `.goreleaser.yml`
+  - NEW `.github/workflows/release.yml`
+  - `README.md` (new `## Download a binary` section above `## Install`; updated `--version` example from `v0.1.4` → `v0.2.0`)
+  - `cmd/rak/main.go` (`const version` → `var version`; default value changed from `"v0.1.4"` → `"v0.2.0-dev"`)
+  - `drops/DROP_E_LOCKFILES_AND_POLISH/PLAN.md` (state flip `todo` → `done` for E.4; Paths row updated to include `README.md` + `cmd/rak/main.go`)
+- **Mage targets run:** none (`mage build` not run — CI-config-only unit per PLAN.md; no Go behavior changes). Path expansion to `cmd/rak/main.go` is a single `const` → `var` token change required for ldflags injection to work — reported back to orchestrator per scope-expansion protocol.
+- **Notes:**
+  - **Critical finding — `const` blocks ldflags injection.** `cmd/rak/main.go` declared `const version = "v0.1.4"`. Go linker `-X` flag can only override package-level `var` declarations; `const` values are baked in at compile time. Without `const` → `var`, every GoReleaser release build would silently print `v0.1.4` regardless of the actual tag. Changed to `var version = "v0.2.0-dev"` (dev fallback for local builds without ldflags).
+  - **Path expansion noted:** `cmd/rak/main.go` was not in E.4's Paths row. The change is 1-token surgical and directly required by the unit's own acceptance criteria ("version injected via ldflags"). Reported here per scope-expansion protocol.
+  - **`.goreleaser.yml` uses `version: 2`** (GoReleaser v2 schema). GoReleaser-action v6 uses goreleaser v2.x; the v1 format is deprecated and emits warnings in v2.
+  - **`goreleaser check` not available locally.** PLAN.md acceptance explicitly allows this: "if `goreleaser` not installed locally, builder notes in worklog that CI will validate on next tag." Dev should run `goreleaser check` or push a tag to validate.
+  - **`fetch-depth: 0`** in the release workflow is required by GoReleaser to generate the changelog from git history. Missing this causes goreleaser to error on changelog generation.
+  - **`version: '~> v2'`** in the goreleaser-action step pins to goreleaser v2.x (compatible with the `version: 2` schema in `.goreleaser.yml`), allowing patch updates within v2.
+  - README `--version` example updated from `v0.1.4` to `v0.2.0` to stay in sync with the upcoming release version.
+
+## Hylla Feedback (Unit E.4)
+
+N/A — task touched only non-Go files (.goreleaser.yml, .github/workflows/release.yml, README.md) and one 1-token Go change (const → var). Hylla is Go-only today; `Read` was the correct primary tool for all file inspection. No Hylla miss to report.

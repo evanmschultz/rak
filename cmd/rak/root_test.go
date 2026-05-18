@@ -1176,7 +1176,7 @@ func TestRootCmd_Version(t *testing.T) {
 
 	var out bytes.Buffer
 	cmd := newRootCmd()
-	// Mirror what fang.WithVersion("v0.1.4") does to the cobra command:
+	// Mirror what fang.WithVersion(version) does to the cobra command:
 	// cobra prints "<use> version <Version>" to OutOrStdout() when --version
 	// is passed and cmd.Version != "".
 	cmd.Version = version
@@ -1190,8 +1190,8 @@ func TestRootCmd_Version(t *testing.T) {
 	}
 
 	got := out.String()
-	if !strings.Contains(got, "v0.1.4") {
-		t.Errorf("--version output does not contain %q; got:\n%s", "v0.1.4", got)
+	if !strings.Contains(got, version) {
+		t.Errorf("--version output does not contain %q; got:\n%s", version, got)
 	}
 }
 
