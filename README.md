@@ -114,7 +114,7 @@ gh pr diff 42 --name-only | rak --files-from -
 - **TOON output by default.** Compact, LLM-friendly format. `--human` for styled terminal output, `--json` for structured piping. `--toon` is an explicit alias for the default.
 - **Hidden files skipped by default.** Pass `--hidden` to include dotfiles and dotdirs.
 - **Binary files skipped by default.** Detected via NUL byte in the first 512 bytes. Pass `--binary` to include them.
-- **Lockfiles counted.** `go.sum`, `package-lock.json`, etc. are tracked by git and counted in v0.1.0. v0.2 may add `--no-lockfiles`.
+- **Lockfiles excluded by default.** `go.sum`, `package-lock.json`, and other machine-generated dep manifests are skipped so counts reflect code your team wrote. Pass `--include-lockfiles` to count them. (v0.2.0 behavior change: v0.1.x counted lockfiles; see [v0.2.0 behavior changes](#v020-behavior-changes).)
 
 ## Flags
 
@@ -134,6 +134,7 @@ gh pr diff 42 --name-only | rak --files-from -
 | `--no-gitignore` | off | **inside a git repo: hard error** (rak uses git-tracked enumeration; this flag is meaningless). Outside a git repo: disable `.gitignore` filtering. |
 | `--binary` | off | include binary files in counts |
 | `--files-from <FILE>` | none | read newline-separated file paths from FILE (use `-` for stdin) |
+| `--include-lockfiles` | off | include lockfiles (`go.sum`, `package-lock.json`, etc.) in counts |
 | `--version` | — | print version and exit |
 | `--help` | — | print help and exit |
 
@@ -146,6 +147,12 @@ Bazel, C, C++, C#, Caddyfile, CMakeLists.txt, CSS, CSV, Dart, Dockerfile, dotenv
 Special-filename detection covers: `Makefile`, `Dockerfile`, `CMakeLists.txt`, `Gemfile`, `Rakefile` (Ruby), `BUILD`, `BUILD.bazel`, `WORKSPACE`, `*.bzl` (Bazel), `Jenkinsfile` (Groovy), `Justfile`/`justfile`, `Earthfile`, `Caddyfile`, `Vagrantfile`/`Brewfile` (Ruby DSLs). `Procfile` is intentionally undetected — those files count as bytes/lines/words but do not appear in `--lang` filtering or `total_by_lang`.
 
 > **v0.2.0 behavior change:** `.xml` files previously appeared as `html` in `total_by_lang`. They now appear as `xml`. This is an intentional split — XML and HTML are distinct languages.
+
+## v0.2.0 behavior changes
+
+> **Lockfiles excluded by default.** v0.1.x counted every git-tracked file including `go.sum`, `package-lock.json`, `yarn.lock`, and other machine-generated dep manifests. v0.2.0 skips them by default so `rak .` answers "how much code did your team write?" not "how large is your dependency graph?". Pass `--include-lockfiles` to restore the v0.1.x behavior.
+
+> **`.xml` files appear as `xml` not `html`.** In `total_by_lang`, `.xml` files are now detected as `xml`. v0.1.x reported them as `html`.
 
 ## Roadmap
 

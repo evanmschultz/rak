@@ -37,7 +37,7 @@ All units below filled by orch (Tier B convention — orch writes Planner sectio
 
 ### Unit E.1 — Lockfile exclusion by default + `--include-lockfiles`
 
-**State:** todo
+**State:** done
 **Paths:** NEW `internal/lockfiles/lockfiles.go`, NEW `internal/lockfiles/lockfiles_test.go`, `internal/lister/lister.go` (filter integration), `internal/lister/lister_test.go` (lockfile-filter test), `cmd/rak/root.go` (flag wiring), `cmd/rak/root_test.go` (flag-parse + integration), `README.md` (Default behavior + Flags table + v0.2.0 release note)
 **Packages:** NEW `internal/lockfiles`, `internal/lister`, `cmd/rak`
 **Blocked by:** —

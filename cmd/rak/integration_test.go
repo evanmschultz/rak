@@ -444,6 +444,105 @@ func TestFlags_FilesFromNoGitignoreHardErrors(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Lockfile filter integration tests
+// ---------------------------------------------------------------------------
+
+// TestLockfileFilter_ExcludedByDefault verifies that rak skips lockfiles
+// (go.sum, package-lock.json, etc.) when --include-lockfiles is NOT passed.
+// Uses --files-from so the test is hermetic and does not depend on git
+// enumerating from within the rak checkout.
+func TestLockfileFilter_ExcludedByDefault(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+
+	// Regular source file — should be counted.
+	src := filepath.Join(tmp, "main.go")
+	srcContent := []byte("package main\n")
+	if err := os.WriteFile(src, srcContent, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Lockfile — should be excluded by default.
+	lock := filepath.Join(tmp, "go.sum")
+	lockContent := []byte("github.com/example/pkg v1.0.0 h1:abc\n")
+	if err := os.WriteFile(lock, lockContent, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Feed both paths via --files-from.
+	list := src + "\n" + lock + "\n"
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetIn(strings.NewReader(list))
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--json", "--files-from", "-"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cmd.Execute: %v", err)
+	}
+
+	var parsed treeResult
+	if err := json.Unmarshal(out.Bytes(), &parsed); err != nil {
+		t.Fatalf("json.Unmarshal(%s): %v", out.String(), err)
+	}
+
+	// Only main.go should be counted — go.sum must be excluded.
+	wantBytes := int64(len(srcContent))
+	if parsed.Total.Bytes != wantBytes {
+		t.Errorf("lockfile excluded by default: Total.Bytes = %d, want %d (only main.go counted)", parsed.Total.Bytes, wantBytes)
+	}
+}
+
+// TestLockfileFilter_IncludeWhenFlagSet verifies that rak counts lockfiles
+// when --include-lockfiles is passed. Uses the same hermetic --files-from
+// approach as the exclusion test; both files must appear in the total.
+func TestLockfileFilter_IncludeWhenFlagSet(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+
+	// Regular source file.
+	src := filepath.Join(tmp, "main.go")
+	srcContent := []byte("package main\n")
+	if err := os.WriteFile(src, srcContent, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Lockfile.
+	lock := filepath.Join(tmp, "go.sum")
+	lockContent := []byte("github.com/example/pkg v1.0.0 h1:abc\n")
+	if err := os.WriteFile(lock, lockContent, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Feed both paths via --files-from WITH --include-lockfiles.
+	list := src + "\n" + lock + "\n"
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetIn(strings.NewReader(list))
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--json", "--files-from", "-", "--include-lockfiles"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cmd.Execute: %v", err)
+	}
+
+	var parsed treeResult
+	if err := json.Unmarshal(out.Bytes(), &parsed); err != nil {
+		t.Fatalf("json.Unmarshal(%s): %v", out.String(), err)
+	}
+
+	// Both files must be counted.
+	wantBytes := int64(len(srcContent) + len(lockContent))
+	if parsed.Total.Bytes != wantBytes {
+		t.Errorf("lockfile included with flag: Total.Bytes = %d, want %d (both files counted)", parsed.Total.Bytes, wantBytes)
+	}
+}
+
 // TestFilesFrom_MaxFiles verifies that --max-files fires correctly in
 // --files-from mode: when the number of accepted files reaches the limit,
 // cmd.Execute returns a non-nil error wrapping ErrMaxFilesExceeded. Three

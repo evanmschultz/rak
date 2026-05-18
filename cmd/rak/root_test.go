@@ -211,13 +211,14 @@ func runTreeFS(t *testing.T, fsys fs.FS, flags *rootFlags) (treeResult, []byte) 
 		sortKey = "lines"
 	}
 	if err := runDirectory(context.Background(), &out, source, runDirectoryOpts{
-		rootLabel: "",
-		binary:    flags.binary,
-		langs:     flags.langs,
-		sortKey:   sortKey,
-		sortAsc:   flags.sortAsc,
-		maxFiles:  flags.maxFiles,
-		renderer:  renderer,
+		rootLabel:        "",
+		binary:           flags.binary,
+		langs:            flags.langs,
+		sortKey:          sortKey,
+		sortAsc:          flags.sortAsc,
+		maxFiles:         flags.maxFiles,
+		renderer:         renderer,
+		includeLockfiles: flags.includeLockfiles,
 	}); err != nil {
 		t.Fatalf("runDirectory: %v", err)
 	}
@@ -492,6 +493,39 @@ func TestRootCmd_PathArg_Hidden(t *testing.T) {
 		res, _ := runTreeFS(t, fsys, &rootFlags{hidden: true})
 		if res.Total.Bytes != 10 { // both
 			t.Errorf("--hidden: expected Bytes=10, got %+v", res.Total)
+		}
+	})
+}
+
+// TestRootCmd_PathArg_LockfileFilter verifies that lockfiles (go.sum,
+// package-lock.json, etc.) are excluded from counts by default and included
+// when --include-lockfiles is passed. Uses a fstest.MapFS so the test is
+// hermetic and does not depend on any filesystem walker or git enumeration.
+func TestRootCmd_PathArg_LockfileFilter(t *testing.T) {
+	t.Parallel()
+
+	// "main.go" = 13 bytes, 1 line; "go.sum" = 6 bytes, 1 line.
+	// Default walk must exclude "go.sum"; --include-lockfiles must count both.
+	fsys := fstest.MapFS{
+		"main.go": {Data: []byte("package main\n")},
+		"go.sum":  {Data: []byte("hash\n\n")},
+	}
+
+	t.Run("default_excludes_lockfile", func(t *testing.T) {
+		t.Parallel()
+		res, _ := runTreeFS(t, fsys, &rootFlags{})
+		// Only main.go (13 bytes) counted.
+		if res.Total.Bytes != 13 {
+			t.Errorf("default: lockfile excluded, expected Bytes=13, got %+v", res.Total)
+		}
+	})
+
+	t.Run("include_lockfiles_flag_counts_both", func(t *testing.T) {
+		t.Parallel()
+		res, _ := runTreeFS(t, fsys, &rootFlags{includeLockfiles: true})
+		// Both files counted: 13 + 6 = 19 bytes.
+		if res.Total.Bytes != 19 {
+			t.Errorf("--include-lockfiles: expected Bytes=19, got %+v", res.Total)
 		}
 	})
 }

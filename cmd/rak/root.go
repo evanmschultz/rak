@@ -15,6 +15,7 @@ import (
 	"github.com/evanmschultz/rak/internal/fileset"
 	"github.com/evanmschultz/rak/internal/lang"
 	"github.com/evanmschultz/rak/internal/lister"
+	"github.com/evanmschultz/rak/internal/lockfiles"
 	"github.com/evanmschultz/rak/internal/render"
 	"github.com/evanmschultz/rak/internal/summary"
 )
@@ -24,20 +25,21 @@ import (
 // is declared inside newRootCmd (closure-local) so each test Execute owns
 // an isolated flag-state binding.
 type rootFlags struct {
-	human       bool
-	json        bool
-	toon        bool
-	depth       int
-	hidden      bool
-	noGitignore bool
-	binary      bool
-	includes    []string
-	excludes    []string
-	langs       []string
-	sort        string // sort key: lines, files, bytes, path (default: lines)
-	sortAsc     bool   // flip sort direction from the key-specific default
-	maxFiles    int    // abort the walk when accepted file count reaches this value (0 = no limit)
-	filesFrom   string // path to a newline-delimited file list, or "-" for stdin
+	human            bool
+	json             bool
+	toon             bool
+	depth            int
+	hidden           bool
+	noGitignore      bool
+	binary           bool
+	includes         []string
+	excludes         []string
+	langs            []string
+	sort             string // sort key: lines, files, bytes, path (default: lines)
+	sortAsc          bool   // flip sort direction from the key-specific default
+	maxFiles         int    // abort the walk when accepted file count reaches this value (0 = no limit)
+	filesFrom        string // path to a newline-delimited file list, or "-" for stdin
+	includeLockfiles bool   // count lockfiles instead of skipping them
 }
 
 // ErrMaxFilesExceeded is returned (wrapped) by walkAndCount when the accepted
@@ -98,7 +100,10 @@ func newRootCmd() *cobra.Command {
   rg --files | rak --files-from -
 
   # Count only tracked Go files
-  git ls-files '*.go' | rak --files-from -`,
+  git ls-files '*.go' | rak --files-from -
+
+  # Include lockfiles in the count (default excludes them)
+  rak --include-lockfiles .`,
 		Args: cobra.MaximumNArgs(1),
 		PersistentPreRunE: func(_ *cobra.Command, args []string) error {
 			if _, ok := validSortKeys[flags.sort]; !ok {
@@ -203,6 +208,12 @@ func newRootCmd() *cobra.Command {
 		"",
 		"read newline-separated file paths from FILE (use - for stdin)",
 	)
+	cmd.Flags().BoolVar(
+		&flags.includeLockfiles,
+		"include-lockfiles",
+		false,
+		"include lockfiles (go.sum, package-lock.json, etc.) in counts (default excludes them so you see code your team wrote, not machine-generated dep manifests)",
+	)
 
 	return cmd
 }
@@ -257,13 +268,14 @@ func runRoot(c *cobra.Command, args []string, flags *rootFlags) error {
 			rootLabel = "<stdin>"
 		}
 		return runDirectory(ctx, c.OutOrStdout(), source, runDirectoryOpts{
-			rootLabel: rootLabel,
-			binary:    flags.binary,
-			langs:     flags.langs,
-			sortKey:   flags.sort,
-			sortAsc:   flags.sortAsc,
-			maxFiles:  flags.maxFiles,
-			renderer:  renderer,
+			rootLabel:        rootLabel,
+			binary:           flags.binary,
+			langs:            flags.langs,
+			sortKey:          flags.sort,
+			sortAsc:          flags.sortAsc,
+			maxFiles:         flags.maxFiles,
+			renderer:         renderer,
+			includeLockfiles: flags.includeLockfiles,
 		})
 	}
 
@@ -277,13 +289,14 @@ func runRoot(c *cobra.Command, args []string, flags *rootFlags) error {
 			return err
 		}
 		return runDirectory(ctx, c.OutOrStdout(), source, runDirectoryOpts{
-			rootLabel: args[0],
-			binary:    flags.binary,
-			langs:     flags.langs,
-			sortKey:   flags.sort,
-			sortAsc:   flags.sortAsc,
-			maxFiles:  flags.maxFiles,
-			renderer:  renderer,
+			rootLabel:        args[0],
+			binary:           flags.binary,
+			langs:            flags.langs,
+			sortKey:          flags.sort,
+			sortAsc:          flags.sortAsc,
+			maxFiles:         flags.maxFiles,
+			renderer:         renderer,
+			includeLockfiles: flags.includeLockfiles,
 		})
 	}
 
@@ -317,13 +330,14 @@ func openFilesFrom(value string, stdin io.Reader) (io.Reader, func(), error) {
 // runDirectoryOpts bundles the per-call options for runDirectory so callers
 // do not have to pass seven trailing parameters positionally.
 type runDirectoryOpts struct {
-	rootLabel string
-	binary    bool
-	langs     []string
-	sortKey   string
-	sortAsc   bool
-	maxFiles  int
-	renderer  render.Renderer
+	rootLabel        string
+	binary           bool
+	langs            []string
+	sortKey          string
+	sortAsc          bool
+	maxFiles         int
+	renderer         render.Renderer
+	includeLockfiles bool
 }
 
 // runDirectory performs the len(args)==1 walk case. source is the FileLister
@@ -341,7 +355,7 @@ func runDirectory(
 	source lister.FileLister,
 	opts runDirectoryOpts,
 ) error {
-	dirs, total, totalByLang, aggErrs, err := walkAndCount(ctx, source, opts.binary, opts.langs, opts.maxFiles)
+	dirs, total, totalByLang, aggErrs, err := walkAndCount(ctx, source, opts.binary, opts.langs, opts.maxFiles, opts.includeLockfiles)
 	if err != nil {
 		return err
 	}
@@ -403,7 +417,7 @@ func runDirectory(
 // LangCounts across all directories (F46). LangUnknown suppression (F33) is
 // the renderer's responsibility; walkAndCount includes LangUnknown in both
 // byDirLang and totalByLang.
-func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, langs []string, maxFiles int) ([]summary.Directory, counting.Counts, map[lang.Language]lang.LangCounts, []error, error) {
+func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, langs []string, maxFiles int, includeLockfiles bool) ([]summary.Directory, counting.Counts, map[lang.Language]lang.LangCounts, []error, error) {
 	byDir := map[string]counting.Counts{}
 	byDirLang := map[string]map[lang.Language]lang.LangCounts{}
 	byDirFiles := map[string]int64{}
@@ -449,6 +463,13 @@ func walkAndCount(ctx context.Context, source lister.FileLister, binary bool, la
 			if isBin {
 				continue
 			}
+		}
+
+		// Lockfile filter (v0.2.0): skip machine-generated dependency manifests
+		// by default so counts reflect code your team wrote. Pass
+		// --include-lockfiles to count them alongside regular source files.
+		if !includeLockfiles && lockfiles.IsLockfile(f.RelPath) {
+			continue
 		}
 
 		// Detect language once per file. The value is stored in a
